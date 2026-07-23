@@ -74,8 +74,8 @@ function normalizeName(name: string): string {
     .replace(/\s+/g, " ");
 }
 
-const POLL_MS = 1_800_000; // 30 minutes (Netlify optimization)
-const HIDDEN_POLL_MS = 3_600_000; // 1 hour when tab is hidden
+const POLL_MS = 330_000; // 5.5 minutes (dev — will bump to 30min on push)
+const HIDDEN_POLL_MS = 1_100_000; // ~18 min when tab is hidden
 
 export function useStock() {
   const [stockMap, setStockMap] = useState<StockMap>({});

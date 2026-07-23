@@ -16,8 +16,8 @@ import {
   SEED_PRODUCTS,
 } from "@/lib/products";
 
-const POLL_MS = 1_800_000; // poll every 30 minutes when visible (Netlify optimization)
-const HIDDEN_POLL_MS = 3_600_000; // 1 hour when tab is hidden (saves quota)
+const POLL_MS = 330_000; // poll every 5.5 minutes when visible (dev — will bump to 30min on push)
+const HIDDEN_POLL_MS = 1_100_000; // ~18 min when tab is hidden
 
 export function useCatalog() {
   // Initialize empty on both server and client (hydration-safe)
