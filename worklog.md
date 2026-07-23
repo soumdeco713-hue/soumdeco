@@ -450,3 +450,44 @@ Stage Summary:
 - Badge shows "🎁 {custom text}" when admin sets badge, "🎁" when empty
 - All admin changes persist correctly (verified in previous task)
 - 0 errors, 0 warnings, all functions working perfectly
+
+---
+Task ID: 9
+Agent: main
+Task: Replace red glow with elmiizaan-style elegant gray/brass glow (matching glow speeds and types).
+
+Work Log:
+- Fetched elmiizaan.space-z.ai reference site + downloaded both CSS files
+- Analyzed elmiizaan glow classes:
+  • glow-pulse: 4s ease-in-out infinite, gray (#4a5568) box-shadow halo
+  • border-glow: 4s ease-in-out infinite, animated border color
+  • cat-glow: 4.5s ease-in-out infinite (category buttons)
+  • No red glow anywhere — elmiizaan uses warm gray/brass tones throughout
+- Removed the red glow CSS (.special-red-frame, @keyframes special-red-glow) from globals.css
+- Updated existing glow-pulse and border-glow from 5s → 4s timing (matches elmiizaan exactly)
+- Rewrote special-offers-section.tsx:
+  • Replaced .special-red-frame with .glow-pulse + .border-glow (elmiizaan-style)
+  • Changed border color from red to brass (border-brass/30, hover:border-brass/60)
+  • Changed badge colors from red to brass (border-brass/60, text-brass-deep)
+  • Changed price color from red to brass-deep
+  • Changed header accent from red to brass (✧ symbols, brass divider)
+  • Kept the badge text display (🎁 + p.badge) — critical feature preserved
+- Verified glow speeds match elmiizaan:
+  • glow-pulse: 4s ease-in-out infinite ✓
+  • border-glow: 4s ease-in-out infinite ✓
+  • cat-glow: 4.5s (unchanged, already existed) ✓
+- Browser-tested: set product as special offer with badge "عرض ذهبي"
+  • Special offers section appeared with "عروض خاصة" heading ✓
+  • Badge text "عرض ذهبي" displayed on card ✓
+  • 1 element with .glow-pulse class ✓
+  • 1 element with .border-glow class ✓
+  • 0 console errors ✓
+- Reset localStorage to clean 29-product seed state
+
+Stage Summary:
+- Red glow REPLACED with elmiizaan-style elegant warm brass glow
+- Glow speeds match elmiizaan exactly (4s glow-pulse, 4s border-glow)
+- Special offer cards now have: warm brass halo (glow-pulse) + animated brass border (border-glow)
+- Badge text (شارة العرض) still displays correctly
+- All colors consistent with the Soum Deco brand palette (brass, not red)
+- 0 errors, 0 warnings

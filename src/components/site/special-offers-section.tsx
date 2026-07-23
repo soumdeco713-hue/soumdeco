@@ -12,10 +12,9 @@ type SpecialOffersSectionProps = {
 /**
  * Special Offers section — shows products where `isSpecialOffer === true`.
  *
- * Each card has:
- *  - A vivid red animated glow frame (.special-red-frame) to make it super special
- *  - The product's badge text (شارة العرض) displayed prominently if set
- *  - A 🎁 emoji badge as a fallback if no badge text is set
+ * Each card uses the elmiizaan-style glow: glow-pulse + border-glow
+ * (4s ease-in-out infinite, warm brass halo + animated border).
+ * Badge text (شارة العرض) is displayed prominently if set.
  */
 export function SpecialOffersSection({
   products,
@@ -38,11 +37,11 @@ export function SpecialOffersSection({
         {/* Header */}
         <div className="fade-up mb-6 text-center">
           <div className="mb-2 flex items-center justify-center gap-2">
-            <span className="text-rose-deep text-sm">🎁</span>
-            <span className="font-arabic text-[11px] font-semibold uppercase tracking-[0.3em] text-rose-deep">
+            <span className="text-brass text-sm">✧</span>
+            <span className="font-arabic text-[11px] font-semibold uppercase tracking-[0.3em] text-brass-deep">
               عروض
             </span>
-            <span className="text-rose-deep text-sm">🎁</span>
+            <span className="text-brass text-sm">✧</span>
           </div>
           <h2 className="font-arabic text-3xl font-bold sm:text-4xl">
             <span className="text-blue-black-animated">عروض خاصة</span>
@@ -51,12 +50,12 @@ export function SpecialOffersSection({
             className="mx-auto mt-3 h-[2px] w-20 rounded-full"
             style={{
               background:
-                "linear-gradient(90deg, transparent, #DC2626, #DC2626, transparent)",
+                "linear-gradient(90deg, transparent, #9A7E3A, #B89656, #9A7E3A, transparent)",
             }}
           />
         </div>
 
-        {/* Products grid — with vivid red glow frame */}
+        {/* Products grid — with elmiizaan-style glow-pulse + border-glow */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
           {offerProducts.map((p, i) => {
             const rupture = isRupture?.(p);
@@ -65,7 +64,7 @@ export function SpecialOffersSection({
                 key={p.id}
                 type="button"
                 onClick={() => onProductClick?.(p)}
-                className={`special-red-frame fade-up group relative flex flex-col overflow-hidden rounded-2xl bg-white text-left transition-transform duration-300 hover:-translate-y-1.5 focus:outline-none focus:ring-2 focus:ring-red-500/50 active:scale-[0.98]`}
+                className="fade-up glow-pulse border-glow group relative flex flex-col overflow-hidden rounded-2xl border-2 border-brass/30 bg-white text-left transition-transform duration-300 hover:-translate-y-1.5 hover:border-brass/60 focus:outline-none focus:ring-2 focus:ring-brass/40 active:scale-[0.98]"
                 style={{
                   transitionDelay: `${Math.min(i * 30, 240)}ms`,
                 }}
@@ -73,14 +72,14 @@ export function SpecialOffersSection({
                 {/* Badge — shows شارة العرض text if set, otherwise 🎁 emoji */}
                 {p.badge && p.badge.trim() !== "" ? (
                   <span
-                    className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-full border border-red-500/60 bg-white px-2.5 py-1 font-arabic text-[10px] font-bold text-red-600 shadow-md"
+                    className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-full border border-brass/60 bg-white px-2.5 py-1 font-arabic text-[10px] font-bold text-brass-deep shadow-sm"
                     aria-label={p.badge}
                   >
                     🎁 {p.badge}
                   </span>
                 ) : (
                   <span
-                    className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-full border border-red-500/60 bg-white px-2 py-0.5 font-arabic text-[10px] font-bold text-red-600 shadow-sm"
+                    className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-full border border-brass/60 bg-white px-2 py-0.5 font-arabic text-[10px] font-bold text-brass-deep shadow-sm"
                     aria-label="عرض خاص"
                   >
                     🎁
@@ -108,7 +107,7 @@ export function SpecialOffersSection({
                   </h3>
                   <p
                     className={`font-arabic text-sm font-bold ${
-                      p.price === null ? "italic text-gray-light" : "text-red-600"
+                      p.price === null ? "italic text-gray-light" : "text-brass-deep"
                     }`}
                   >
                     {p.oldPrice != null && (
