@@ -1,0 +1,1013 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter);
+  --font-serif: var(--font-cormorant);
+  --font-arabic: var(--font-arabic);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+
+  /* ===== Neon Midnight Brand Palette =====
+     Dark navy base + electric cyan + neon magenta + gold accent.
+     "Novel" feel — feels alive, modern, premium, like a 2026 product site. */
+  --color-cream: var(--cream);
+  --color-sand: var(--sand);
+  --color-clay: var(--clay);
+  --color-stone: var(--stone);
+  --color-charcoal: var(--charcoal);
+  --color-gray: var(--gray);
+  --color-gray-light: var(--gray-light);
+  --color-terracotta: var(--terracotta);
+  --color-brass: var(--brass);
+  --color-brass-bright: var(--brass-bright);
+  --color-brass-dark: var(--brass-dark);
+  --color-cocoa: var(--cocoa);
+  --color-ink: var(--ink);
+  --color-paper: var(--paper);
+  --color-emerald: var(--emerald);
+  --color-emerald-deep: var(--emerald-deep);
+  --color-emerald-bright: var(--emerald-bright);
+  --color-gold: var(--gold);
+  --color-gold-bright: var(--gold-bright);
+  --color-neon-cyan: var(--neon-cyan);
+  --color-neon-magenta: var(--neon-magenta);
+  --color-neon-violet: var(--neon-violet);
+  --color-night: var(--night);
+  --color-night-soft: var(--night-soft);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 10px);
+}
+
+:root {
+  --radius: 0.75rem;
+
+  /* Navy & Gold — matched to the logo's deep navy (#0A1E3A) + warm gold (#D4AF37).
+     Clean white base, navy text, gold accents. Glows kept the same. */
+  --night: #FAFBFC;             /* cool ivory main background */
+  --night-soft: #FFFFFF;         /* pure white for cards/sections */
+  --cream: #FAFBFC;             /* alias */
+  --sand: #F0F2F6;              /* cool light gray for subtle backgrounds */
+  --clay: #D8DCE4;              /* cool gray for borders */
+  --stone: #E8EBF0;             /* light cool stone for thumbnail bg */
+  --charcoal: #0A1E3A;          /* LOGO NAVY — deep navy blue for text */
+  --gray: #3D5070;              /* medium navy-gray */
+  --gray-light: #6B7B95;        /* light navy-gray for muted text */
+  --terracotta: #B5453A;        /* warm rust for "out of stock" + errors */
+  --brass: #D4AF37;             /* LOGO GOLD — warm gold accent */
+  --brass-bright: #E8C547;      /* brighter gold */
+  --brass-dark: #B8962E;        /* deeper gold */
+  --cocoa: #1A2D4A;             /* deep navy cocoa */
+  --ink: #0A1E3A;               /* LOGO NAVY for strong text */
+  --paper: #FFFFFF;             /* card surface — pure white */
+  --emerald: #0A1E3A;           /* REPLACED with LOGO NAVY — primary brand color */
+  --emerald-deep: #071528;      /* darker navy for hover */
+  --emerald-bright: #1A3A5C;    /* brighter navy */
+  --gold: #D4AF37;              /* LOGO GOLD */
+  --gold-bright: #E8C547;       /* brighter gold */
+  --neon-cyan: #4A9DA1;         /* kept — soft teal */
+  --neon-magenta: #C25B7E;      /* kept — soft rose */
+  --neon-violet: #7E6BA8;       /* kept — soft violet */
+  --blue-deep: #0A1E3A;         /* LOGO NAVY — for animated headings */
+  --blue-mid: #1A3A5C;          /* medium navy */
+  --blue-bright: #2B5278;       /* bright navy */
+  --black-soft: #0A1E3A;        /* LOGO NAVY */
+
+  --background: var(--night);
+  --foreground: var(--charcoal);
+  --card: #FFFFFF;
+  --card-foreground: var(--charcoal);
+  --popover: #FFFFFF;
+  --popover-foreground: var(--charcoal);
+  --primary: var(--emerald);
+  --primary-foreground: #FFFFFF;
+  --secondary: var(--sand);
+  --secondary-foreground: var(--charcoal);
+  --muted: var(--sand);
+  --muted-foreground: var(--gray);
+  --accent: var(--brass);
+  --accent-foreground: #FFFFFF;
+  --destructive: var(--terracotta);
+  --border: rgba(10, 30, 58, 0.12);
+  --input: rgba(10, 30, 58, 0.15);
+  --ring: var(--brass);
+  --chart-1: var(--emerald);
+  --chart-2: var(--neon-cyan);
+  --chart-3: var(--neon-magenta);
+  --chart-4: var(--gold);
+  --chart-5: var(--neon-violet);
+  --sidebar: #FFFFFF;
+  --sidebar-foreground: var(--charcoal);
+  --sidebar-primary: var(--emerald);
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: var(--sand);
+  --sidebar-accent-foreground: var(--charcoal);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--brass);
+}
+
+.dark {
+  /* Same as :root — site is light by default; .dark keeps the same values for compat */
+  --night: #FAFBFC;
+  --night-soft: #FFFFFF;
+  --cream: #FAFBFC;
+  --sand: #F0F2F6;
+  --clay: #D8DCE4;
+  --stone: #E8EBF0;
+  --charcoal: #0A1E3A;
+  --gray: #3D5070;
+  --gray-light: #6B7B95;
+  --terracotta: #B5453A;
+  --brass: #D4AF37;
+  --brass-bright: #E8C547;
+  --brass-dark: #B8962E;
+  --cocoa: #1A2D4A;
+  --ink: #0A1E3A;
+  --paper: #FFFFFF;
+  --emerald: #0A1E3A;
+  --emerald-deep: #071528;
+  --emerald-bright: #1A3A5C;
+  --gold: #D4AF37;
+  --gold-bright: #E8C547;
+  --neon-cyan: #4A9DA1;
+  --neon-magenta: #C25B7E;
+  --neon-violet: #7E6BA8;
+  --blue-deep: #0A1E3A;
+  --blue-mid: #1A3A5C;
+  --blue-bright: #3B82F6;
+  --black-soft: #0F1622;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    font-size: 16px;
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "ss01", "cv02", "cv03";
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    -webkit-overflow-scrolling: touch;
+    /* Subtle warm ivory background with navy + gold halos — matches logo */
+    background-color: var(--night);
+    background-image:
+      radial-gradient(ellipse 80% 60% at 15% 10%, rgba(10, 30, 58, 0.05) 0%, transparent 60%),
+      radial-gradient(ellipse 70% 50% at 85% 20%, rgba(212, 175, 55, 0.05) 0%, transparent 60%),
+      radial-gradient(ellipse 90% 70% at 50% 90%, rgba(10, 30, 58, 0.03) 0%, transparent 65%),
+      radial-gradient(ellipse 60% 50% at 90% 80%, rgba(212, 175, 55, 0.03) 0%, transparent 60%);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+  [lang="ar"], [dir="rtl"], .font-arabic {
+    font-family: var(--font-arabic), var(--font-sans), sans-serif;
+  }
+  input, select, textarea {
+    font-size: 16px;
+  }
+}
+
+/* ===== Respect reduced motion preference ===== */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ===== Neon Animations ===== */
+
+/* Aurora pulse — slow shifting background gradient */
+@keyframes aurora-drift {
+  0%, 100% {
+    background-position: 0% 50%, 100% 30%, 50% 100%, 80% 80%;
+  }
+  50% {
+    background-position: 30% 30%, 70% 50%, 80% 80%, 30% 50%;
+  }
+}
+.aurora-bg {
+  animation: aurora-drift 18s ease-in-out infinite;
+}
+
+/* Elegant glow pulse — for primary CTAs (soft, refined, not neon) */
+@keyframes neon-pulse {
+  0%, 100% {
+    box-shadow:
+      0 4px 12px -2px rgba(42, 125, 91, 0.30),
+      0 0 0 0 rgba(42, 125, 91, 0);
+  }
+  50% {
+    box-shadow:
+      0 6px 20px -2px rgba(42, 125, 91, 0.45),
+      0 0 0 4px rgba(42, 125, 91, 0.08);
+  }
+}
+.neon-pulse {
+  animation: neon-pulse 3.5s ease-in-out infinite;
+}
+
+/* Soft cyan/teal glow */
+@keyframes neon-cyan-pulse {
+  0%, 100% {
+    box-shadow:
+      0 2px 8px -1px rgba(74, 157, 161, 0.25);
+  }
+  50% {
+    box-shadow:
+      0 4px 14px -1px rgba(74, 157, 161, 0.40);
+  }
+}
+.neon-cyan-pulse {
+  animation: neon-cyan-pulse 3.5s ease-in-out infinite;
+}
+
+/* Soft rose glow */
+@keyframes neon-magenta-pulse {
+  0%, 100% {
+    box-shadow:
+      0 2px 8px -1px rgba(194, 91, 126, 0.25);
+  }
+  50% {
+    box-shadow:
+      0 4px 14px -1px rgba(194, 91, 126, 0.40);
+  }
+}
+.neon-magenta-pulse {
+  animation: neon-magenta-pulse 3.5s ease-in-out infinite;
+}
+
+/* Sparkle twinkle — neon stars */
+@keyframes sparkle-twinkle {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.05); }
+}
+.sparkle-anim {
+  animation: sparkle-twinkle 1.8s ease-in-out infinite;
+  display: inline-block;
+  will-change: transform, opacity;
+}
+
+/* Gold shimmer — for badges */
+@keyframes brass-shimmer {
+  0% { background-position: 200% center; }
+  100% { background-position: -200% center; }
+}
+.badge-shimmer {
+  background-size: 200% auto;
+  animation: brass-shimmer 3s linear infinite;
+}
+
+/* Subtle floating drift */
+@keyframes float-drift {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-4px) rotate(1deg); }
+}
+.float-drift {
+  animation: float-drift 4s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* Floating strong — for hero logos */
+@keyframes float-strong {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+.float-strong {
+  animation: float-strong 5s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* Fade-up reveal */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-up {
+  animation: fade-up 0.4s ease-out both;
+  will-change: opacity, transform;
+}
+
+/* Slide-in from right (for product cards in grid) */
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.slide-in-right {
+  animation: slide-in-right 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Menu link underline */
+.menu-link {
+  position: relative;
+  display: inline-block;
+}
+.menu-link::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -3px;
+  width: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--neon-cyan), var(--neon-magenta));
+  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.menu-link:hover::after,
+.menu-link[data-active="true"]::after {
+  width: 100%;
+}
+
+/* Card hover lift (desktop) — elegant gray glow border */
+@media (hover: hover) {
+  .lift-on-hover {
+    transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+                box-shadow 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 0.5s ease;
+  }
+  .lift-on-hover:hover {
+    transform: translateY(-6px);
+    border-color: rgba(74, 85, 104, 0.40);
+    box-shadow:
+      0 12px 32px -8px rgba(74, 85, 104, 0.25),
+      0 0 0 1px rgba(74, 85, 104, 0.15),
+      0 0 24px -4px rgba(74, 85, 104, 0.18);
+  }
+}
+
+/* Image zoom on hover */
+@media (hover: hover) {
+  .zoom-img-wrap {
+    overflow: hidden;
+  }
+  .zoom-img-wrap img {
+    transition: transform 1s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .zoom-img-wrap:hover img {
+    transform: scale(1.06);
+  }
+}
+
+/* Carousel slide animation */
+@keyframes carousel-slide-in {
+  from { opacity: 0; transform: translateX(30px) scale(0.96); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes carousel-slide-out {
+  from { opacity: 1; transform: translateX(0) scale(1); }
+  to { opacity: 0; transform: translateX(-30px) scale(0.96); }
+}
+.carousel-slide-in {
+  animation: carousel-slide-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.carousel-slide-out {
+  animation: carousel-slide-out 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Carousel fade — lightweight CSS-only fade for the featured carousel */
+@keyframes carousel-fade {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.carousel-fade {
+  animation: carousel-fade 0.3s ease-out both;
+}
+
+/* Drawer slide-in (used for cart + menu drawers) — pure CSS transition.
+   Toggle the .drawer-open class to animate between states. */
+.drawer-slide {
+  transition: transform 0.25s ease-out;
+  will-change: transform;
+}
+
+/* Modal slide-up — pure CSS transition for modal content */
+.modal-slide-up {
+  transition: transform 0.25s ease-out, opacity 0.25s ease-out;
+  will-change: transform, opacity;
+}
+
+/* Drawer / modal entrance animations — pure CSS (no JS animation lib).
+   Each animation runs once on mount when the component is conditionally
+   rendered into the DOM. */
+@keyframes drawer-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.drawer-overlay {
+  animation: drawer-overlay-in 0.25s ease-out both;
+}
+
+@keyframes drawer-panel-left-in {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+.drawer-panel-left {
+  animation: drawer-panel-left-in 0.25s ease-out both;
+}
+
+@keyframes drawer-panel-right-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+.drawer-panel-right {
+  animation: drawer-panel-right-in 0.25s ease-out both;
+}
+
+@keyframes modal-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.modal-overlay {
+  animation: modal-overlay-in 0.25s ease-out both;
+}
+
+@keyframes modal-panel-in {
+  from { opacity: 0; transform: translateY(20px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.modal-panel {
+  animation: modal-panel-in 0.25s ease-out both;
+}
+
+/* Tiny pulse for accent badges (e.g. heart on thank-you page) */
+@keyframes pulse-soft {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+.pulse-soft {
+  animation: pulse-soft 1.4s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* Admin panel — section title inside the product edit form.
+   A simple right-side accent bar (RTL friendly) + bold label. */
+.admin-section-title {
+  border-right: 3px solid var(--emerald, #2A7D5B);
+  padding-right: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--charcoal, #1F2937);
+  margin-top: 0.5rem;
+  margin-bottom: -0.25rem;
+}
+
+/* Elegant scrollbar */
+.elegant-scroll::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.elegant-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.elegant-scroll::-webkit-scrollbar-thumb {
+  background: var(--clay);
+  border-radius: 999px;
+}
+
+/* Emerald gradient text — used by wordmark (deep, elegant, not neon) */
+.text-emerald-gradient {
+  background: linear-gradient(135deg, #3DA177 0%, #2A7D5B 50%, #1F5E44 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* Gold gradient text */
+.text-gold-gradient {
+  background: linear-gradient(120deg, #D4A93F 0%, #B8902F 40%, #8A6B22 70%, #D4A93F 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* Elegant emerald-gold gradient text — for hero taglines (was neon) */
+.text-neon-gradient {
+  background: linear-gradient(90deg, #2A7D5B 0%, #3DA177 50%, #B8902F 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  background-size: 200% auto;
+  animation: brass-shimmer 8s linear infinite;
+}
+
+/* NEW: Animated blue-black gradient text — vivid blue shimmering into black.
+   Used for headings, product names, section titles. Slow and elegant. */
+@keyframes blue-black-shimmer {
+  0% { background-position: 0% center; }
+  100% { background-position: -200% center; }
+}
+.text-blue-black-animated {
+  background: linear-gradient(90deg, #0A1E3A 0%, #1A3A5C 25%, #D4AF37 50%, #1A3A5C 75%, #0A1E3A 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: blue-black-shimmer 5s linear infinite;
+}
+
+/* Static version (no animation) — for places where animation would be too busy */
+.text-blue-black {
+  background: linear-gradient(135deg, #0A1E3A 0%, #1A3A5C 50%, #D4AF37 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* Beautiful animated black gradient text — deep black shimmering with charcoal highlights.
+   Used for thank-you screen elements (badge text, buttons) where green was before. */
+@keyframes black-shimmer {
+  0% { background-position: 0% center; }
+  100% { background-position: -200% center; }
+}
+.text-animated-black {
+  background: linear-gradient(90deg, #0F0D0A 0%, #2D3748 25%, #1A2333 50%, #2D3748 75%, #0F0D0A 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: black-shimmer 5s linear infinite;
+}
+
+/* Animated black gradient background — for buttons/badges (solid fill, not text) */
+@keyframes black-bg-shift {
+  0% { background-position: 0% center; }
+  100% { background-position: -200% center; }
+}
+.bg-animated-black {
+  background: linear-gradient(90deg, #0F0D0A 0%, #2D3748 25%, #1A2333 50%, #2D3748 75%, #0F0D0A 100%);
+  background-size: 200% auto;
+  animation: black-bg-shift 5s linear infinite;
+}
+
+/* Paper texture overlay — subtle warm tones on white */
+.paper-texture {
+  background-image:
+    radial-gradient(circle at 20% 20%, rgba(42, 125, 91, 0.04) 0%, transparent 50%),
+    radial-gradient(circle at 80% 60%, rgba(184, 144, 47, 0.04) 0%, transparent 50%);
+}
+
+/* Quantity stepper pop */
+@keyframes qty-pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+.qty-pop {
+  animation: qty-pop 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Pick Me badge — cute bounce animation */
+@keyframes pick-me-bounce {
+  0%, 100% { transform: translateY(0); opacity: 0.85; }
+  50% { transform: translateY(-3px); opacity: 1; }
+}
+.pick-me-badge {
+  animation: pick-me-bounce 1.2s ease-in-out infinite;
+}
+
+/* Stock rupture shimmer */
+@keyframes rupture-pulse {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
+}
+.rupture-pulse {
+  animation: rupture-pulse 1.5s ease-in-out infinite;
+}
+
+/* Modal slide up */
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.sheet-up {
+  animation: sheet-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Drawer slide in */
+@keyframes drawer-in {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+/* Hide horizontal scrollbar */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.stabilize {
+  transform: translateZ(0);
+}
+
+.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 400px;
+}
+
+.gpu {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+.elegant-scroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* Backdrop blur — limited paint area */
+.backdrop-blur-sm, .backdrop-blur-md, .backdrop-blur {
+  contain: paint;
+  backface-visibility: hidden;
+}
+
+/* Toaster — Arabic font + dark neon styling */
+.toaster {
+  --normal-bg: var(--card) !important;
+  --normal-text: var(--charcoal) !important;
+  --normal-border: transparent !important;
+  font-family: var(--font-arabic), var(--font-sans), sans-serif !important;
+}
+.toaster [data-sonner-toast] {
+  margin-left: auto !important;
+  margin-right: auto !important;
+  text-align: center !important;
+  justify-content: center !important;
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0);
+}
+
+/* ===== Cinematic Showcase Animations ===== */
+
+@keyframes ken-burns {
+  0% { transform: scale(1.0) translate(0%, 0%); }
+  100% { transform: scale(1.12) translate(-2%, -2%); }
+}
+.ken-burns {
+  animation: ken-burns 1.8s ease-out both;
+  will-change: transform;
+}
+
+@keyframes name-reveal {
+  0% { opacity: 0; transform: translateY(24px); filter: blur(4px); }
+  100% { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+.name-reveal {
+  animation: name-reveal 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
+  will-change: opacity, transform;
+}
+
+@keyframes line-draw {
+  0% { width: 0; opacity: 0; }
+  100% { width: 2.5rem; opacity: 0.8; }
+}
+.line-draw {
+  animation: line-draw 0.6s cubic-bezier(0.22, 1, 0.36, 1) 0.4s both;
+}
+
+/* Glow pulse — fancy elegant gray glow for featured cards */
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow:
+      0 4px 16px -4px rgba(74, 85, 104, 0.18),
+      0 0 0 0 rgba(74, 85, 104, 0),
+      0 0 20px -8px rgba(74, 85, 104, 0.12);
+  }
+  50% {
+    box-shadow:
+      0 8px 32px -6px rgba(74, 85, 104, 0.28),
+      0 0 0 2px rgba(74, 85, 104, 0.10),
+      0 0 40px -6px rgba(74, 85, 104, 0.22);
+  }
+}
+.glow-pulse {
+  animation: glow-pulse 4s ease-in-out infinite;
+  will-change: box-shadow;
+}
+
+/* Border glow — fancy elegant gray */
+@keyframes border-glow {
+  0%, 100% { border-color: rgba(74, 85, 104, 0.25); }
+  50% { border-color: rgba(74, 85, 104, 0.45); }
+}
+.border-glow {
+  animation: border-glow 4s ease-in-out infinite;
+}
+
+@keyframes sparkle-drift {
+  0%, 100% { opacity: 0.3; transform: translateY(0) scale(0.8); }
+  50% { opacity: 1; transform: translateY(-4px) scale(1.1); }
+}
+.sparkle-drift {
+  animation: sparkle-drift 2.5s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+
+/* ===== Utility helpers ===== */
+
+/* Gold gradient ring — for circular logo containers (elegant, soft) */
+.gold-ring {
+  background: linear-gradient(135deg, #E8C547 0%, #D4AF37 45%, #B8962E 70%, #E8C547 100%);
+  box-shadow: 0 2px 10px -1px rgba(212, 175, 55, 0.40), 0 1px 3px rgba(212, 175, 55, 0.25);
+}
+
+/* Navy-gold ring — matches the logo */
+.neon-ring {
+  background: linear-gradient(135deg, #D4AF37 0%, #0A1E3A 35%, #1A3A5C 70%, #D4AF37 100%);
+  box-shadow: 0 2px 12px -1px rgba(10, 30, 58, 0.30), 0 1px 3px rgba(212, 175, 55, 0.25);
+}
+
+.brass-ring {
+  background: linear-gradient(135deg, #E8C547 0%, #D4AF37 45%, #B8962E 70%, #E8C547 100%);
+  box-shadow: 0 2px 10px -1px rgba(212, 175, 55, 0.30);
+}
+
+.brass-text {
+  background: linear-gradient(120deg, #E8C547 0%, #D4AF37 40%, #B8962E 70%, #E8C547 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* One-shot pop */
+@keyframes sd-pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  60% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.sd-pop {
+  animation: sd-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  will-change: transform, opacity;
+}
+
+@keyframes sd-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.sd-fade {
+  animation: sd-fade 0.3s ease-out both;
+}
+
+/* Scroll area */
+.scroll-area {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--clay) transparent;
+}
+.scroll-area::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-area::-webkit-scrollbar-thumb {
+  background: var(--clay);
+  border-radius: 999px;
+}
+
+/* Category Glow — fancy elegant gray */
+@keyframes cat-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(74, 85, 104, 0);
+  }
+  50% {
+    box-shadow: 0 2px 14px -1px rgba(74, 85, 104, 0.22);
+  }
+}
+.cat-glow {
+  animation: cat-glow 4.5s ease-in-out infinite;
+}
+.cat-glow:nth-child(2) { animation-delay: 0.5s; }
+.cat-glow:nth-child(3) { animation-delay: 1s; }
+.cat-glow:nth-child(4) { animation-delay: 1.5s; }
+.cat-glow:nth-child(5) { animation-delay: 2s; }
+.cat-glow:nth-child(6) { animation-delay: 2.5s; }
+.cat-glow:nth-child(7) { animation-delay: 3s; }
+
+/* Category badge glow — fancy elegant gray */
+@keyframes badge-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(74, 85, 104, 0);
+    opacity: 0.95;
+  }
+  50% {
+    box-shadow: 0 1px 10px 0 rgba(74, 85, 104, 0.25);
+    opacity: 1;
+  }
+}
+.badge-glow {
+  animation: badge-glow 3.5s ease-in-out infinite;
+  font-weight: 600;
+}
+
+/* Gallery fade */
+@keyframes gallery-fade {
+  from { opacity: 0; transform: scale(1.02); }
+  to { opacity: 1; transform: scale(1); }
+}
+.gallery-fade {
+  animation: gallery-fade 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Page enter */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.page-enter {
+  animation: page-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Elegant text shadow utilities — soft, not neon */
+.neon-text-cyan {
+  text-shadow: 0 1px 2px rgba(74, 157, 161, 0.20);
+}
+.neon-text-emerald {
+  text-shadow: 0 1px 2px rgba(42, 125, 91, 0.20);
+}
+.neon-text-magenta {
+  text-shadow: 0 1px 2px rgba(194, 91, 126, 0.20);
+}
+.neon-text-gold {
+  text-shadow: 0 1px 2px rgba(184, 144, 47, 0.20);
+}
+
+/* Glassmorphism card — elegant on white */
+.glass-card {
+  background: rgba(255, 255, 255, 0.70);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(107, 100, 87, 0.12);
+}
+
+/* Animated gradient border — elegant emerald + gold */
+.gradient-border-animated {
+  position: relative;
+  background: var(--card);
+  border-radius: 1rem;
+}
+.gradient-border-animated::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, #3DA177, #B8902F, #C25B7E, #3DA177);
+  background-size: 300% 300%;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: brass-shimmer 10s linear infinite;
+  pointer-events: none;
+}
+
+/* Scroll-triggered fade-up — uses IntersectionObserver via inline JS */
+.scroll-reveal {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.7s ease-out, transform 0.7s ease-out;
+}
+.scroll-reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Shimmer line — for skeleton loaders (light theme) */
+@keyframes shimmer-line {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer-line {
+  background: linear-gradient(90deg,
+    rgba(107, 100, 87, 0.08) 0%,
+    rgba(107, 100, 87, 0.15) 50%,
+    rgba(107, 100, 87, 0.08) 100%);
+  background-size: 200% 100%;
+  animation: shimmer-line 1.8s ease-in-out infinite;
+}
+
+/* ===== Category buttons — simple glowing colors, no animations ===== */
+
+.cat-btn {
+  transition: border-color 0.3s ease, background-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
+}
+
+@media (hover: hover) {
+  .cat-btn:hover {
+    box-shadow: 0 4px 14px -2px rgba(74, 85, 104, 0.18);
+  }
+}
+
+.cat-active-auto { box-shadow: 0 4px 14px -2px rgba(37, 99, 235, 0.25); border-color: rgba(37, 99, 235, 0.45) !important; }
+.cat-active-device { box-shadow: 0 4px 14px -2px rgba(74, 157, 161, 0.25); border-color: rgba(74, 157, 161, 0.45) !important; }
+.cat-active-tool { box-shadow: 0 4px 14px -2px rgba(184, 144, 47, 0.25); border-color: rgba(184, 144, 47, 0.45) !important; }
+.cat-active-decor { box-shadow: 0 4px 14px -2px rgba(212, 169, 63, 0.25); border-color: rgba(212, 169, 63, 0.45) !important; }
+.cat-active-furniture { box-shadow: 0 4px 14px -2px rgba(61, 53, 48, 0.25); border-color: rgba(61, 53, 48, 0.45) !important; }
+.cat-active-textile { box-shadow: 0 4px 14px -2px rgba(126, 107, 168, 0.25); border-color: rgba(126, 107, 168, 0.45) !important; }
+.cat-active-kids { box-shadow: 0 4px 14px -2px rgba(61, 161, 119, 0.25); border-color: rgba(61, 161, 119, 0.45) !important; }
+.cat-active-garden { box-shadow: 0 4px 14px -2px rgba(42, 125, 91, 0.25); border-color: rgba(42, 125, 91, 0.45) !important; }
+.cat-active-beauty { box-shadow: 0 4px 14px -2px rgba(194, 91, 126, 0.25); border-color: rgba(194, 91, 126, 0.45) !important; }
+.cat-active-art { box-shadow: 0 4px 14px -2px rgba(126, 107, 168, 0.25); border-color: rgba(126, 107, 168, 0.45) !important; }
+.cat-active-default { box-shadow: 0 4px 14px -2px rgba(37, 99, 235, 0.25); border-color: rgba(37, 99, 235, 0.45) !important; }
+
+
+/* ===== Elegant frame accents =====
+   Subtle top-corner accent line that appears on hover.
+   Applied via .frame-accent class on the card's inner wrapper. */
+.frame-accent {
+  position: relative;
+}
+.frame-accent::before,
+.frame-accent::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-color: rgba(74, 85, 104, 0);
+  border-style: solid;
+  border-width: 0;
+  transition: border-color 0.4s ease, width 0.4s ease, height 0.4s ease;
+  pointer-events: none;
+  z-index: 5;
+}
+/* Top-right corner accent */
+.frame-accent::before {
+  top: 8px;
+  right: 8px;
+  border-top-width: 2px;
+  border-right-width: 2px;
+  border-top-right-radius: 6px;
+}
+/* Bottom-left corner accent */
+.frame-accent::after {
+  bottom: 8px;
+  left: 8px;
+  border-bottom-width: 2px;
+  border-left-width: 2px;
+  border-bottom-left-radius: 6px;
+}
+.frame-accent:hover::before,
+.frame-accent:hover::after {
+  border-color: rgba(74, 85, 104, 0.45);
+  width: 22px;
+  height: 22px;
+}

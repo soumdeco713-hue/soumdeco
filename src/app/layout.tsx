@@ -1,0 +1,105 @@
+import type { Metadata, Viewport } from "next";
+import { Inter, Cormorant_Garamond, Noto_Naskh_Arabic } from "next/font/google";
+import "./globals.css";
+import { Toaster } from "@/components/ui/sonner";
+import { BRAND } from "@/lib/brand-config";
+
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+  display: "swap",
+});
+
+const cormorant = Cormorant_Garamond({
+  variable: "--font-cormorant",
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
+  display: "swap",
+});
+
+// Noto Naskh Arabic — elegant, traditional Arabic script
+const arabic = Noto_Naskh_Arabic({
+  variable: "--font-arabic",
+  subsets: ["arabic"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
+});
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  userScalable: true,
+  themeColor: "#0A1E3A",
+};
+
+export const metadata: Metadata = {
+  title: `${BRAND.name} — ${BRAND.tagline}`,
+  description: `${BRAND.name} · ${BRAND.tagline}. توصيل لكل الولايات الجزائرية · الدفع عند الاستلام.`,
+  keywords: [
+    BRAND.name,
+    BRAND.nameLatin,
+    "متجر",
+    "الجزائر",
+    "توصيل",
+    "الدفع عند الاستلام",
+    "مستلزمات المنزل",
+    "إكسسوارات السيارة",
+  ],
+  authors: [{ name: BRAND.name }],
+  openGraph: {
+    title: `${BRAND.name} — ${BRAND.tagline}`,
+    description: `${BRAND.tagline}. توصيل لكل الولايات الجزائرية.`,
+    siteName: BRAND.name,
+    type: "website",
+    locale: "ar_DZ",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: `${BRAND.name} — ${BRAND.tagline}`,
+    description: BRAND.tagline,
+  },
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="ar" dir="rtl" suppressHydrationWarning>
+      <head>
+        {/* Preload API calls — starts fetching before JS loads (saves 1-2s) */}
+        <link rel="preload" as="fetch" href="/api/products" crossOrigin="anonymous" />
+        <link rel="preload" as="fetch" href="/api/stock" crossOrigin="anonymous" />
+        {/* DNS prefetch for Cloudinary — faster image loading */}
+        <link rel="dns-prefetch" href="https://res.cloudinary.com" />
+        <link rel="preconnect" href="https://res.cloudinary.com" />
+      </head>
+      <body
+        className={`${inter.variable} ${cormorant.variable} ${arabic.variable} font-arabic antialiased bg-background text-foreground`}
+      >
+        {children}
+        <Toaster
+          position="top-center"
+          richColors
+          dir="rtl"
+          toastOptions={{
+            style: {
+              borderRadius: "9999px",
+              padding: "10px 20px",
+              fontSize: "13px",
+              fontWeight: 500,
+              boxShadow: "0 8px 24px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.08)",
+              border: "none",
+              minWidth: "220px",
+              textAlign: "center",
+              justifyContent: "center",
+            },
+            className: "font-arabic",
+          }}
+        />
+      </body>
+    </html>
+  );
+}
