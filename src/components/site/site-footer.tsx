@@ -108,7 +108,7 @@ export function SiteFooter() {
           💵 Paiement à la livraison · الدفع عند الاستلام
         </p>
 
-        <p className="font-arabic text-xs text-gray-light">
+        <p className="font-arabic text-xs text-gray-light" suppressHydrationWarning>
           © {year ?? ""} {BRAND.name}. جميع الحقوق محفوظة.
         </p>
       </div>
