@@ -47,7 +47,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ar" dir="rtl" suppressHydrationWarning>
-      <head>
+      <head suppressHydrationWarning>
         {/* Preload API calls — starts fetching before JS loads (saves 1-2s) */}
         <link rel="preload" as="fetch" href="/api/products" crossOrigin="anonymous" />
         <link rel="preload" as="fetch" href="/api/stock" crossOrigin="anonymous" />

@@ -7,7 +7,7 @@ export function Hero() {
   return (
     <section
       id="accueil"
-      className="relative flex flex-col items-center justify-center overflow-hidden px-6 pt-16 pb-8 sm:pt-24 sm:pb-12"
+      className="relative flex flex-col items-center justify-center overflow-hidden px-6 pt-20 pb-8 sm:pt-28 sm:pb-12"
       dir="rtl"
       lang="ar"
     >
@@ -44,7 +44,7 @@ export function Hero() {
 
       <div className="relative z-10 flex flex-col items-center text-center">
         {/* Refined logo with brass-taupe ring */}
-        <div className="fade-up relative mb-6 h-20 w-20 sm:h-24 sm:w-24">
+        <div className="fade-up relative mb-6 h-20 w-20 sm:h-20 sm:w-20">
           {/* Soft pulsing glow */}
           <div
             aria-hidden
@@ -70,49 +70,20 @@ export function Hero() {
           </div>
         </div>
 
-        {/* Brand name — elegant Cormorant Garamond serif, light weight,
-            shimmering charcoal-brass gradient. Big and refined, not bold.
-            letter-reveal animation: starts wide+blurred, settles into place. */}
-        <h1
-          className="fade-up font-serif text-5xl font-medium tracking-[0.08em] sm:text-7xl"
-          style={{ lineHeight: 1.05 }}
-        >
-          <span className="text-blue-black-animated letter-reveal">{BRAND.name}</span>
+        {/* Brand name — identical to soumdeco.netlify.app:
+            "SOUM" in brass-text (gold gradient) + gap + "DECO" in terracotta.
+            Cormorant Garamond serif, semibold, tight tracking.
+            Uses flex + gap-4 for a reliable 16px gap that works in both LTR and RTL. */}
+        <h1 className="fade-up flex items-center justify-center gap-4 font-serif text-5xl font-semibold tracking-tight text-charcoal sm:text-6xl">
+          <span className="brass-text">SOUM</span>
+          <span className="text-terracotta">DECO</span>
         </h1>
 
-        {/* Decorative brass divider — elegant line with center dot */}
-        <div
-          className="fade-up mt-5 flex items-center gap-2"
-          style={{ animationDelay: "0.15s" }}
-        >
-          <div
-            className="h-[1px] w-16 sm:w-24 rounded-full"
-            style={{
-              background:
-                "linear-gradient(90deg, transparent, #9A7E3A 60%, #B89656)",
-            }}
-          />
-          <div
-            className="h-1.5 w-1.5 rounded-full"
-            style={{ background: "#9A7E3A", boxShadow: "0 0 8px rgba(154, 126, 58, 0.5)" }}
-          />
-          <div
-            className="h-[1px] w-16 sm:w-24 rounded-full"
-            style={{
-              background:
-                "linear-gradient(90deg, #B89656, #9A7E3A 40%, transparent)",
-            }}
-          />
-        </div>
-
-        {/* Tagline — elegant italic Cormorant, larger and prominent.
-            Animated with a slow shimmer + gentle float. */}
-        <p
-          className="fade-up mt-6 max-w-xl font-serif text-xl italic tracking-wide sm:text-3xl"
-          style={{ animationDelay: "0.3s" }}
-        >
+        {/* Tagline — elegant italic Cormorant, gentle float animation.
+            Uses fade-up (not letter-reveal) to avoid hydration mismatch. */}
+        <p className="fade-up mt-3 max-w-md font-serif text-lg italic text-gray sm:text-xl">
           <span
-            className="text-blue-black-animated tagline-float"
+            className="tagline-float"
             style={{ display: "inline-block" }}
           >
             {BRAND.tagline}

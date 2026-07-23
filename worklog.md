@@ -261,3 +261,40 @@ Stage Summary:
 - Admin panel "2500 بكسل" text removed (silent 1500px compression)
 - Lint: 0 errors, 1 warning (custom font — expected tradeoff for Netlify bandwidth savings)
 - Browser-verified: 0 console errors, logo loads, Cloudinary URLs use c_limit,w_800
+
+---
+Task ID: 5
+Agent: main
+Task: Fix hydration error, redesign featured carousel to match reference, fix SOUM DECO title gap + colors, verify trust badge removal.
+
+Work Log:
+- Investigated hydration error: root cause was the `letter-reveal` CSS animation that started at `opacity: 0` with `animation-fill-mode: both`, causing server/client render mismatch. Also added `suppressHydrationWarning` to `<head>` for Google Fonts CDN links.
+- Fixed hero title: 
+  • Removed `letter-reveal` animation (hydration fix) — now uses simple `fade-up`
+  • Split "SOUM DECO" into two spans: `<span className="brass-text">SOUM</span>` + `<span className="text-terracotta">DECO</span>`
+  • SOUM = brass-text (gold gradient), DECO = text-terracotta (rust color) — matches reference exactly
+  • Used `flex items-center justify-center gap-4` for reliable 16px gap (me-4/mr-4 didn't work in RTL)
+  • Font: `font-serif text-5xl font-semibold tracking-tight` (Cormorant Garamond, semibold, tight tracking) — matches reference
+  • Removed decorative brass divider (reference doesn't have one)
+  • Tagline: `font-serif text-lg italic text-gray sm:text-xl` with `tagline-float` animation
+- Redesigned featured-carousel.tsx to match reference exactly:
+  • Eyebrow: "Nos Coups de Cœur" (was "Sélection")
+  • Card: `bg-paper/90 shadow-xl shadow-brass/10 backdrop-blur-sm border border-brass/20` (transparent)
+  • Dark gradient overlay on image: `bg-gradient-to-t from-ink/60 via-transparent to-transparent`
+  • Category badge: top-LEFT (was top-right), `bg-paper/70 backdrop-blur-sm border border-brass/20`
+  • Title + price OVERLAID on image at bottom: `text-cream drop-shadow-md` for title, `text-brass-bright` for price
+  • No separate title/price section below image — everything overlaid
+  • Arrows: `h-9 w-9 bg-paper/80 backdrop-blur-sm border-brass/30` (smaller, transparent)
+  • Dots: `h-1.5` (thinner), active `w-6 bg-brass`, inactive `w-1.5 bg-clay/60`
+  • Rupture overlay: `bg-ink/50` with `bg-charcoal` badge
+- Verified trust badge removal: `curl -s http://localhost:3000/ | grep -c "توصيل سريع لكل الولايات"` returns 0. Vision model confirmed no Arabic trust badges at top. User was seeing cached version.
+- Added `suppressHydrationWarning` to `<head>` element in layout.tsx for Google Fonts CDN links
+
+Stage Summary:
+- Hydration error FIXED (removed letter-reveal animation + suppressHydrationWarning on head)
+- SOUM DECO title FIXED (visible gap, SOUM gold + DECO terracotta, matching reference font)
+- Featured carousel REDESIGNED (transparent card, overlay title+price, dark gradient, "Nos Coups de Cœur" eyebrow)
+- Trust badge CONFIRMED REMOVED (0 occurrences in HTML, vision-verified)
+- Vision model confirmed: gap visible, SOUM gold, DECO burgundy/terracotta
+- 0 console errors, 0 hydration errors
+- Lint: 0 errors, 1 warning (custom font — expected tradeoff)
