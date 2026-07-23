@@ -16,9 +16,8 @@ import {
 } from "@/lib/sheet";
 import { SEED_PRODUCTS } from "@/lib/seed-products";
 
-// Cache this route's GET response at the server/CDN level for 30 minutes.
-// Thousands of visitors share 1 single function invocation (Netlify ISR).
-export const revalidate = 1800;
+// NOTE: Netlify ISR (revalidate=1800) temporarily REMOVED for dev.
+// Will be re-applied when pushing to production. See NETLIFY-OPTIMIZATION-GUIDE.md.
 
 // GET /api/products → list all products
 // Tries the configured Google Sheet first. Falls back to SEED_PRODUCTS
