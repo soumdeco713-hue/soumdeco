@@ -1,9 +1,8 @@
 "use client";
 
 import Image from "next/image";
-import { Menu, X } from "lucide-react";
+import { Menu, X, Instagram, Facebook, Phone } from "lucide-react";
 import { BRAND } from "@/lib/brand-config";
-import { TikTokIcon } from "./tiktok-icon";
 
 type SiteMenuProps = {
   open: boolean;
@@ -99,13 +98,30 @@ export function SiteMenu({ open, onOpenChange }: SiteMenuProps) {
 
         <div className="mt-auto space-y-3 border-t border-clay/30 p-4">
           <a
-            href={BRAND.contact.tiktokUrl}
+            href={BRAND.contact.instagramUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center gap-2 font-arabic text-sm text-charcoal transition-colors hover:text-emerald"
+            className="flex items-center justify-center gap-2 font-arabic text-sm text-charcoal transition-colors hover:text-brass"
           >
-            <TikTokIcon className="h-5 w-5 text-emerald" />
-            @{BRAND.contact.tiktok}
+            <Instagram className="h-5 w-5 text-brass" />
+            @{BRAND.contact.instagram}
+          </a>
+          <a
+            href={BRAND.contact.facebookUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 font-arabic text-sm text-charcoal transition-colors hover:text-brass"
+          >
+            <Facebook className="h-5 w-5 text-brass" />
+            Facebook
+          </a>
+          <a
+            href={`tel:${BRAND.contact.phone}`}
+            className="flex items-center justify-center gap-2 font-arabic text-sm text-charcoal transition-colors hover:text-brass"
+            dir="ltr"
+          >
+            <Phone className="h-5 w-5 text-brass" />
+            {BRAND.contact.phoneDisplay}
           </a>
         </div>
       </div>

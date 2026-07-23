@@ -8,8 +8,8 @@
 // - Automatic image optimization + CDN delivery
 // - Permanent URLs (https://res.cloudinary.com/{cloud}/image/upload/...)
 
-const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || "mxhc8k5i";
-const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "miizaan";
+const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || "soumdeco";
+const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "soumdeco";
 
 /**
  * Upload a single base64 image to Cloudinary.

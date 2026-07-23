@@ -30,21 +30,22 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 5,
   userScalable: true,
-  themeColor: "#0A1E3A",
+  themeColor: "#FAF8F4",
 };
 
 export const metadata: Metadata = {
   title: `${BRAND.name} — ${BRAND.tagline}`,
-  description: `${BRAND.name} · ${BRAND.tagline}. توصيل لكل الولايات الجزائرية · الدفع عند الاستلام.`,
+  description: `${BRAND.name} · ${BRAND.tagline}. متجر ديكور المنزل وفنّ المائدة. توصيل لكل الولايات الجزائرية · الدفع عند الاستلام.`,
   keywords: [
     BRAND.name,
     BRAND.nameLatin,
-    "متجر",
+    "ديكور المنزل",
+    "فنّ المائدة",
     "الجزائر",
     "توصيل",
     "الدفع عند الاستلام",
-    "مستلزمات المنزل",
-    "إكسسوارات السيارة",
+    "decoration maison",
+    "art de la table",
   ],
   authors: [{ name: BRAND.name }],
   openGraph: {
@@ -90,11 +91,13 @@ export default function RootLayout({
               padding: "10px 20px",
               fontSize: "13px",
               fontWeight: 500,
-              boxShadow: "0 8px 24px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.08)",
-              border: "none",
+              boxShadow: "0 8px 24px rgba(28, 24, 21, 0.10), 0 2px 8px rgba(28, 24, 21, 0.06)",
+              border: "1px solid rgba(154, 126, 58, 0.18)",
               minWidth: "220px",
               textAlign: "center",
               justifyContent: "center",
+              background: "#FFFFFF",
+              color: "#1C1815",
             },
             className: "font-arabic",
           }}

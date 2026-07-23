@@ -1,17 +1,55 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#1F5E4A"/>
-      <stop offset="100%" stop-color="#143D2F"/>
+    <linearGradient id="brassGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#D4B46A"/>
+      <stop offset="50%" stop-color="#9A7E3A"/>
+      <stop offset="100%" stop-color="#6E5C2A"/>
     </linearGradient>
-    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#E8C480"/>
-      <stop offset="50%" stop-color="#C9974A"/>
-      <stop offset="100%" stop-color="#A67935"/>
+    <linearGradient id="taupeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3D3530"/>
+      <stop offset="100%" stop-color="#1C1815"/>
     </linearGradient>
+    <radialGradient id="bgGrad" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#FAF8F4"/>
+      <stop offset="100%" stop-color="#F1ECE3"/>
+    </radialGradient>
   </defs>
-  <rect width="400" height="400" rx="80" fill="url(#bg)"/>
-  <circle cx="200" cy="200" r="130" fill="none" stroke="url(#gold)" stroke-width="4"/>
-  <text x="200" y="240" text-anchor="middle" font-family="Noto Naskh Arabic, Amiri, serif" font-size="140" font-weight="700" fill="url(#gold)">ب</text>
-  <text x="200" y="320" text-anchor="middle" font-family="Cormorant Garamond, serif" font-size="22" font-weight="500" fill="#E8C480" letter-spacing="6">PLACEHOLDER</text>
+
+  <!-- Soft cream circle backdrop -->
+  <circle cx="120" cy="120" r="118" fill="url(#bgGrad)"/>
+
+  <!-- Outer brass ring (thin, elegant) -->
+  <circle cx="120" cy="120" r="110" fill="none" stroke="url(#brassGrad)" stroke-width="1.5" opacity="0.85"/>
+  <!-- Inner dotted brass ring -->
+  <circle cx="120" cy="120" r="102" fill="none" stroke="#9A7E3A" stroke-width="0.6" stroke-dasharray="1 3" opacity="0.7"/>
+
+  <!-- Decorative flourish — small leaf/laurel above the wordmark -->
+  <g transform="translate(120 58)" fill="url(#brassGrad)">
+    <path d="M 0 -8 C -3 -4 -3 4 0 8 C 3 4 3 -4 0 -8 Z" opacity="0.95"/>
+    <path d="M -10 -2 C -8 -6 -2 -7 0 -4 C -4 -2 -8 0 -10 -2 Z" opacity="0.85"/>
+    <path d="M 10 -2 C 8 -6 2 -7 0 -4 C 4 -2 8 0 10 -2 Z" opacity="0.85"/>
+    <circle cx="0" cy="0" r="1.2" fill="#3D3530"/>
+  </g>
+
+  <!-- Wordmark "SOUM" — large elegant serif -->
+  <text x="120" y="120" text-anchor="middle" font-family="'Cormorant Garamond', 'Garamond', 'Times New Roman', serif"
+        font-size="58" font-weight="600" letter-spacing="6" fill="url(#taupeGrad)">SOUM</text>
+
+  <!-- Wordmark "DÉCO" — smaller, spaced -->
+  <text x="120" y="158" text-anchor="middle" font-family="'Cormorant Garamond', 'Garamond', 'Times New Roman', serif"
+        font-size="26" font-weight="400" letter-spacing="14" fill="#6B6358">DÉCO</text>
+
+  <!-- Decorative divider line -->
+  <g transform="translate(120 180)" stroke="#9A7E3A" stroke-width="0.8" fill="none">
+    <line x1="-44" y1="0" x2="-8" y2="0"/>
+    <line x1="8" y1="0" x2="44" y2="0"/>
+    <circle cx="0" cy="0" r="2" fill="#9A7E3A" stroke="none"/>
+    <circle cx="-50" cy="0" r="1" fill="#9A7E3A" stroke="none"/>
+    <circle cx="50" cy="0" r="1" fill="#9A7E3A" stroke="none"/>
+  </g>
+
+  <!-- Tagline at bottom — elegant small caps -->
+  <text x="120" y="200" text-anchor="middle" font-family="'Jost', 'Inter', sans-serif"
+        font-size="9" font-weight="300" letter-spacing="4" fill="#6B6358" opacity="0.9">ÉLÉGANCE &amp; MAISON</text>
 </svg>

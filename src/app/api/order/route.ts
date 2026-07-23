@@ -77,5 +77,5 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET() {
-  return NextResponse.json({ ok: true, service: "El Miizaan order API" });
+  return NextResponse.json({ ok: true, service: "Soum Deco order API" });
 }

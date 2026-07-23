@@ -1,0 +1,864 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→import { useEffect, useMemo, useState } from "react";
+     4→     4→import { toast } from "sonner";
+     5→     5→import { Check, Send, Heart, Sparkles } from "lucide-react";
+     6→     6→import {
+     7→     7→  getShippingPrice,
+     8→     8→  ShippingSpeed,
+     9→     9→  DeliveryType,
+    10→    10→  SHIPPING_SPEED_LABELS_AR,
+    11→    11→  DELIVERY_TYPE_LABELS_AR,
+    12→    12→} from "@/lib/shipping";
+    13→    13→import { formatPrice, QuantityTier } from "@/lib/products";
+    14→    14→import { useAlgeriaData, PHONE_REGEX } from "@/hooks/use-algeria-data";
+    15→    15→import { BRAND } from "@/lib/brand-config";
+    16→    16→
+    17→    17→export type OrderItem = {
+    18→    18→  name: string;
+    19→    19→  price: number | null;
+    20→    20→  quantity: number;
+    21→    21→};
+    22→    22→
+    23→    23→type CodOrderFormProps = {
+    24→    24→  items: OrderItem[];
+    25→    25→  rupture?: boolean;
+    26→    26→  onSuccess?: () => void;
+    27→    27→  onContinueShopping?: () => void;
+    28→    28→  /** Extra notes that should be appended to the order notes (e.g. variation selections). */
+    29→    29→  extraNotes?: string;
+    30→    30→  /** Optional quantity tiers — when provided AND items.length === 1, the 4-button
+    31→    31→   *  selector highlights tier quantities with a ✨ badge and applies discount /
+    32→    32→   *  free-shipping benefits to the totals. */
+    33→    33→  quantityTiers?: QuantityTier[];
+    34→    34→};
+    35→    35→
+    36→    36→type FormState = {
+    37→    37→  fullName: string;
+    38→    38→  phone: string;
+    39→    39→  wilaya: string;
+    40→    40→  commune: string;
+    41→    41→  speed: ShippingSpeed;
+    42→    42→  delivery: DeliveryType;
+    43→    43→  notes: string;
+    44→    44→};
+    45→    45→
+    46→    46→function generateOrderRef(): string {
+    47→    47→  const n = Math.floor(100000 + Math.random() * 900000);
+    48→    48→  return `SD-${n}`;
+    49→    49→}
+    50→    50→
+    51→    51→export function CodOrderForm({
+    52→    52→  items: initialItems,
+    53→    53→  rupture,
+    54→    54→  onSuccess,
+    55→    55→  onContinueShopping,
+    56→    56→  extraNotes,
+    57→    57→  quantityTiers,
+    58→    58→}: CodOrderFormProps) {
+    59→    59→  const { wilayas, getCommunesForWilaya, loading } = useAlgeriaData();
+    60→    60→  const [items, setItems] = useState<OrderItem[]>(initialItems);
+    61→    61→  const [form, setForm] = useState<FormState>({
+    62→    62→    fullName: "",
+    63→    63→    phone: "",
+    64→    64→    wilaya: "",
+    65→    65→    commune: "",
+    66→    66→    speed: "express",
+    67→    67→    delivery: "stop_desk",
+    68→    68→    notes: "",
+    69→    69→  });
+    70→    70→  const [phoneError, setPhoneError] = useState(false);
+    71→    71→  const [submitting, setSubmitting] = useState(false);
+    72→    72→  const [done, setDone] = useState(false);
+    73→    73→  const [orderRef, setOrderRef] = useState("");
+    74→    74→  const [orderSummary, setOrderSummary] = useState<null | {
+    75→    75→    items: OrderItem[];
+    76→    76→    productTotal: number;
+    77→    77→    discountAmount: number;
+    78→    78→    shippingPrice: number;
+    79→    79→    grandTotal: number;
+    80→    80→    freeShippingApplied: boolean;
+    81→    81→    fullName: string;
+    82→    82→    phone: string;
+    83→    83→    wilayaLabel: string;
+    84→    84→    deliveryLabel: string;
+    85→    85→    date: string;
+    86→    86→  }>(null);
+    87→    87→
+    88→    88→  // Sync items when prop changes (e.g., modal opens different product)
+    89→    89→  useEffect(() => {
+    90→    90→    setItems(initialItems);
+    91→    91→  }, [initialItems]);
+    92→    92→
+    93→    93→  const communes = useMemo(
+    94→    94→    () => (form.wilaya ? getCommunesForWilaya(form.wilaya) : []),
+    95→    95→    [form.wilaya, getCommunesForWilaya],
+    96→    96→  );
+    97→    97→
+    98→    98→  // Reset commune when wilaya changes
+    99→    99→  useEffect(() => {
+   100→   100→    setForm((f) => ({ ...f, commune: "" }));
+   101→   101→  }, [form.wilaya]);
+   102→   102→
+   103→   103→  // The NORMAL shipping price (without any tier benefit applied).
+   104→   104→  // Returns null until BOTH wilaya AND commune are selected.
+   105→   105→  const normalShippingPrice = useMemo(() => {
+   106→   106→    if (!form.wilaya || !form.commune) return null;
+   107→   107→    const result = getShippingPrice(form.wilaya, form.speed, form.delivery);
+   108→   108→    return result ? result.price : null;
+   109→   109→  }, [form.wilaya, form.commune, form.speed, form.delivery]);
+   110→   110→
+   111→   111→  const shippingDelay = useMemo(() => {
+   112→   112→    if (!form.wilaya || !form.commune) return null;
+   113→   113→    const result = getShippingPrice(form.wilaya, form.speed, form.delivery);
+   114→   114→    return result ? result.delay : null;
+   115→   115→  }, [form.wilaya, form.commune, form.speed, form.delivery]);
+   116→   116→
+   117→   117→  // Active tier — only for single-item orders where the parent passed `quantityTiers`.
+   118→   118→  // Used to compute discount and free-shipping benefits.
+   119→   119→  const activeTier = useMemo(() => {
+   120→   120→    if (items.length !== 1) return null;
+   121→   121→    const q = items[0].quantity;
+   122→   122→    return (quantityTiers ?? []).find((t) => t.qty === q) ?? null;
+   123→   123→  }, [items, quantityTiers]);
+   124→   124→
+   125→   125→  // Discount from the active tier (if any) — clamped so total can never go negative.
+   126→   126→  const discountAmount = activeTier?.discountAmount ?? 0;
+   127→   127→
+   128→   128→  // Whether the active tier grants free shipping for the current delivery type.
+   129→   129→  const freeShippingApplied = useMemo(() => {
+   130→   130→    if (!activeTier || activeTier.freeShipping === "none") return false;
+   131→   131→    if (activeTier.freeShipping === "both") return true;
+   132→   132→    if (activeTier.freeShipping === "desk" && form.delivery === "stop_desk") return true;
+   133→   133→    if (activeTier.freeShipping === "home" && form.delivery === "home") return true;
+   134→   134→    return false;
+   135→   135→  }, [activeTier, form.delivery]);
+   136→   136→
+   137→   137→  const productTotal = useMemo(
+   138→   138→    () => items.reduce((s, i) => s + (i.price ?? 0) * i.quantity, 0),
+   139→   139→    [items],
+   140→   140→  );
+   141→   141→
+   142→   142→  // Product total AFTER discount (never negative).
+   143→   143→  const productTotalAfterDiscount = useMemo(
+   144→   144→    () => Math.max(0, productTotal - discountAmount),
+   145→   145→    [productTotal, discountAmount],
+   146→   146→  );
+   147→   147→
+   148→   148→  // Final shipping price: 0 if the tier grants free shipping, otherwise normal price.
+   149→   149→  const shippingPrice = useMemo(() => {
+   150→   150→    if (normalShippingPrice === null) return null;
+   151→   151→    return freeShippingApplied ? 0 : normalShippingPrice;
+   152→   152→  }, [normalShippingPrice, freeShippingApplied]);
+   153→   153→
+   154→   154→  const grandTotal = useMemo(() => {
+   155→   155→    const ship = shippingPrice ?? 0;
+   156→   156→    return productTotalAfterDiscount + ship;
+   157→   157→  }, [productTotalAfterDiscount, shippingPrice]);
+   158→   158→
+   159→   159→  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
+   160→   160→    setForm((f) => ({ ...f, [key]: value }));
+   161→   161→    if (key === "phone") setPhoneError(false);
+   162→   162→  };
+   163→   163→
+   164→   164→  const setSingleQty = (q: number) => {
+   165→   165→    if (q < 1) return;
+   166→   166→    setItems((prev) =>
+   167→   167→      prev.length === 1 ? [{ ...prev[0], quantity: q }] : prev,
+   168→   168→    );
+   169→   169→  };
+   170→   170→
+   171→   171→  const tierBenefitLine = (tier: QuantityTier): string => {
+   172→   172→    const hasFree = tier.freeShipping && tier.freeShipping !== "none";
+   173→   173→    const discount = tier.discountAmount ?? 0;
+   174→   174→    const hasDiscount = discount > 0;
+   175→   175→    const shippingLabel =
+   176→   176→      tier.freeShipping === "both"
+   177→   177→        ? "كلاهما"
+   178→   178→        : tier.freeShipping === "desk"
+   179→   179→        ? "المكتب"
+   180→   180→        : tier.freeShipping === "home"
+   181→   181→        ? "المنزل"
+   182→   182→        : "";
+   183→   183→    if (hasFree && hasDiscount) {
+   184→   184→      return `🎉 توصيل مجاني (${shippingLabel}) + خصم ${discount} دج عند شراء ${tier.qty} قطعة!`;
+   185→   185→    }
+   186→   186→    if (hasFree) {
+   187→   187→      return `🎉 توصيل مجاني (${shippingLabel}) عند شراء ${tier.qty} قطعة!`;
+   188→   188→    }
+   189→   189→    if (hasDiscount) {
+   190→   190→      return `🎉 خصم ${discount} دج عند شراء ${tier.qty} قطعة!`;
+   191→   191→    }
+   192→   192→    return "";
+   193→   193→  };
+   194→   194→
+   195→   195→  const validate = (): boolean => {
+   196→   196→    if (!form.fullName.trim()) {
+   197→   197→      toast.error("الرجاء إدخال الاسم الكامل");
+   198→   198→      return false;
+   199→   199→    }
+   200→   200→    if (!PHONE_REGEX.test(form.phone.replace(/\D/g, ""))) {
+   201→   201→      setPhoneError(true);
+   202→   202→      toast.error(
+   203→   203→        "رقم الهاتف غير صحيح. يجب أن يبدأ بـ 05 أو 06 أو 07 ويتكون من 10 أرقام",
+   204→   204→      );
+   205→   205→      return false;
+   206→   206→    }
+   207→   207→    if (!form.wilaya) {
+   208→   208→      toast.error("الرجاء اختيار الولاية");
+   209→   209→      return false;
+   210→   210→    }
+   211→   211→    if (!form.commune) {
+   212→   212→      toast.error("الرجاء اختيار البلدية");
+   213→   213→      return false;
+   214→   214→    }
+   215→   215→    return true;
+   216→   216→  };
+   217→   217→
+   218→   218→  const handleSubmit = async () => {
+   219→   219→    if (rupture) return;
+   220→   220→    if (!validate()) return;
+   221→   221→    setSubmitting(true);
+   222→   222→
+   223→   223→    const wilayaLabel =
+   224→   224→      wilayas.find((w) => w.code === form.wilaya)?.name || form.wilaya;
+   225→   225→    const deliveryLabel = DELIVERY_TYPE_LABELS_AR[form.delivery];
+   226→   226→    const companyLabel = SHIPPING_SPEED_LABELS_AR[form.speed];
+   227→   227→    const ship = shippingPrice ?? 0;
+   228→   228→    const finalGrandTotal = productTotalAfterDiscount + ship;
+   229→   229→
+   230→   230→    try {
+   231→   231→      // Send ALL items as ONE single order (1 row in the sheet, 1 shipping price)
+   232→   232→      const allProducts = items
+   233→   233→        .map((it) => `${it.name} ×${it.quantity}`)
+   234→   234→        .join(" + ");
+   235→   235→      const totalQty = items.reduce((s, i) => s + i.quantity, 0);
+   236→   236→      const totalUnitPrice = items.reduce((s, i) => s + (i.price ?? 0), 0);
+   237→   237→
+   238→   238→      // Combine user notes with variation summary (if any)
+   239→   239→      const speedNote = shippingDelay !== null
+   240→   240→        ? `${SHIPPING_SPEED_LABELS_AR[form.speed]} — ${shippingDelay} ${shippingDelay === 1 ? "يوم" : "أيام"}`
+   241→   241→        : SHIPPING_SPEED_LABELS_AR[form.speed];
+   242→   242→
+   243→   243→      const combinedNotes = [extraNotes, form.notes, speedNote]
+   244→   244→        .filter((s) => s && s.trim())
+   245→   245→        .join(" · ");
+   246→   246→
+   247→   247→      // If a discount or free shipping was applied, append a small note so the
+   248→   248→      // store owner can see the benefit granted to this customer.
+   249→   249→      const benefitNote =
+   250→   250→        discountAmount > 0 && freeShippingApplied
+   251→   251→          ? `🎉 خصم ${discountAmount} دج + توصيل مجاني`
+   252→   252→          : discountAmount > 0
+   253→   253→          ? `🎉 خصم ${discountAmount} دج`
+   254→   254→          : freeShippingApplied
+   255→   255→          ? `🎉 توصيل مجاني`
+   256→   256→          : "";
+   257→   257→      const finalNotes = [combinedNotes, benefitNote]
+   258→   258→        .filter(Boolean)
+   259→   259→        .join(" · ");
+   260→   260→
+   261→   261→      const res = await fetch("/api/order", {
+   262→   262→        method: "POST",
+   263→   263→        headers: { "Content-Type": "application/json" },
+   264→   264→        body: JSON.stringify({
+   265→   265→          product: allProducts,
+   266→   266→          quantity: String(totalQty),
+   267→   267→          price: items.length === 1 ? items[0].price : totalUnitPrice,
+   268→   268→          total: productTotalAfterDiscount,
+   269→   269→          shippingPrice: ship,
+   270→   270→          grandTotal: finalGrandTotal,
+   271→   271→          shippingCompany: form.speed,
+   272→   272→          shippingCompanyLabel: companyLabel,
+   273→   273→          fullName: form.fullName,
+   274→   274→          phone: form.phone.replace(/\D/g, ""),
+   275→   275→          wilaya: wilayaLabel,
+   276→   276→          commune: form.commune,
+   277→   277→          delivery: form.delivery,
+   278→   278→          deliveryLabel,
+   279→   279→          notes: finalNotes,
+   280→   280→        }),
+   281→   281→      });
+   282→   282→
+   283→   283→      // If the API returned an error, don't show the thank-you screen
+   284→   284→      if (!res.ok) {
+   285→   285→        throw new Error("Order submission failed");
+   286→   286→      }
+   287→   287→
+   288→   288→      setOrderRef(generateOrderRef());
+   289→   289→      setOrderSummary({
+   290→   290→        items,
+   291→   291→        productTotal,
+   292→   292→        discountAmount,
+   293→   293→        shippingPrice: ship,
+   294→   294→        grandTotal: finalGrandTotal,
+   295→   295→        freeShippingApplied,
+   296→   296→        fullName: form.fullName,
+   297→   297→        phone: form.phone,
+   298→   298→        wilayaLabel,
+   299→   299→        deliveryLabel,
+   300→   300→        date: new Date().toLocaleString("fr-FR"),
+   301→   301→      });
+   302→   302→      setDone(true);
+   303→   303→      onSuccess?.();
+   304→   304→    } catch {
+   305→   305→      toast.error("حدث خطأ أثناء إرسال الطلب. حاول مرة أخرى.");
+   306→   306→    } finally {
+   307→   307→      setSubmitting(false);
+   308→   308→    }
+   309→   309→  };
+   310→   310→
+   311→   311→  // === RUPTURE STATE ===
+   312→   312→  if (rupture) {
+   313→   313→    return (
+   314→   314→      <div
+   315→   315→        dir="rtl"
+   316→   316→        lang="ar"
+   317→   317→        className="rounded-xl border border-terracotta/40 bg-terracotta/10 p-6 text-center font-arabic backdrop-blur-sm"
+   318→   318→      >
+   319→   319→        <p className="text-lg font-semibold text-terracotta neon-text-magenta">نفدت الكمية</p>
+   320→   320→        <p className="mt-2 text-[13px] leading-relaxed text-gray">
+   321→   321→          هذا المنتج غير متوفر حالياً. تواصل معنا لمعرفة موعد توفره القادم.
+   322→   322→        </p>
+   323→   323→        <div className="mt-5 flex flex-col gap-2">
+   324→   324→          <button
+   325→   325→            type="button"
+   326→   326→            onClick={() => onContinueShopping?.()}
+   327→   327→            className="w-full rounded-full bg-emerald px-4 py-3 text-sm font-semibold text-night transition-colors hover:bg-emerald-bright"
+   328→   328→            style={{ boxShadow: "0 0 18px rgba(42, 125, 91, 0.45)" }}
+   329→   329→          >
+   330→   330→            متابعة التسوق
+   331→   331→          </button>
+   332→   332→        </div>
+   333→   333→      </div>
+   334→   334→    );
+   335→   335→  }
+   336→   336→
+   337→   337→  // === THANK-YOU STATE — super elegant, beautiful, with love ===
+   338→   338→  if (done && orderSummary) {
+   339→   339→    return (
+   340→   340→      <div
+   341→   341→        dir="rtl"
+   342→   342→        lang="ar"
+   343→   343→        className="px-1 py-2 text-center font-arabic"
+   344→   344→      >
+   345→   345→        {/* Animated heart with neon glow + floating sparkles */}
+   346→   346→        <div className="relative mx-auto mb-5 h-24 w-24">
+   347→   347→          {/* Outer pulsing glow rings */}
+   348→   348→          <div
+   349→   349→            aria-hidden
+   350→   350→            className="pulse-soft absolute inset-0 rounded-full"
+   351→   351→            style={{
+   352→   352→              background:
+   353→   353→                "radial-gradient(circle, rgba(194, 91, 126, 0.25) 0%, transparent 70%)",
+   354→   354→              filter: "blur(12px)",
+   355→   355→            }}
+   356→   356→          />
+   357→   357→          <div
+   358→   358→            aria-hidden
+   359→   359→            className="pulse-soft absolute inset-0 rounded-full"
+   360→   360→            style={{
+   361→   361→              background:
+   362→   362→                "radial-gradient(circle, rgba(15, 13, 10, 0.22) 0%, transparent 70%)",
+   363→   363→              filter: "blur(16px)",
+   364→   364→              animationDelay: "0.5s",
+   365→   365→            }}
+   366→   366→          />
+   367→   367→
+   368→   368→          {/* Floating sparkle stars around the heart */}
+   369→   369→          <div
+   370→   370→            className="float-strong absolute -top-1 -right-1 text-brass-bright"
+   371→   371→          >
+   372→   372→            <Sparkles className="h-4 w-4" fill="currentColor" />
+   373→   373→          </div>
+   374→   374→          <div
+   375→   375→            className="float-strong absolute -bottom-1 -left-2 text-neon-magenta"
+   376→   376→            style={{ animationDelay: "0.3s" }}
+   377→   377→          >
+   378→   378→            <Sparkles className="h-3.5 w-3.5" fill="currentColor" />
+   379→   379→          </div>
+   380→   380→          <div
+   381→   381→            className="float-strong absolute top-1/2 -right-3 text-charcoal"
+   382→   382→            style={{ animationDelay: "0.7s" }}
+   383→   383→          >
+   384→   384→            <Sparkles className="h-3 w-3" fill="currentColor" />
+   385→   385→          </div>
+   386→   386→          <div
+   387→   387→            className="float-strong absolute top-1/2 -left-3 text-neon-cyan"
+   388→   388→            style={{ animationDelay: "1s" }}
+   389→   389→          >
+   390→   390→            <Sparkles className="h-3 w-3" fill="currentColor" />
+   391→   391→          </div>
+   392→   392→
+   393→   393→          {/* Heart icon — pulsing with love */}
+   394→   394→          <div
+   395→   395→            className="fade-up relative flex h-full w-full items-center justify-center"
+   396→   396→          >
+   397→   397→            <div
+   398→   398→              className="pulse-soft flex h-20 w-20 items-center justify-center rounded-full"
+   399→   399→              style={{
+   400→   400→                background:
+   401→   401→                  "linear-gradient(135deg, #C25B7E 0%, #B5453A 50%, #C25B7E 100%)",
+   402→   402→                boxShadow:
+   403→   403→                  "0 4px 20px -2px rgba(194, 91, 126, 0.50), 0 0 0 4px rgba(255, 255, 255, 0.80), 0 0 0 5px rgba(194, 91, 126, 0.20)",
+   404→   404→              }}
+   405→   405→            >
+   406→   406→              <div className="pulse-soft">
+   407→   407→                <Heart
+   408→   408→                  className="h-9 w-9 text-white"
+   409→   409→                  fill="white"
+   410→   410→                  strokeWidth={0}
+   411→   411→                />
+   412→   412→              </div>
+   413→   413→            </div>
+   414→   414→          </div>
+   415→   415→        </div>
+   416→   416→
+   417→   417→        {/* Thank you heading — animated blue-black gradient */}
+   418→   418→        <h3
+   419→   419→          className="fade-up font-arabic text-2xl font-bold sm:text-3xl"
+   420→   420→          style={{ animationDelay: "0.3s" }}
+   421→   421→        >
+   422→   422→          <span className="text-blue-black-animated">شكراً لك من كلّ قلبنا! ❤</span>
+   423→   423→        </h3>
+   424→   424→
+   425→   425→        {/* Warm message */}
+   426→   426→        <p
+   427→   427→          className="fade-up mt-3 text-[14px] leading-loose text-gray"
+   428→   428→          style={{ animationDelay: "0.5s" }}
+   429→   429→        >
+   430→   430→          تمّ استلام طلبك بنجاح. نحن سعداء بثقتك بنا، وسنتواصل معك قريباً
+   431→   431→          لتأكيد الطلب وترتيب التوصيل.
+   432→   432→        </p>
+   433→   433→
+   434→   434→        {/* Order reference — elegant badge with animated black */}
+   435→   435→        <div
+   436→   436→          className="fade-up mt-4 inline-flex items-center gap-2 rounded-full border border-charcoal/25 bg-white px-4 py-2"
+   437→   437→          style={{
+   438→   438→            boxShadow: "0 2px 12px -2px rgba(15, 13, 10, 0.18)",
+   439→   439→            animationDelay: "0.7s",
+   440→   440→          }}
+   441→   441→        >
+   442→   442→          <span className="text-[11px] text-gray">رقم الطلب</span>
+   443→   443→          <span className="font-arabic text-sm font-bold text-animated-black">
+   444→   444→            {orderRef}
+   445→   445→          </span>
+   446→   446→        </div>
+   447→   447→
+   448→   448→        {/* Order summary — elegant card with soft glow */}
+   449→   449→        <div
+   450→   450→          className="fade-up mt-5 overflow-hidden rounded-2xl border border-clay/40 bg-white p-4 text-right text-[12px]"
+   451→   451→          style={{
+   452→   452→            boxShadow:
+   453→   453→              "0 4px 20px -6px rgba(74, 85, 104, 0.18), 0 0 0 1px rgba(74, 85, 104, 0.06)",
+   454→   454→            animationDelay: "0.9s",
+   455→   455→          }}
+   456→   456→        >
+   457→   457→          {/* Items */}
+   458→   458→          {orderSummary.items.map((it, i) => (
+   459→   459→            <div key={i} className="mb-1.5 flex justify-between">
+   460→   460→              <span className="text-gray line-clamp-1">{it.name}</span>
+   461→   461→              <span className="font-bold text-charcoal">×{it.quantity}</span>
+   462→   462→            </div>
+   463→   463→          ))}
+   464→   464→          <div className="my-2.5 h-px bg-clay/30" />
+   465→   465→          {/* Totals */}
+   466→   466→          <div className="mb-1 flex justify-between">
+   467→   467→            <span className="text-gray">المجموع</span>
+   468→   468→            <span className="font-medium text-charcoal">{formatPrice(orderSummary.productTotal)}</span>
+   469→   469→          </div>
+   470→   470→          {orderSummary.discountAmount > 0 && (
+   471→   471→            <div className="mb-1 flex justify-between">
+   472→   472→              <span className="text-neon-magenta">الخصم</span>
+   473→   473→              <span className="font-medium text-neon-magenta">-{formatPrice(orderSummary.discountAmount)}</span>
+   474→   474→            </div>
+   475→   475→          )}
+   476→   476→          <div className="mb-1.5 flex justify-between">
+   477→   477→            <span className="text-gray">التوصيل</span>
+   478→   478→            <span className="font-medium text-charcoal">
+   479→   479→              {orderSummary.freeShippingApplied
+   480→   480→                ? "0 دج (مجاني)"
+   481→   481→                : formatPrice(orderSummary.shippingPrice)}
+   482→   482→            </span>
+   483→   483→          </div>
+   484→   484→          <div className="mb-2.5 flex justify-between border-t border-clay/30 pt-2 text-[14px] font-bold">
+   485→   485→            <span className="text-charcoal">المجموع الكلي</span>
+   486→   486→            <span className="text-emerald">{formatPrice(orderSummary.grandTotal)}</span>
+   487→   487→          </div>
+   488→   488→          <div className="my-2.5 h-px bg-clay/30" />
+   489→   489→          {/* Customer info */}
+   490→   490→          <div className="mb-1 flex justify-between">
+   491→   491→            <span className="text-gray">الاسم</span>
+   492→   492→            <span className="font-medium text-charcoal">{orderSummary.fullName}</span>
+   493→   493→          </div>
+   494→   494→          <div className="mb-1 flex justify-between">
+   495→   495→            <span className="text-gray">الهاتف</span>
+   496→   496→            <bdi dir="ltr" className="font-medium text-charcoal">{orderSummary.phone}</bdi>
+   497→   497→          </div>
+   498→   498→          <div className="mb-1 flex justify-between">
+   499→   499→            <span className="text-gray">الولاية</span>
+   500→   500→            <span className="font-medium text-charcoal">{orderSummary.wilayaLabel}</span>
+   501→   501→          </div>
+   502→   502→          <div className="mb-1 flex justify-between">
+   503→   503→            <span className="text-gray">التوصيل</span>
+   504→   504→            <span className="font-medium text-charcoal">{orderSummary.deliveryLabel}</span>
+   505→   505→          </div>
+   506→   506→          <div className="flex justify-between">
+   507→   507→            <span className="text-gray">التاريخ</span>
+   508→   508→            <span className="text-[11px] text-charcoal">{orderSummary.date}</span>
+   509→   509→          </div>
+   510→   510→        </div>
+   511→   511→
+   512→   512→        {/* "With love" footer */}
+   513→   513→        <p
+   514→   514→          className="fade-up mt-4 flex items-center justify-center gap-1.5 text-[12px] text-gray-light"
+   515→   515→          style={{ animationDelay: "1.2s" }}
+   516→   516→        >
+   517→   517→          <span>صُنع بحبّ في</span>
+   518→   518→          <span className="font-bold text-blue-black-animated">{BRAND.name}</span>
+   519→   519→          <span
+   520→   520→            className="pulse-soft text-neon-magenta"
+   521→   521→          >
+   522→   522→            ❤
+   523→   523→          </span>
+   524→   524→        </p>
+   525→   525→
+   526→   526→        {/* Action buttons */}
+   527→   527→        <div
+   528→   528→          className="fade-up mt-5 flex flex-col gap-2"
+   529→   529→          style={{ animationDelay: "1.4s" }}
+   530→   530→        >
+   531→   531→          <button
+   532→   532→            type="button"
+   533→   533→            onClick={() => onContinueShopping?.()}
+   534→   534→            className="w-full rounded-full bg-animated-black px-4 py-3 text-sm font-bold text-white transition-transform hover:scale-[1.02] active:scale-[0.98] hover:shadow-lg"
+   535→   535→            style={{
+   536→   536→              boxShadow:
+   537→   537→                "0 4px 20px -2px rgba(15, 13, 10, 0.40), 0 0 0 1px rgba(15, 13, 10, 0.15)",
+   538→   538→            }}
+   539→   539→          >
+   540→   540→            متابعة التسوق
+   541→   541→          </button>
+   542→   542→        </div>
+   543→   543→      </div>
+   544→   544→    );
+   545→   545→  }
+   546→   546→
+   547→   547→  // === FORM STATE ===
+   548→   548→  const inputClass =
+   549→   549→    "w-full rounded-lg border border-clay/40 bg-night/60 px-3 py-2.5 text-right font-arabic text-[13px] text-charcoal outline-none transition-colors focus:border-charcoal focus:bg-night-soft";
+   550→   550→  const labelClass =
+   551→   551→    "mb-1 block font-arabic text-[12px] font-medium text-charcoal";
+   552→   552→
+   553→   553→  return (
+   554→   554→    <div dir="rtl" lang="ar" className="font-arabic">
+   555→   555→      {/* COD reminder banner */}
+   556→   556→      <div className="mb-4 rounded-lg border border-charcoal/30 bg-charcoal/5 px-3 py-2 text-center text-[12px] font-medium text-charcoal">
+   557→   557→        💵 الدفع عند الاستلام · توصيل لكل الولايات
+   558→   558→      </div>
+   559→   559→
+   560→   560→      <div className="space-y-4">
+   561→   561→        {/* 1. Full name */}
+   562→   562→        <div>
+   563→   563→          <label className={labelClass} htmlFor="cod-fullname">
+   564→   564→            الاسم الكامل · Nom complet
+   565→   565→          </label>
+   566→   566→          <input
+   567→   567→            id="cod-fullname"
+   568→   568→            type="text"
+   569→   569→            value={form.fullName}
+   570→   570→            onChange={(e) => set("fullName", e.target.value)}
+   571→   571→            className={inputClass}
+   572→   572→            placeholder="مثال: محمد أمين"
+   573→   573→          />
+   574→   574→        </div>
+   575→   575→
+   576→   576→        {/* 2. Phone */}
+   577→   577→        <div>
+   578→   578→          <label className={labelClass} htmlFor="cod-phone">
+   579→   579→            رقم الهاتف · Téléphone
+   580→   580→          </label>
+   581→   581→          <input
+   582→   582→            id="cod-phone"
+   583→   583→            type="tel"
+   584→   584→            dir="ltr"
+   585→   585→            value={form.phone}
+   586→   586→            onChange={(e) => set("phone", e.target.value)}
+   587→   587→            className={`${inputClass} text-left ${
+   588→   588→              phoneError
+   589→   589→                ? "border-terracotta bg-terracotta/5"
+   590→   590→                : "border-clay"
+   591→   591→            }`}
+   592→   592→            placeholder="0X XX XX XX XX"
+   593→   593→            inputMode="numeric"
+   594→   594→            maxLength={10}
+   595→   595→          />
+   596→   596→          {phoneError && (
+   597→   597→            <p className="mt-1 font-arabic text-[11px] text-terracotta">
+   598→   598→              يجب أن يبدأ بـ 05 أو 06 أو 07 ويتكون من 10 أرقام
+   599→   599→            </p>
+   600→   600→          )}
+   601→   601→        </div>
+   602→   602→
+   603→   603→        {/* 3. Wilaya */}
+   604→   604→        <div>
+   605→   605→          <label className={labelClass} htmlFor="cod-wilaya">
+   606→   606→            الولاية · Wilaya
+   607→   607→          </label>
+   608→   608→          <select
+   609→   609→            id="cod-wilaya"
+   610→   610→            value={form.wilaya}
+   611→   611→            onChange={(e) => set("wilaya", e.target.value)}
+   612→   612→            className={`${inputClass} ${
+   613→   613→              !form.wilaya ? "text-gray-light" : ""
+   614→   614→            }`}
+   615→   615→            disabled={loading}
+   616→   616→          >
+   617→   617→            <option value="">
+   618→   618→              {loading ? "جاري التحميل..." : "اختر الولاية"}
+   619→   619→            </option>
+   620→   620→            {wilayas.map((w) => (
+   621→   621→              <option key={w.code} value={w.code} className="text-charcoal">
+   622→   622→                {w.code} - {w.name} ({w.ar_name})
+   623→   623→              </option>
+   624→   624→            ))}
+   625→   625→          </select>
+   626→   626→        </div>
+   627→   627→
+   628→   628→        {/* 4. Commune */}
+   629→   629→        <div>
+   630→   630→          <label className={labelClass} htmlFor="cod-commune">
+   631→   631→            البلدية · Commune
+   632→   632→          </label>
+   633→   633→          <select
+   634→   634→            id="cod-commune"
+   635→   635→            value={form.commune}
+   636→   636→            onChange={(e) => set("commune", e.target.value)}
+   637→   637→            className={`${inputClass} ${
+   638→   638→              !form.commune ? "text-gray-light" : ""
+   639→   639→            }`}
+   640→   640→            disabled={!form.wilaya}
+   641→   641→          >
+   642→   642→            <option value="">
+   643→   643→              {form.wilaya ? "اختر البلدية" : "اختر الولاية أولاً"}
+   644→   644→            </option>
+   645→   645→            {communes.map((c) => (
+   646→   646→              <option key={c.id} value={c.name} className="text-charcoal">
+   647→   647→                {c.name} ({c.ar_name})
+   648→   648→              </option>
+   649→   649→            ))}
+   650→   650→          </select>
+   651→   651→        </div>
+   652→   652→
+   653→   653→        {/* 5. Shipping speed — سريع vs عادي */}
+   654→   654→        <div>
+   655→   655→          <label className={labelClass}>سرعة التوصيل</label>
+   656→   656→          <div className="grid grid-cols-2 gap-2">
+   657→   657→            {(["express", "economique"] as ShippingSpeed[]).map((s) => (
+   658→   658→              <button
+   659→   659→                key={s}
+   660→   660→                type="button"
+   661→   661→                onClick={() => set("speed", s)}
+   662→   662→                className={`font-arabic text-[12px] rounded-lg border px-3 py-2.5 font-medium transition-colors ${
+   663→   663→                  form.speed === s
+   664→   664→                    ? "border-charcoal bg-charcoal/10 text-charcoal"
+   665→   665→                    : "border-clay/40 bg-night/40 text-gray hover:border-charcoal/50 hover:text-charcoal"
+   666→   666→                }`}
+   667→   667→              >
+   668→   668→                {SHIPPING_SPEED_LABELS_AR[s]}
+   669→   669→              </button>
+   670→   670→            ))}
+   671→   671→          </div>
+   672→   672→          <p className="mt-1.5 font-arabic text-[10px] text-gray-light">
+   673→   673→            📦 نوفّر التوصيل عبر Yalidine Express لجميع الولايات
+   674→   674→          </p>
+   675→   675→        </div>
+   676→   676→
+   677→   677→        {/* 6. Delivery type */}
+   678→   678→        <div>
+   679→   679→          <label className={labelClass}>طريقة التوصيل</label>
+   680→   680→          <div className="grid grid-cols-2 gap-2">
+   681→   681→            {(["stop_desk", "home"] as DeliveryType[]).map((d) => (
+   682→   682→              <button
+   683→   683→                key={d}
+   684→   684→                type="button"
+   685→   685→                onClick={() => set("delivery", d)}
+   686→   686→                className={`font-arabic text-[12px] rounded-lg border px-3 py-2.5 font-medium transition-colors ${
+   687→   687→                  form.delivery === d
+   688→   688→                    ? "border-charcoal bg-charcoal/10 text-charcoal"
+   689→   689→                    : "border-clay/40 bg-night/40 text-gray hover:border-charcoal/50 hover:text-charcoal"
+   690→   690→                }`}
+   691→   691→              >
+   692→   692→                {DELIVERY_TYPE_LABELS_AR[d]}
+   693→   693→              </button>
+   694→   694→            ))}
+   695→   695→          </div>
+   696→   696→        </div>
+   697→   697→
+   698→   698→        {/* 7. Shipping price + delay display — only shows once wilaya + commune are selected. */}
+   699→   699→        <div className="rounded-lg border border-charcoal/30 bg-charcoal/5 px-3 py-2.5 text-[12px]">
+   700→   700→          {form.wilaya && form.commune && normalShippingPrice !== null ? (
+   701→   701→            <div className="flex flex-col gap-1">
+   702→   702→              <span className="font-arabic text-charcoal">
+   703→   703→                🚚 التوصيل ·{" "}
+   704→   704→                {freeShippingApplied
+   705→   705→                  ? "0 دج (مجاني 🎉)"
+   706→   706→                  : formatPrice(normalShippingPrice)}
+   707→   707→              </span>
+   708→   708→              {shippingDelay !== null && !freeShippingApplied && (
+   709→   709→                <span className="font-arabic text-[11px] text-gray-light">
+   710→   710→                  ⏱️ مدة التوصيل: {shippingDelay} {shippingDelay === 1 ? "يوم" : "أيام"}
+   711→   711→                </span>
+   712→   712→              )}
+   713→   713→              {freeShippingApplied && (
+   714→   714→                <span className="font-arabic text-[11px] text-gray-light">
+   715→   715→                  ⏱️ مدة التوصيل: {shippingDelay} {shippingDelay === 1 ? "يوم" : "أيام"}
+   716→   716→                </span>
+   717→   717→              )}
+   718→   718→            </div>
+   719→   719→          ) : (
+   720→   720→            <span className="font-arabic text-gray-light">
+   721→   721→              🚚 التوصيل · اختر الولاية والبلدية لعرض السعر
+   722→   722→            </span>
+   723→   723→          )}
+   724→   724→        </div>
+   725→   725→
+   726→   726→        {/* 8. Items / quantities.
+   727→   727→            For single-item orders we ALWAYS show the 4-button selector (1, 2, 3, 4).
+   728→   728→            The +/- stepper has been removed entirely — this is the ONLY quantity selector.
+   729→   729→            The ✨ emoji appears on buttons that match a tier (when `quantityTiers` is provided). */}
+   730→   730→        {items.length === 1 ? (
+   731→   731→          <div>
+   732→   732→            {/* Selected variant summary — shown when the parent passes extraNotes
+   733→   733→                (e.g. "اللون: أحمر · المقاس: كبير"). Read-only display; the actual
+   734→   734→                selection buttons live in the parent (product page). */}
+   735→   735→            {extraNotes && extraNotes.trim() && (
+   736→   736→              <div className="mb-2 rounded-lg border border-emerald/25 bg-emerald/5 px-3 py-2 text-[12px] font-arabic">
+   737→   737→                <span className="text-gray-light">الخيار المحدد: </span>
+   738→   738→                <span className="font-medium text-charcoal">{extraNotes}</span>
+   739→   739→              </div>
+   740→   740→            )}
+   741→   741→            <label className={labelClass}>الكمية · Quantité</label>
+   742→   742→            <div className="flex items-end justify-center gap-3">
+   743→   743→              {[1, 2, 3, 4].map((q) => {
+   744→   744→                const isActive = items[0].quantity === q;
+   745→   745→                const tier = (quantityTiers ?? []).find((t) => t.qty === q);
+   746→   746→                return (
+   747→   747→                  <div
+   748→   748→                    key={q}
+   749→   749→                    className="relative flex flex-col items-center"
+   750→   750→                  >
+   751→   751→                    {tier && (
+   752→   752→                      <span
+   753→   753→                        aria-hidden
+   754→   754→                        className="pointer-events-none absolute -top-3 text-[11px]"
+   755→   755→                      >
+   756→   756→                        ✨
+   757→   757→                      </span>
+   758→   758→                    )}
+   759→   759→                    <button
+   760→   760→                      type="button"
+   761→   761→                      onClick={() => setSingleQty(q)}
+   762→   762→                      aria-label={`اختر ${q} قطعة`}
+   763→   763→                      aria-pressed={isActive}
+   764→   764→                      className={`flex h-10 w-10 items-center justify-center rounded-full border-2 font-arabic text-sm font-bold transition-all hover:-translate-y-0.5 active:scale-90 sm:h-11 sm:w-11 ${
+   765→   765→                        isActive
+   766→   766→                          ? "border-transparent bg-animated-black text-white shadow-md"
+   767→   767→                          : "border-clay/40 bg-night/60 text-charcoal hover:border-neon-magenta/50"
+   768→   768→                      }`}
+   769→   769→                    >
+   770→   770→                      {q}
+   771→   771→                    </button>
+   772→   772→                  </div>
+   773→   773→                );
+   774→   774→              })}
+   775→   775→            </div>
+   776→   776→            {activeTier && tierBenefitLine(activeTier) && (
+   777→   777→              <p className="mt-3 text-center font-arabic text-[11px] font-medium text-neon-magenta">
+   778→   778→                {tierBenefitLine(activeTier)}
+   779→   779→              </p>
+   780→   780→            )}
+   781→   781→          </div>
+   782→   782→        ) : (
+   783→   783→          <div>
+   784→   784→            <label className={labelClass}>المنتجات</label>
+   785→   785→            <div className="rounded-lg border border-clay/40 bg-night/40 p-2 text-[12px]">
+   786→   786→              {items.map((it, i) => (
+   787→   787→                <div
+   788→   788→                  key={i}
+   789→   789→                  className="flex items-center justify-between py-1"
+   790→   790→                >
+   791→   791→                  <span className="line-clamp-1 text-gray">{it.name}</span>
+   792→   792→                  <span className="font-medium text-charcoal">
+   793→   793→                    ×{it.quantity}
+   794→   794→                  </span>
+   795→   795→                </div>
+   796→   796→              ))}
+   797→   797→            </div>
+   798→   798→          </div>
+   799→   799→        )}
+   800→   800→
+   801→   801→        {/* 9. Notes */}
+   802→   802→        <div>
+   803→   803→          <label className={labelClass} htmlFor="cod-notes">
+   804→   804→            ملاحظات (اختياري) · Notes
+   805→   805→          </label>
+   806→   806→          <textarea
+   807→   807→            id="cod-notes"
+   808→   808→            value={form.notes}
+   809→   809→            onChange={(e) => set("notes", e.target.value)}
+   810→   810→            rows={2}
+   811→   811→            className={`${inputClass} resize-none`}
+   812→   812→            placeholder="أي تفاصيل إضافية..."
+   813→   813→          />
+   814→   814→        </div>
+   815→   815→
+   816→   816→        {/* 10. Total breakdown — applies discount + free shipping from the active tier.
+   817→   817→            Math:
+   818→   818→              productTotal = unitPrice × qty
+   819→   819→              productTotalAfterDiscount = max(0, productTotal − discount)
+   820→   820→              shippingPrice = (freeShippingApplied) ? 0 : normalShippingPrice
+   821→   821→              grandTotal = productTotalAfterDiscount + shippingPrice */}
+   822→   822→        <div className="rounded-lg border border-charcoal/20 bg-charcoal/3 p-3 text-[12px]">
+   823→   823→          <div className="mb-1 flex justify-between">
+   824→   824→            <span className="text-gray">المجموع · Total produit</span>
+   825→   825→            <span className="font-medium text-charcoal">{formatPrice(productTotal)}</span>
+   826→   826→          </div>
+   827→   827→          {discountAmount > 0 && (
+   828→   828→            <div className="mb-1 flex justify-between">
+   829→   829→              <span className="text-neon-magenta">الخصم · Remise</span>
+   830→   830→              <span className="font-medium text-neon-magenta">-{formatPrice(discountAmount)}</span>
+   831→   831→            </div>
+   832→   832→          )}
+   833→   833→          <div className="mb-1 flex justify-between">
+   834→   834→            <span className="text-gray">التوصيل · Livraison</span>
+   835→   835→            <span className="font-medium text-charcoal">
+   836→   836→              {shippingPrice === null
+   837→   837→                ? "—"
+   838→   838→                : freeShippingApplied
+   839→   839→                ? "0 دج (مجاني)"
+   840→   840→                : formatPrice(shippingPrice)}
+   841→   841→            </span>
+   842→   842→          </div>
+   843→   843→          <div className="mt-1 flex justify-between border-t border-clay/30 pt-1 text-[14px] font-bold">
+   844→   844→            <span className="text-charcoal">المجموع الكلي · Grand total</span>
+   845→   845→            <span className="text-animated-black">{formatPrice(grandTotal)}</span>
+   846→   846→          </div>
+   847→   847→        </div>
+   848→   848→
+   849→   849→        {/* 11. Submit — with Send icon */}
+   850→   850→        <button
+   851→   851→          type="button"
+   852→   852→          onClick={handleSubmit}
+   853→   853→          disabled={submitting}
+   854→   854→          className="flex w-full items-center justify-center gap-2 rounded-full bg-animated-black px-4 py-3 text-sm font-semibold text-white transition-shadow hover:shadow-lg disabled:opacity-60"
+   855→   855→          style={{ boxShadow: "0 4px 20px -2px rgba(15, 13, 10, 0.35)" }}
+   856→   856→        >
+   857→   857→          <Send className="h-4 w-4" />
+   858→   858→          {submitting ? "جاري الإرسال..." : "تأكيد الطلب"}
+   859→   859→        </button>
+   860→   860→      </div>
+   861→   861→    </div>
+   862→   862→  );
+   863→   863→}
+   864→   864→

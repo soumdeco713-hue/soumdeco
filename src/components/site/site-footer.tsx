@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import { Instagram, Facebook, Phone, MapPin } from "lucide-react";
 import { BRAND } from "@/lib/brand-config";
-import { TikTokIcon } from "./tiktok-icon";
 
 export function SiteFooter() {
   const [year, setYear] = useState<number | null>(null);
@@ -55,18 +55,47 @@ export function SiteFooter() {
           </div>
         </div>
 
-        <a
-          href={BRAND.contact.tiktokUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-2 font-arabic text-sm text-gray transition-colors hover:text-emerald"
-        >
-          <TikTokIcon className="h-4 w-4 text-emerald" />
-          @{BRAND.contact.tiktok}
-        </a>
+        <div className="flex items-center gap-4">
+          <a
+            href={BRAND.contact.instagramUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Instagram"
+            className="flex items-center gap-2 font-arabic text-sm text-gray transition-colors hover:text-brass"
+          >
+            <Instagram className="h-4 w-4" />
+            @{BRAND.contact.instagram}
+          </a>
+          <span className="text-clay">·</span>
+          <a
+            href={BRAND.contact.facebookUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Facebook"
+            className="flex items-center gap-2 font-arabic text-sm text-gray transition-colors hover:text-brass"
+          >
+            <Facebook className="h-4 w-4" />
+            Facebook
+          </a>
+          <span className="text-clay">·</span>
+          <a
+            href={`tel:${BRAND.contact.phone}`}
+            aria-label="Téléphone"
+            className="flex items-center gap-2 font-arabic text-sm text-gray transition-colors hover:text-brass"
+            dir="ltr"
+          >
+            <Phone className="h-4 w-4" />
+            {BRAND.contact.phoneDisplay}
+          </a>
+        </div>
+
+        <p className="flex items-center justify-center gap-1.5 font-arabic text-xs text-gray-light">
+          <MapPin className="h-3.5 w-3.5" />
+          {BRAND.contact.address}
+        </p>
 
         <p className="font-arabic text-xs text-gray-light">
-          💵 الدفع عند الاستلام · توصيل لكل الولايات
+          💵 Paiement à la livraison · الدفع عند الاستلام
         </p>
 
         <p className="font-arabic text-xs text-gray-light">
