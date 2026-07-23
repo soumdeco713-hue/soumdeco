@@ -10,12 +10,12 @@ type SpecialOffersSectionProps = {
 };
 
 /**
- * Special Offers section — a simple CSS-only grid of products where
- * `isSpecialOffer === true`. Renders nothing if there are no such products.
+ * Special Offers section — shows products where `isSpecialOffer === true`.
  *
- * The section is shown on the home page between the featured carousel and
- * the categories section. Each card uses the same style as the all-products
- * grid but with a magenta accent border and a 🎁 badge.
+ * Each card has:
+ *  - A vivid red animated glow frame (.special-red-frame) to make it super special
+ *  - The product's badge text (شارة العرض) displayed prominently if set
+ *  - A 🎁 emoji badge as a fallback if no badge text is set
  */
 export function SpecialOffersSection({
   products,
@@ -33,18 +33,16 @@ export function SpecialOffersSection({
       id="special-offers"
       className="px-4 py-8 sm:px-6 sm:py-10"
       aria-label="عروض خاصة"
-     
-     
     >
       <div className="mx-auto max-w-6xl">
         {/* Header */}
         <div className="fade-up mb-6 text-center">
           <div className="mb-2 flex items-center justify-center gap-2">
-            <span className="text-neon-magenta text-sm">🎁</span>
-            <span className="font-arabic text-[11px] font-semibold uppercase tracking-[0.3em] text-neon-magenta">
+            <span className="text-rose-deep text-sm">🎁</span>
+            <span className="font-arabic text-[11px] font-semibold uppercase tracking-[0.3em] text-rose-deep">
               عروض
             </span>
-            <span className="text-neon-magenta text-sm">🎁</span>
+            <span className="text-rose-deep text-sm">🎁</span>
           </div>
           <h2 className="font-arabic text-3xl font-bold sm:text-4xl">
             <span className="text-blue-black-animated">عروض خاصة</span>
@@ -53,12 +51,12 @@ export function SpecialOffersSection({
             className="mx-auto mt-3 h-[2px] w-20 rounded-full"
             style={{
               background:
-                "linear-gradient(90deg, transparent, #C25B7E, #C25B7E, transparent)",
+                "linear-gradient(90deg, transparent, #DC2626, #DC2626, transparent)",
             }}
           />
         </div>
 
-        {/* Products grid — same style as all-products but with magenta accent */}
+        {/* Products grid — with vivid red glow frame */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
           {offerProducts.map((p, i) => {
             const rupture = isRupture?.(p);
@@ -67,22 +65,27 @@ export function SpecialOffersSection({
                 key={p.id}
                 type="button"
                 onClick={() => onProductClick?.(p)}
-                className="fade-up group relative flex flex-col overflow-hidden rounded-2xl border-2 border-neon-magenta/40 bg-white text-left transition-transform duration-300 hover:-translate-y-1.5 hover:border-neon-magenta/70 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-neon-magenta/40 active:scale-[0.98]"
+                className={`special-red-frame fade-up group relative flex flex-col overflow-hidden rounded-2xl bg-white text-left transition-transform duration-300 hover:-translate-y-1.5 focus:outline-none focus:ring-2 focus:ring-red-500/50 active:scale-[0.98]`}
                 style={{
-                  boxShadow:
-                    "0 2px 12px -4px rgba(194, 91, 126, 0.20), 0 0 0 1px rgba(194, 91, 126, 0.08)",
                   transitionDelay: `${Math.min(i * 30, 240)}ms`,
                 }}
-               
-               
               >
-                {/* 🎁 badge — always shown on special offer cards */}
-                <span
-                  className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-full border border-neon-magenta/60 bg-white px-2 py-0.5 font-arabic text-[10px] font-bold text-neon-magenta shadow-sm"
-                  aria-label="عرض خاص"
-                >
-                  🎁
-                </span>
+                {/* Badge — shows شارة العرض text if set, otherwise 🎁 emoji */}
+                {p.badge && p.badge.trim() !== "" ? (
+                  <span
+                    className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-full border border-red-500/60 bg-white px-2.5 py-1 font-arabic text-[10px] font-bold text-red-600 shadow-md"
+                    aria-label={p.badge}
+                  >
+                    🎁 {p.badge}
+                  </span>
+                ) : (
+                  <span
+                    className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-full border border-red-500/60 bg-white px-2 py-0.5 font-arabic text-[10px] font-bold text-red-600 shadow-sm"
+                    aria-label="عرض خاص"
+                  >
+                    🎁
+                  </span>
+                )}
 
                 <div className="relative aspect-square w-full overflow-hidden bg-stone">
                   <ProductImage src={p.image} alt={p.name} fit="contain" />
@@ -105,7 +108,7 @@ export function SpecialOffersSection({
                   </h3>
                   <p
                     className={`font-arabic text-sm font-bold ${
-                      p.price === null ? "italic text-gray-light" : "text-emerald"
+                      p.price === null ? "italic text-gray-light" : "text-red-600"
                     }`}
                   >
                     {p.oldPrice != null && (

@@ -405,3 +405,48 @@ Stage Summary:
 - When user configures a real Google Sheet, the sheet becomes source of truth (seed mode disabled)
 - Hero title has gray-gold slow gradient glow, tagline is plain
 - Complete revision done: 0 errors, all functions working perfectly
+
+---
+Task ID: 8
+Agent: main
+Task: Fix special offer badge not appearing + add vivid red glow frame on special offer cards.
+
+Work Log:
+=== BUG FIX: Special offer badge (شارة العرض) not appearing ===
+ROOT CAUSE: special-offers-section.tsx only showed a static 🎁 emoji badge — it never displayed the product's `p.badge` text field that admins set in the "شارة العرض" input.
+
+FIX: Rewrote special-offers-section.tsx:
+- If `p.badge` is set (non-empty): shows "🎁 {p.badge}" (emoji + the admin's custom badge text)
+- If `p.badge` is empty: shows just "🎁" (fallback emoji)
+- Badge styling: red border + red text + shadow to match the red glow theme
+- Price color changed to text-red-600 for special offer cards (was text-emerald)
+
+=== FEATURE: Vivid red glow frame on special offer cards ===
+Added .special-red-frame CSS class to globals.css:
+- 2s ease-in-out infinite animation
+- Two-layer pulsing red box-shadow:
+  • Outer: 0 0 0 2px red border + 20px + 40px expanding glow
+  • Drop shadow: 8px 24px -6px red
+- Animated red border (rgba 220,38,38 → rgba 239,68,68 → back)
+- Colors: red-600 (#DC2626) to red-500 (#EF4444) — vivid and evident
+- Applied to the entire card button element (frames the whole product card)
+
+=== VERIFICATION (complete flow tested) ===
+1. Admin: edited "Service a table Blanc Luxe"
+2. Ticked "عرض في قسم العروض الخاصة" checkbox → verified checked=true
+3. Typed "عرض ذهبي" in "شارة العرض" field → verified value saved
+4. Clicked save → verified localStorage: {isSpecialOffer: true, badge: "عرض ذهبي"}
+5. Went to storefront → verified:
+   • "عروض خاصة" section appeared (heading + red divider)
+   • "عرض ذهبي" badge text appeared on the product card
+   • 1 element with .special-red-frame class (the glowing card)
+   • Product also appeared in all-products grid with badge text
+6. 0 console errors, 0 page errors
+7. Reset localStorage to clean 29-product seed state
+
+Stage Summary:
+- Special offer badge text NOW APPEARS on special offer cards (was only showing 🎁 emoji before)
+- Vivid red animated glow frame on every special offer card (2s pulse, red-600 to red-500)
+- Badge shows "🎁 {custom text}" when admin sets badge, "🎁" when empty
+- All admin changes persist correctly (verified in previous task)
+- 0 errors, 0 warnings, all functions working perfectly
