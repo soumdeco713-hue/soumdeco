@@ -1086,3 +1086,21 @@
   animation: letter-reveal 1.2s cubic-bezier(0.4, 0, 0.2, 1) both;
   will-change: opacity, letter-spacing, filter;
 }
+
+/* ===== Vivid gold gradient glow — for hero tagline =====
+   Vivid gold shimmer with a soft golden glow halo.
+   More vivid and goldy than text-blue-black-animated. */
+@keyframes gold-shimmer {
+  0%   { background-position: 0% center; }
+  100% { background-position: -200% center; }
+}
+.text-gold-glow {
+  background: linear-gradient(90deg, #6E5C2A 0%, #B89656 20%, #D4B46A 40%, #E8C878 50%, #D4B46A 60%, #B89656 80%, #6E5C2A 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: gold-shimmer 4s linear infinite;
+  filter: drop-shadow(0 0 6px rgba(184, 150, 86, 0.35)) drop-shadow(0 0 12px rgba(212, 180, 106, 0.2));
+}

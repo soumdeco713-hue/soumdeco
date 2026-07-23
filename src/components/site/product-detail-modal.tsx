@@ -81,8 +81,8 @@ export function ProductDetailModal({
       role="dialog"
       aria-modal="true"
       aria-label={product.name}
-      dir="rtl"
-      lang="ar"
+     
+     
     >
       <div onClick={onClose} className="fixed inset-0 bg-ink/55" />
 
@@ -182,7 +182,7 @@ export function ProductDetailModal({
             )}
           </div>
 
-          <div className="flex flex-col p-5 sm:p-6" dir="rtl" lang="ar">
+          <div className="flex flex-col p-5 sm:p-6">
             <div>
               <h2 className="font-arabic text-2xl font-bold leading-tight text-charcoal">
                 {product.name}

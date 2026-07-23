@@ -156,8 +156,8 @@ export function ProductPage({
   return (
     <div
       className="page-enter min-h-screen"
-      dir="rtl"
-      lang="ar"
+     
+     
     >
       {/* Top bar: back button */}
       <div className="sticky top-0 z-40 border-b border-clay/30 bg-night-soft/85 backdrop-blur-lg">
@@ -469,7 +469,7 @@ export function ProductPage({
                   key={p.id}
                   type="button"
                   onClick={() => onProductClick?.(p)}
-                  className="fade-up group flex flex-col overflow-hidden rounded-2xl border border-clay/40 bg-night-soft/70 text-right backdrop-blur-md transition-transform duration-300 hover:-translate-y-1 hover:border-emerald/50 active:scale-[0.98]"
+                  className="fade-up group flex flex-col overflow-hidden rounded-2xl border border-clay/40 bg-night-soft/70 text-left backdrop-blur-md transition-transform duration-300 hover:-translate-y-1 hover:border-emerald/50 active:scale-[0.98]"
                   style={{ animationDelay: `${i * 80}ms` }}
                 >
                   <div className="relative aspect-square w-full overflow-hidden bg-night">

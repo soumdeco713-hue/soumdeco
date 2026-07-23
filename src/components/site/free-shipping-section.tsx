@@ -35,8 +35,8 @@ export function SpecialOffersSection({
     <section
       id="special-offers"
       className="relative overflow-hidden px-4 py-10 sm:px-6 sm:py-14"
-      dir="rtl"
-      lang="ar"
+     
+     
       style={{
         background:
           "linear-gradient(135deg, rgba(194, 91, 126, 0.08) 0%, rgba(255, 246, 235, 0.55) 35%, rgba(255, 255, 255, 0.85) 65%, rgba(201, 151, 74, 0.10) 100%)",
@@ -87,14 +87,14 @@ export function SpecialOffersSection({
               key={p.id}
               type="button"
               onClick={() => onProductClick?.(p)}
-              className="fade-up group relative flex flex-col overflow-hidden rounded-2xl border-2 border-neon-magenta/35 bg-white text-right transition-transform duration-300 hover:-translate-y-1 hover:border-neon-magenta/70 active:scale-[0.98]"
+              className="fade-up group relative flex flex-col overflow-hidden rounded-2xl border-2 border-neon-magenta/35 bg-white text-left transition-transform duration-300 hover:-translate-y-1 hover:border-neon-magenta/70 active:scale-[0.98]"
               style={{
                 boxShadow:
                   "0 0 0 1px rgba(194, 91, 126, 0.10), 0 8px 24px -8px rgba(194, 91, 126, 0.35), 0 0 28px -6px rgba(194, 91, 126, 0.25)",
                 animationDelay: `${Math.min(i * 60, 350)}ms`,
               }}
-              dir="rtl"
-              lang="ar"
+             
+             
             >
               {/* Animated glow ring (visible on hover) */}
               <span

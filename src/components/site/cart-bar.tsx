@@ -17,7 +17,7 @@ export function CartBarButton({ count, onOpen }: CartBarProps) {
       onClick={onOpen}
       aria-label="فتح السلة"
       className="relative flex items-center gap-1.5 rounded-full border border-emerald/30 bg-night-soft/70 px-4 py-2.5 font-arabic text-base font-medium text-charcoal shadow-lg backdrop-blur-md transition-colors hover:border-emerald hover:bg-emerald/10 focus:outline-none focus:ring-2 focus:ring-emerald/50 active:scale-95"
-      dir="rtl"
+     
     >
       <ShoppingBag className="h-5 w-5 text-emerald" />
       <span>السلة</span>
@@ -60,15 +60,15 @@ export function CartDrawer({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50" dir="rtl">
+    <div className="fixed inset-0 z-50">
       {/* Overlay — fade in via CSS animation */}
       <div
         onClick={() => onOpenChange(false)}
         className="drawer-overlay absolute inset-0 bg-night/70 backdrop-blur-sm"
       />
-      {/* Drawer panel — slide in from the left via CSS animation */}
+      {/* Drawer panel — slide in from the right (LTR) via CSS animation */}
       <div
-        className="drawer-panel-left drawer-slide absolute left-0 top-0 flex h-full w-[340px] max-w-[90vw] flex-col border-r border-emerald/20 bg-night-soft/95 shadow-2xl backdrop-blur-xl"
+        className="drawer-panel-right drawer-slide absolute right-0 top-0 flex h-full w-[340px] max-w-[90vw] flex-col border-l border-emerald/20 bg-night-soft/95 shadow-2xl backdrop-blur-xl"
         role="dialog"
         aria-label="السلة"
       >
@@ -114,7 +114,7 @@ export function CartDrawer({
                     <button
                       type="button"
                       onClick={() => onItemClick(item.productId)}
-                      className="line-clamp-2 text-right font-arabic text-sm font-medium text-charcoal hover:text-emerald"
+                      className="line-clamp-2 text-left font-arabic text-sm font-medium text-charcoal hover:text-emerald"
                     >
                       {item.name}
                     </button>

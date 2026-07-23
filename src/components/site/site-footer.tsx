@@ -12,8 +12,8 @@ export function SiteFooter() {
   return (
     <footer
       className="relative mt-auto overflow-hidden border-t border-emerald/15 bg-night-soft/60 backdrop-blur-md"
-      dir="rtl"
-      lang="ar"
+     
+     
     >
       {/* Decorative neon top border */}
       <div
@@ -47,7 +47,7 @@ export function SiteFooter() {
               />
             </div>
           </div>
-          <div className="text-right">
+          <div className="text-left">
             <p className="font-arabic text-2xl font-bold">
               <span className="text-blue-black-animated">{BRAND.name}</span>
             </p>

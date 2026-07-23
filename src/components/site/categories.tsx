@@ -391,8 +391,8 @@ export function Categories({ products, active, onSelect }: CategoriesProps) {
     <section
       id="categories"
       className="px-4 py-4 sm:px-6 sm:py-6"
-      dir="rtl"
-      lang="ar"
+     
+     
     >
       <div className="mx-auto max-w-5xl">
         <div

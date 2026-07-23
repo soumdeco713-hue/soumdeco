@@ -58,7 +58,7 @@ export function CheckoutModal({
       role="dialog"
       aria-modal="true"
       aria-label="إتمام الطلب"
-      dir="rtl"
+     
     >
       <div
         onClick={handleClose}

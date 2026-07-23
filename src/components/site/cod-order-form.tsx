@@ -312,8 +312,8 @@ export function CodOrderForm({
   if (rupture) {
     return (
       <div
-        dir="rtl"
-        lang="ar"
+       
+       
         className="rounded-xl border border-terracotta/40 bg-terracotta/10 p-6 text-center font-arabic backdrop-blur-sm"
       >
         <p className="text-lg font-semibold text-terracotta neon-text-magenta">نفدت الكمية</p>
@@ -338,8 +338,8 @@ export function CodOrderForm({
   if (done && orderSummary) {
     return (
       <div
-        dir="rtl"
-        lang="ar"
+       
+       
         className="px-1 py-2 text-center font-arabic"
       >
         {/* Animated heart with neon glow + floating sparkles */}
@@ -447,7 +447,7 @@ export function CodOrderForm({
 
         {/* Order summary — elegant card with soft glow */}
         <div
-          className="fade-up mt-5 overflow-hidden rounded-2xl border border-clay/40 bg-white p-4 text-right text-[12px]"
+          className="fade-up mt-5 overflow-hidden rounded-2xl border border-clay/40 bg-white p-4 text-left text-[12px]"
           style={{
             boxShadow:
               "0 4px 20px -6px rgba(74, 85, 104, 0.18), 0 0 0 1px rgba(74, 85, 104, 0.06)",
@@ -546,12 +546,12 @@ export function CodOrderForm({
 
   // === FORM STATE ===
   const inputClass =
-    "w-full rounded-lg border border-clay/40 bg-night/60 px-3 py-2.5 text-right font-arabic text-[13px] text-charcoal outline-none transition-colors focus:border-charcoal focus:bg-night-soft";
+    "w-full rounded-lg border border-clay/40 bg-night/60 px-3 py-2.5 text-left font-arabic text-[13px] text-charcoal outline-none transition-colors focus:border-charcoal focus:bg-night-soft";
   const labelClass =
     "mb-1 block font-arabic text-[12px] font-medium text-charcoal";
 
   return (
-    <div dir="rtl" lang="ar" className="font-arabic">
+    <div className="font-arabic">
       {/* COD reminder banner */}
       <div className="mb-4 rounded-lg border border-charcoal/30 bg-charcoal/5 px-3 py-2 text-center text-[12px] font-medium text-charcoal">
         💵 الدفع عند الاستلام · توصيل لكل الولايات

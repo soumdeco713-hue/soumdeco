@@ -58,8 +58,8 @@ export function FeaturedCarousel({
       id="vedettes"
       className="relative px-4 py-8 sm:px-6 sm:py-12"
       aria-label="منتجات مميزة"
-      dir="rtl"
-      lang="ar"
+     
+     
     >
       <div className="mx-auto max-w-md">
         {/* Header — identical to reference: "Nos Coups de Cœur" eyebrow + "Produits Vedettes" */}

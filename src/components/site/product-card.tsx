@@ -18,13 +18,13 @@ export function ProductCard({ product, onClick, rupture, lowStock, index = 0 }: 
     <button
       type="button"
       onClick={() => onClick?.(product)}
-      className="group relative flex flex-col overflow-hidden rounded-2xl border border-clay/40 bg-white text-right transition-transform duration-300 hover:-translate-y-1.5 hover:border-gray/40 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-mid/40 active:scale-[0.98]"
+      className="group relative flex flex-col overflow-hidden rounded-2xl border border-clay/40 bg-white text-left transition-transform duration-300 hover:-translate-y-1.5 hover:border-gray/40 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-mid/40 active:scale-[0.98]"
       style={{
         boxShadow: "0 2px 12px -4px rgba(74, 85, 104, 0.15)",
         transitionDelay: `${Math.min(index * 30, 240)}ms`,
       }}
-      dir="rtl"
-      lang="ar"
+     
+     
     >
       {/* Hover elegant gray glow */}
       <div

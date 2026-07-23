@@ -136,8 +136,8 @@ function PasswordGate({ onAuthed }: { onAuthed: () => void }) {
   return (
     <div
       className="flex min-h-[60vh] items-center justify-center p-6"
-      dir="rtl"
-      lang="ar"
+     
+     
     >
       <div className="w-full max-w-sm rounded-2xl border border-emerald/30 bg-night-soft/80 p-6 shadow-2xl backdrop-blur-md">
         <div className="mb-4 flex flex-col items-center text-center">
@@ -161,7 +161,7 @@ function PasswordGate({ onAuthed }: { onAuthed: () => void }) {
           onKeyDown={(e) => {
             if (e.key === "Enter") submit();
           }}
-          className={`w-full rounded-lg border bg-night/60 px-3 py-2.5 text-right font-arabic text-sm text-charcoal outline-none focus:border-emerald ${
+          className={`w-full rounded-lg border bg-night/60 px-3 py-2.5 text-left font-arabic text-sm text-charcoal outline-none focus:border-emerald ${
             error ? "border-terracotta" : "border-clay/40"
           }`}
           placeholder="كلمة المرور"
@@ -366,13 +366,13 @@ function EditForm({
   };
 
   const inputClass =
-    "w-full rounded-lg border border-clay/40 bg-night/60 px-3 py-2.5 text-right font-arabic text-sm text-charcoal outline-none focus:border-brass focus:ring-1 focus:ring-brass/30";
+    "w-full rounded-lg border border-clay/40 bg-night/60 px-3 py-2.5 text-left font-arabic text-sm text-charcoal outline-none focus:border-brass focus:ring-1 focus:ring-brass/30";
 
   return (
     <div
       className="rounded-2xl border border-emerald/25 bg-night-soft/70 p-5 backdrop-blur-md sm:p-6"
-      dir="rtl"
-      lang="ar"
+     
+     
     >
       <div className="mb-4 flex items-center justify-between">
         <h3 className="font-arabic text-xl font-bold text-charcoal">
@@ -976,8 +976,8 @@ export function AdminPanel({
   return (
     <div
       className="min-h-screen bg-night font-arabic"
-      dir="rtl"
-      lang="ar"
+     
+     
     >
       {/* Admin header */}
       <div className="sticky top-0 z-30 border-b border-emerald/15 bg-night-soft/90 backdrop-blur-lg">

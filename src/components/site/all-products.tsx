@@ -30,8 +30,8 @@ export function AllProducts({
     <section
       id="tous"
       className="px-4 py-6 sm:px-6 sm:py-8"
-      dir="rtl"
-      lang="ar"
+     
+     
     >
       <div className="mx-auto max-w-6xl">
         <div className="fade-up mb-6 text-center">

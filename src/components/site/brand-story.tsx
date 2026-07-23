@@ -7,8 +7,8 @@ export function BrandStory() {
     <section
       id="apropos"
       className="px-4 py-14 sm:px-6 sm:py-20"
-      dir="rtl"
-      lang="ar"
+     
+     
     >
       <div className="mx-auto max-w-3xl">
         <div

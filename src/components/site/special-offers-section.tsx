@@ -33,8 +33,8 @@ export function SpecialOffersSection({
       id="special-offers"
       className="px-4 py-8 sm:px-6 sm:py-10"
       aria-label="عروض خاصة"
-      dir="rtl"
-      lang="ar"
+     
+     
     >
       <div className="mx-auto max-w-6xl">
         {/* Header */}
@@ -67,14 +67,14 @@ export function SpecialOffersSection({
                 key={p.id}
                 type="button"
                 onClick={() => onProductClick?.(p)}
-                className="fade-up group relative flex flex-col overflow-hidden rounded-2xl border-2 border-neon-magenta/40 bg-white text-right transition-transform duration-300 hover:-translate-y-1.5 hover:border-neon-magenta/70 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-neon-magenta/40 active:scale-[0.98]"
+                className="fade-up group relative flex flex-col overflow-hidden rounded-2xl border-2 border-neon-magenta/40 bg-white text-left transition-transform duration-300 hover:-translate-y-1.5 hover:border-neon-magenta/70 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-neon-magenta/40 active:scale-[0.98]"
                 style={{
                   boxShadow:
                     "0 2px 12px -4px rgba(194, 91, 126, 0.20), 0 0 0 1px rgba(194, 91, 126, 0.08)",
                   transitionDelay: `${Math.min(i * 30, 240)}ms`,
                 }}
-                dir="rtl"
-                lang="ar"
+               
+               
               >
                 {/* 🎁 badge — always shown on special offer cards */}
                 <span

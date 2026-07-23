@@ -74,7 +74,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ar" dir="rtl" suppressHydrationWarning>
+    <html lang="fr" dir="ltr" suppressHydrationWarning>
       <head suppressHydrationWarning>
         {/* Preload API calls — starts fetching before JS loads (saves 1-2s) */}
         <link rel="preload" as="fetch" href="/api/products" crossOrigin="anonymous" />
@@ -90,7 +90,7 @@ export default function RootLayout({
         <Toaster
           position="top-center"
           richColors
-          dir="rtl"
+         
           toastOptions={{
             style: {
               borderRadius: "9999px",

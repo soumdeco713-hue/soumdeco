@@ -8,14 +8,12 @@ export function Hero() {
     <section
       id="accueil"
       className="relative flex flex-col items-center justify-center overflow-hidden px-6 pt-20 pb-8 sm:pt-28 sm:pb-12"
-      dir="rtl"
-      lang="ar"
     >
-      {/* Soft warm halos in the background — pure CSS animations.
-          Brass + rose + sage — like sunlight filtering through linen. */}
+      {/* Static warm halos in the background — NO animation (CPU friendly).
+          Brass + rose + sage — like sunlight through linen. */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div
-          className="float-strong absolute -top-10 right-10 h-72 w-72 rounded-full"
+          className="absolute -top-10 right-10 h-72 w-72 rounded-full"
           style={{
             background:
               "radial-gradient(circle, rgba(154, 126, 58, 0.18) 0%, transparent 70%)",
@@ -23,32 +21,30 @@ export function Hero() {
           }}
         />
         <div
-          className="float-strong absolute top-20 -left-10 h-80 w-80 rounded-full"
+          className="absolute top-20 -left-10 h-80 w-80 rounded-full"
           style={{
             background:
               "radial-gradient(circle, rgba(212, 165, 165, 0.14) 0%, transparent 70%)",
             filter: "blur(55px)",
-            animationDelay: "1.5s",
           }}
         />
         <div
-          className="float-strong absolute bottom-0 right-1/3 h-64 w-64 rounded-full"
+          className="absolute bottom-0 right-1/3 h-64 w-64 rounded-full"
           style={{
             background:
               "radial-gradient(circle, rgba(143, 166, 142, 0.12) 0%, transparent 70%)",
             filter: "blur(45px)",
-            animationDelay: "3s",
           }}
         />
       </div>
 
       <div className="relative z-10 flex flex-col items-center text-center">
-        {/* Refined logo with brass-taupe ring */}
+        {/* Logo with brass-taupe ring — static glow (no pulse, CPU friendly) */}
         <div className="fade-up relative mb-6 h-20 w-20 sm:h-20 sm:w-20">
-          {/* Soft pulsing glow */}
+          {/* Static soft glow */}
           <div
             aria-hidden
-            className="pulse-soft absolute -inset-4 rounded-full"
+            className="absolute -inset-4 rounded-full"
             style={{
               background:
                 "radial-gradient(circle, rgba(154, 126, 58, 0.25) 0%, transparent 70%)",
@@ -70,22 +66,17 @@ export function Hero() {
           </div>
         </div>
 
-        {/* Brand name — identical to soumdeco.netlify.app:
-            "SOUM" in brass-text (gold gradient) + gap + "DECO" in terracotta.
-            Cormorant Garamond serif, semibold, tight tracking.
-            Uses flex + gap-4 for a reliable 16px gap that works in both LTR and RTL. */}
+        {/* Brand name — SOUM (brass gold) + DECO (terracotta).
+            Cormorant Garamond serif, semibold, tight tracking. */}
         <h1 className="fade-up flex items-center justify-center gap-4 font-serif text-5xl font-semibold tracking-tight text-charcoal sm:text-6xl">
           <span className="brass-text">SOUM</span>
           <span className="text-terracotta">DECO</span>
         </h1>
 
-        {/* Tagline — elegant italic Cormorant, gentle float animation.
-            Uses fade-up (not letter-reveal) to avoid hydration mismatch. */}
-        <p className="fade-up mt-3 max-w-md font-serif text-lg italic text-gray sm:text-xl">
-          <span
-            className="tagline-float"
-            style={{ display: "inline-block" }}
-          >
+        {/* Tagline — vivid gold gradient glow (no float animation).
+            Shimmering gold with a soft golden halo. */}
+        <p className="fade-up mt-3 max-w-md font-serif text-lg italic sm:text-xl">
+          <span className="text-gold-glow">
             {BRAND.tagline}
           </span>
         </p>

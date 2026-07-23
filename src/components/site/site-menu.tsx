@@ -24,7 +24,7 @@ export function SiteMenuButton({ onClick }: { onClick: () => void }) {
       onClick={onClick}
       aria-label="فتح القائمة"
       className="flex items-center gap-1.5 rounded-full border border-emerald/30 bg-night-soft/70 px-4 py-2.5 font-arabic text-base font-medium text-charcoal shadow-lg backdrop-blur-md transition-colors hover:border-emerald hover:bg-emerald/10 focus:outline-none focus:ring-2 focus:ring-emerald/50 active:scale-95"
-      dir="rtl"
+     
     >
       <Menu className="h-5 w-5 text-emerald" />
       <span>القائمة</span>
@@ -44,15 +44,15 @@ export function SiteMenu({ open, onOpenChange }: SiteMenuProps) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50" dir="rtl">
+    <div className="fixed inset-0 z-50">
       {/* Overlay — fade in via CSS animation */}
       <div
         onClick={() => onOpenChange(false)}
         className="drawer-overlay absolute inset-0 bg-night/70 backdrop-blur-sm"
       />
-      {/* Drawer panel — slide in from the right via CSS animation */}
+      {/* Drawer panel — slide in from the left (LTR) via CSS animation */}
       <div
-        className="drawer-panel-right drawer-slide absolute right-0 top-0 flex h-full w-[300px] max-w-[88vw] flex-col border-l border-emerald/20 bg-night-soft/95 shadow-2xl backdrop-blur-xl"
+        className="drawer-panel-left drawer-slide absolute left-0 top-0 flex h-full w-[300px] max-w-[88vw] flex-col border-r border-emerald/20 bg-night-soft/95 shadow-2xl backdrop-blur-xl"
         role="dialog"
         aria-label="القائمة"
       >
@@ -89,7 +89,7 @@ export function SiteMenu({ open, onOpenChange }: SiteMenuProps) {
               key={l.href}
               type="button"
               onClick={() => handleNav(l.href)}
-              className="rounded-xl px-4 py-3.5 text-right text-base font-medium text-charcoal transition-colors hover:bg-emerald/10 hover:text-emerald"
+              className="rounded-xl px-4 py-3.5 text-left text-base font-medium text-charcoal transition-colors hover:bg-emerald/10 hover:text-emerald"
             >
               {l.label}
             </button>
