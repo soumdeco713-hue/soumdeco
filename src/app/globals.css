@@ -121,9 +121,9 @@
 
   /* Brand-primary mapping — charcoal drives the brand identity.
      emerald kept as green accent (matches reference's "in stock" color). */
-  --emerald:      #2F7D5B;               /* sage green — "in stock" accent */
-  --emerald-deep: #1F5E44;               /* darker green for hover */
-  --emerald-bright: #4CA87E;             /* brighter green */
+  --emerald:      var(--charcoal);               /* BRAND PRIMARY — warm charcoal (matches reference) */
+  --emerald-deep: var(--cocoa);               /* darker charcoal for hover */
+  --emerald-bright: var(--gray);             /* brighter charcoal */
   --night:        var(--cream);          /* main background alias */
   --night-soft:   var(--cream-soft);     /* card surface alias */
   --blue-deep:    var(--charcoal);       /* alias for animated headings */
@@ -192,9 +192,9 @@
   --rose-deep:    #B07878;
   --terracotta:   #8A4A32;
   --olive:        #6B7556;
-  --emerald:      #2F7D5B;
-  --emerald-deep: #1F5E44;
-  --emerald-bright: #4CA87E;
+  --emerald:      var(--charcoal);
+  --emerald-deep: var(--cocoa);
+  --emerald-bright: var(--gray);
   --night:        var(--cream);
   --night-soft:   var(--cream-soft);
   --blue-deep:    var(--charcoal);

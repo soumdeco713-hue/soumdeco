@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Menu, X, Instagram, Facebook, Phone } from "lucide-react";
+import { Menu, X, Instagram, Facebook, Phone, Mail } from "lucide-react";
 import { BRAND } from "@/lib/brand-config";
 
 type SiteMenuProps = {
@@ -122,6 +122,14 @@ export function SiteMenu({ open, onOpenChange }: SiteMenuProps) {
           >
             <Phone className="h-5 w-5 text-brass" />
             {BRAND.contact.phoneDisplay}
+          </a>
+          <a
+            href={`mailto:${BRAND.contact.email}`}
+            className="flex items-center justify-center gap-2 font-arabic text-sm text-charcoal transition-colors hover:text-brass break-all"
+            dir="ltr"
+          >
+            <Mail className="h-5 w-5 text-brass flex-shrink-0" />
+            <span className="text-xs">{BRAND.contact.email}</span>
           </a>
         </div>
       </div>

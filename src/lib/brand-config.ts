@@ -26,6 +26,7 @@ export const BRAND = {
     facebookUrl: "https://www.facebook.com/soumdeco",
     phone: "0541645727",
     phoneDisplay: "0541 645 727",
+    email: "soumdecorationdz@gmail.com",
     address: "Alger, Algérie",
   },
 

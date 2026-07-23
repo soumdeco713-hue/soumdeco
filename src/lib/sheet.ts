@@ -4,10 +4,12 @@
 // Image uploads use POST (the only thing doPost handles).
 
 export function getSheetBaseUrl(): string | null {
+  // Only return a sheet URL if explicitly configured via env.
+  // When neither is set, the API falls back to SEED_PRODUCTS (offline / demo mode).
   return (
     process.env.NEXT_PUBLIC_SHEET_URL ||
     process.env.GOOGLE_SHEET_WEBHOOK_URL ||
-    "https://script.google.com/macros/s/AKfycbyp59qPpZuP0XCDW50Zn6-v_uwA-aSkEXe9Z_Sew0Zy6wWlQqO7HyN6Q07od6vU-oIQvw/exec"
+    null
   );
 }
 

@@ -366,7 +366,7 @@ function EditForm({
   };
 
   const inputClass =
-    "w-full rounded-lg border border-clay/40 bg-night/60 px-3 py-2.5 text-right font-arabic text-sm text-charcoal outline-none focus:border-emerald";
+    "w-full rounded-lg border border-clay/40 bg-night/60 px-3 py-2.5 text-right font-arabic text-sm text-charcoal outline-none focus:border-brass focus:ring-1 focus:ring-brass/30";
 
   return (
     <div
@@ -509,24 +509,31 @@ function EditForm({
 
         {/* 2. Name */}
         <div>
-          <label className="mb-1 block text-sm font-medium text-charcoal">
+          <label htmlFor={`fld-name-${draft.id ?? "new"}`} className="mb-1 block text-sm font-medium text-charcoal">
             الاسم <span className="text-terracotta">*</span>
           </label>
           <input
+            id={`fld-name-${draft.id ?? "new"}`}
+            name="productName"
             type="text"
             value={draft.name}
             onChange={(e) => setDraft({ ...draft, name: e.target.value })}
             className={inputClass}
             placeholder="اسم المنتج"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
           />
         </div>
 
         {/* 3. Description */}
         <div>
-          <label className="mb-1 block text-sm font-medium text-charcoal">
+          <label htmlFor={`fld-desc-${draft.id ?? "new"}`} className="mb-1 block text-sm font-medium text-charcoal">
             الوصف
           </label>
           <textarea
+            id={`fld-desc-${draft.id ?? "new"}`}
+            name="productDescription"
             value={draft.description}
             onChange={(e) =>
               setDraft({ ...draft, description: e.target.value })
@@ -534,18 +541,23 @@ function EditForm({
             rows={5}
             className={`${inputClass} resize-none`}
             placeholder="وصف المنتج بالعربية..."
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
           />
         </div>
 
         {/* 4. Category */}
         <div>
-          <label className="mb-1 block text-sm font-medium text-charcoal">
+          <label htmlFor={`fld-category-${draft.id ?? "new"}`} className="mb-1 block text-sm font-medium text-charcoal">
             الفئة{" "}
             <span className="text-xs font-normal text-gray-light">
               (اختياري)
             </span>
           </label>
           <input
+            id={`fld-category-${draft.id ?? "new"}`}
+            name="productCategory"
             type="text"
             value={draft.category}
             onChange={(e) =>
@@ -554,6 +566,9 @@ function EditForm({
             className={inputClass}
             placeholder="مثال: إكسسوارات السيارة"
             list="rokn-category-list"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
           />
           <datalist id="rokn-category-list">
             {categories.map((c) => (
@@ -564,13 +579,15 @@ function EditForm({
 
         {/* 5. Price */}
         <div>
-          <label className="mb-1 block text-sm font-medium text-charcoal">
+          <label htmlFor={`fld-price-${draft.id ?? "new"}`} className="mb-1 block text-sm font-medium text-charcoal">
             السعر{" "}
             <span className="text-xs font-normal text-gray-light">
               (فارغ = السعر عند الطلب)
             </span>
           </label>
           <input
+            id={`fld-price-${draft.id ?? "new"}`}
+            name="productPrice"
             type="number"
             value={draft.price ?? ""}
             onChange={(e) =>
@@ -585,18 +602,21 @@ function EditForm({
             className={inputClass}
             placeholder="2500"
             min={0}
+            autoComplete="off"
           />
         </div>
 
         {/* 6b. Old Price (optional — shown struck through) */}
         <div>
-          <label className="mb-1 block text-sm font-medium text-charcoal">
+          <label htmlFor={`fld-oldprice-${draft.id ?? "new"}`} className="mb-1 block text-sm font-medium text-charcoal">
             السعر القديم{" "}
             <span className="text-xs font-normal text-gray-light">
               (اختياري — يظهر مشطوب)
             </span>
           </label>
           <input
+            id={`fld-oldprice-${draft.id ?? "new"}`}
+            name="productOldPrice"
             type="number"
             value={draft.oldPrice ?? ""}
             onChange={(e) =>
@@ -609,6 +629,7 @@ function EditForm({
             className={inputClass}
             placeholder="اختياري — يُظهر بسطر مشطوب"
             min={0}
+            autoComplete="off"
           />
         </div>
 
@@ -624,7 +645,7 @@ function EditForm({
             <button
               type="button"
               onClick={() => addVariant("color")}
-              className="flex items-center gap-1 rounded-full bg-emerald/10 px-3 py-1 text-xs font-medium text-emerald hover:bg-emerald/20"
+              className="flex items-center gap-1 rounded-full bg-brass/10 px-3 py-1 text-xs font-medium text-brass-deep hover:bg-brass/20"
             >
               <Plus className="h-3 w-3" />
               إضافة لون
@@ -684,7 +705,7 @@ function EditForm({
             <button
               type="button"
               onClick={() => addVariant("size")}
-              className="flex items-center gap-1 rounded-full bg-emerald/10 px-3 py-1 text-xs font-medium text-emerald hover:bg-emerald/20"
+              className="flex items-center gap-1 rounded-full bg-brass/10 px-3 py-1 text-xs font-medium text-brass-deep hover:bg-brass/20"
             >
               <Plus className="h-3 w-3" />
               إضافة مقاس
@@ -822,13 +843,15 @@ function EditForm({
 
         {/* 7b. Badge */}
         <div>
-          <label className="mb-1 block text-sm font-medium text-charcoal">
+          <label htmlFor={`fld-badge-${draft.id ?? "new"}`} className="mb-1 block text-sm font-medium text-charcoal">
             شارة العرض{" "}
             <span className="text-xs font-normal text-gray-light">
               (مثال: عرض خاص، جديد، تخفيض — اختياري)
             </span>
           </label>
           <input
+            id={`fld-badge-${draft.id ?? "new"}`}
+            name="productBadge"
             type="text"
             value={draft.badge ?? ""}
             onChange={(e) =>
@@ -836,6 +859,9 @@ function EditForm({
             }
             className={inputClass}
             placeholder="عرض خاص"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
           />
         </div>
 
@@ -847,7 +873,7 @@ function EditForm({
             onChange={(e) =>
               setDraft({ ...draft, featured: e.target.checked })
             }
-            className="h-4 w-4 rounded border-clay/40 accent-emerald"
+            className="h-4 w-4 rounded border-clay/40 accent-brass"
           />
           <span className="text-sm text-charcoal">
             عرض في المنتجات المميزة
@@ -864,7 +890,7 @@ function EditForm({
             onChange={(e) =>
               setDraft({ ...draft, isSpecialOffer: e.target.checked })
             }
-            className="h-4 w-4 rounded border-clay/40 accent-neon-magenta"
+            className="h-4 w-4 rounded border-clay/40 accent-rose-deep"
           />
           <span className="text-sm text-charcoal">
             عرض في قسم العروض الخاصة

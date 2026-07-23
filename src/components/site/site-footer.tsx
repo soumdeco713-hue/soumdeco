@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { Instagram, Facebook, Phone, MapPin } from "lucide-react";
+import { Instagram, Facebook, Phone, Mail, MapPin } from "lucide-react";
 import { BRAND } from "@/lib/brand-config";
 
 export function SiteFooter() {
@@ -21,7 +21,7 @@ export function SiteFooter() {
         className="absolute inset-x-0 top-0 h-[1px]"
         style={{
           background:
-            "linear-gradient(90deg, transparent, rgba(42, 125, 91, 0.30), rgba(74, 157, 161, 0.5), transparent)",
+            "linear-gradient(90deg, transparent, rgba(154, 126, 58, 0.30), rgba(184, 150, 86, 0.5), transparent)",
         }}
       />
       {/* Decorative orbs */}
@@ -29,7 +29,7 @@ export function SiteFooter() {
         aria-hidden
         className="pointer-events-none absolute -top-16 right-10 h-40 w-40 rounded-full opacity-30"
         style={{
-          background: "radial-gradient(circle, rgba(74, 157, 161, 0.30) 0%, transparent 70%)",
+          background: "radial-gradient(circle, rgba(154, 126, 58, 0.25) 0%, transparent 70%)",
           filter: "blur(40px)",
         }}
       />
@@ -55,7 +55,7 @@ export function SiteFooter() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
           <a
             href={BRAND.contact.instagramUrl}
             target="_blank"
@@ -86,6 +86,16 @@ export function SiteFooter() {
           >
             <Phone className="h-4 w-4" />
             {BRAND.contact.phoneDisplay}
+          </a>
+          <span className="text-clay">·</span>
+          <a
+            href={`mailto:${BRAND.contact.email}`}
+            aria-label="Email"
+            className="flex items-center gap-2 font-arabic text-sm text-gray transition-colors hover:text-brass"
+            dir="ltr"
+          >
+            <Mail className="h-4 w-4" />
+            {BRAND.contact.email}
           </a>
         </div>
 

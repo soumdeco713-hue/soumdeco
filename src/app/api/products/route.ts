@@ -14,12 +14,40 @@ import {
   getSheetBaseUrl,
   type SheetProduct,
 } from "@/lib/sheet";
+import { SEED_PRODUCTS } from "@/lib/seed-products";
 
-// GET /api/products → list all products from the sheet
+// GET /api/products → list all products
+// Tries the configured Google Sheet first. Falls back to SEED_PRODUCTS
+// (29 Soum Deco reference products) when the sheet is unreachable or
+// no sheet URL is configured (offline / demo mode).
 export async function GET() {
-  const products = await sheetListProducts();
+  const sheetUrl = getSheetBaseUrl();
+  let products: SheetProduct[] = [];
+  let usedSeed = false;
+
+  if (sheetUrl) {
+    try {
+      const fetched = await sheetListProducts();
+      // If the sheet returns at least one product, use it.
+      if (Array.isArray(fetched) && fetched.length > 0) {
+        products = fetched;
+      } else {
+        products = SEED_PRODUCTS;
+        usedSeed = true;
+      }
+    } catch {
+      // Sheet unreachable (network error, timeout, etc.) → fall back to seed
+      products = SEED_PRODUCTS;
+      usedSeed = true;
+    }
+  } else {
+    // No sheet configured → demo / offline mode
+    products = SEED_PRODUCTS;
+    usedSeed = true;
+  }
+
   return NextResponse.json(
-    { ok: true, products },
+    { ok: true, products, seed: usedSeed },
     {
       headers: {
         "Cache-Control": "public, max-age=60, stale-while-revalidate=300",

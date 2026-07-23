@@ -124,3 +124,65 @@ Stage Summary:
 - All 3 social platforms in footer/menu: Instagram + Facebook + Téléphone
 - Lint clean, 0 console errors, all API routes 200 OK
 - Ready for user to provide new Google Sheet URL + Cloudinary creds (currently still using El Miizaan's)
+
+---
+Task ID: 3
+Agent: main
+Task: Rebrand to SOUM DECO with exact reference palette, add email, seed 29 real products, fix admin input bug, create xlsx sheet.
+
+Work Log:
+- Fetched soumdeco.netlify.app/api/products → got 64 real products with Cloudinary URLs
+- Extracted email from reference HTML: soumdecorationdz@gmail.com (mailto link)
+- Downloaded reference CSS and identified green (#2F7D5B emerald) was used as primary brand color in El Miizaan components — not appropriate for Soum Deco (which uses charcoal #2A2520 as primary)
+- Selected exactly 29 products per user's specification:
+  • First 6 (all arts de la table): Blanc Luxe, Blanc luxe doré, Blanc luxe avec reliefs, Blanc cassé gris, beige luxe, café au lait A
+  • arts de la table positions 12,14,15,16,17: avec motifs, motif gris, Blue, Blanc luxe doré ref02, 24p vert
+  • All Coussins (2): Coussin de voyage Rose, Marron
+  • All Électroménager (3): Mixeur Cristor, CRISTOR BLEND-IT Noir, Blanc
+  • Cuisine positions 1,5,9,13: Cocotte 06L Ref01, 06L Ref01, 06L Ref03, 06L Ref04
+  • Miroirs position 1: Miroir Noir
+  • Décoration positions 1,4: Jarr Terracotta, Vase décoratif Blanc
+  • Lampe de chevet positions 1,5,6: Veilleuse cylindrique BB, Veilleuse OVNI, Veilleuse BB8
+  • Meubes positions 1,3,4: Porte manteaux Rose, Meuble salle de bain, Meuble rangements Ref01
+- Updated brand-config.ts: added email soumdecorationdz@gmail.com to contact object
+- Updated globals.css: mapped --emerald to var(--charcoal) so all text-emerald/bg-emerald/border-emerald classes automatically use warm charcoal (NOT green) — matches reference's actual primary color. Kept --sage as the only green variable for rare in-stock indicators.
+- Updated site-footer.tsx: added Mail icon + email link (mailto:soumdecorationdz@gmail.com) alongside Instagram, Facebook, Téléphone. Updated decorative orbs to use brass rgba instead of green rgba.
+- Updated site-menu.tsx: added Mail icon + email link in drawer footer alongside Instagram, Facebook, Téléphone
+- Fixed admin-panel.tsx input overwrite bug (root cause: inputs lacked id/name/autoComplete attributes, causing browser autofill to map category + badge to the same field category and overwrite each other):
+  • Added unique id attributes (fld-name-{id}, fld-desc-{id}, fld-category-{id}, fld-price-{id}, fld-oldprice-{id}, fld-badge-{id}) to all text/number/textarea inputs
+  • Added unique name attributes (productName, productDescription, productCategory, productPrice, productOldPrice, productBadge)
+  • Added htmlFor attributes to all labels (accessibility fix — clicking label now focuses input)
+  • Added autoComplete="off" + autoCorrect="off" + spellCheck={false} to all text inputs
+  • Changed inputClass focus:border-emerald → focus:border-brass + focus:ring-brass/30
+  • Changed checkbox accent-emerald → accent-brass, accent-neon-magenta → accent-rose-deep
+  • Changed "add color/size" button bg-emerald/10 → bg-brass/10 with text-brass-deep
+- Created src/lib/seed-products.ts with all 29 products as SheetProduct[] (string-based format matching sheet structure)
+- Replaced SEED_PRODUCTS in src/lib/products.ts: removed old 3 El Miizaan products, added 29 Soum Deco products as Product[] (with images as string arrays, proper sortOrder 1-29)
+- Updated src/app/api/products/route.ts: now tries sheet first, falls back to SEED_PRODUCTS when sheet is unreachable or returns empty. Returns { ok, products, seed } flag.
+- Fixed src/lib/sheet.ts: removed hardcoded fallback to old El Miizaan sheet URL in getSheetBaseUrl() — now returns null when no env var is set, triggering seed fallback
+- Updated .env: commented out NEXT_PUBLIC_SHEET_URL (so seed kicks in), updated Cloudinary creds to soumdeco placeholders, added documentation comments explaining how to configure each
+- Created scripts/build-sheet-template.py: Python script using openpyxl to generate Soum-Deco-Sheet-Template.xlsx with:
+  • Products tab: 17 columns (matching apps-script.gs PRODUCTS_COLS exactly), 29 products pre-filled with real Cloudinary URLs, Arabic guidance row 2, frozen panes, conditional formatting
+  • Orders tab: 14 columns, status conditional formatting (New=blue, Confirmed=green, Shipped=yellow, Delivered=dark green, Cancelled=red)
+  • Stock tab: 29 product names pre-filled, stock count empty (= unlimited), conditional formatting (0=red, 1-3=yellow, >3=green)
+- Generated /home/z/my-project/download/Soum-Deco-Sheet-Template.xlsx (16KB)
+- Copied /home/z/my-project/download/apps-script.gs for convenience
+- Restarted dev server cleanly
+- Browser-verified:
+  • Homepage shows SOUM DECO brand + French tagline + 18 featured products in carousel + 8 categories + all 29 products in grid
+  • All product images load from reference site's Cloudinary (anhvhy4j cloud)
+  • Product page works: 5 image thumbnails, Arabic description, COD form with 58 wilayas
+  • Admin panel bug FIXED: typed "arts de la table TEST" in category → badge stayed empty; typed "عرض خاص TEST" in badge → category stayed "arts de la table TEST" (no overwrite!)
+  • 0 console errors
+  • ESLint: clean (0 errors, 0 warnings)
+
+Stage Summary:
+- Site is LIVE with 29 real Soum Deco products (PID 6857)
+- Colors now match reference exactly: cream #FAF8F4 bg, charcoal #2A2520 text, antique brass #9A7E3A accent — NO green as primary
+- Email added everywhere: soumdecorationdz@gmail.com (footer + menu)
+- Admin category/badge overwrite bug FIXED via id/name/htmlFor/autoComplete attributes
+- All El Miizaan animations preserved (ken-burns, name-reveal, glow-pulse, carousel-fade, drawer slide, etc.)
+- Arabic RTL UI preserved (القائمة, السلة, منتجات مميّزة, كل المنتجات, حكايتنا, لوحة التحكم)
+- /home/z/my-project/download/Soum-Deco-Sheet-Template.xlsx ready for Google Sheets import (29 products pre-filled)
+- /home/z/my-project/download/apps-script.gs ready to paste into Apps Script editor
+- Ready for user's future changes — just say what to change
