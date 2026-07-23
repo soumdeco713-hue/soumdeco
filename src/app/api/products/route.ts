@@ -16,6 +16,10 @@ import {
 } from "@/lib/sheet";
 import { SEED_PRODUCTS } from "@/lib/seed-products";
 
+// Cache this route's GET response at the server/CDN level for 30 minutes.
+// Thousands of visitors share 1 single function invocation (Netlify ISR).
+export const revalidate = 1800;
+
 // GET /api/products → list all products
 // Tries the configured Google Sheet first. Falls back to SEED_PRODUCTS
 // (29 Soum Deco reference products) when the sheet is unreachable or
@@ -50,6 +54,7 @@ export async function GET() {
     { ok: true, products, seed: usedSeed },
     {
       headers: {
+        // Browser caches for 60s, then serves stale while revalidating.
         "Cache-Control": "public, max-age=60, stale-while-revalidate=300",
       },
     },

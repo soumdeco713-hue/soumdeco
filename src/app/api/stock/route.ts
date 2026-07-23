@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getSheetBaseUrl } from "@/lib/sheet";
 
+// Cache this route's GET response at the server/CDN level for 30 minutes (Netlify ISR).
+export const revalidate = 1800;
+
 // GET /api/stock → Stock tab as CSV (proxied from Google Apps Script)
 export async function GET() {
   const base = getSheetBaseUrl();

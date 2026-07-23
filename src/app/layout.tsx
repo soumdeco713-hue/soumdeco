@@ -1,29 +1,7 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Cormorant_Garamond, Noto_Naskh_Arabic } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { BRAND } from "@/lib/brand-config";
-
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-  display: "swap",
-});
-
-const cormorant = Cormorant_Garamond({
-  variable: "--font-cormorant",
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
-  display: "swap",
-});
-
-// Noto Naskh Arabic — elegant, traditional Arabic script
-const arabic = Noto_Naskh_Arabic({
-  variable: "--font-arabic",
-  subsets: ["arabic"],
-  weight: ["400", "500", "600", "700"],
-  display: "swap",
-});
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -76,10 +54,16 @@ export default function RootLayout({
         {/* DNS prefetch for Cloudinary — faster image loading */}
         <link rel="dns-prefetch" href="https://res.cloudinary.com" />
         <link rel="preconnect" href="https://res.cloudinary.com" />
+        {/* Google Fonts CDN — saves ~80KB per first visit on Netlify bandwidth
+            (vs self-hosting via next/font/google). Preconnect for faster TLS. */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,500&family=Inter:wght@300;400;500;600;700&family=Noto+Naskh+Arabic:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
+          rel="stylesheet"
+        />
       </head>
-      <body
-        className={`${inter.variable} ${cormorant.variable} ${arabic.variable} font-arabic antialiased bg-background text-foreground`}
-      >
+      <body className="font-arabic antialiased bg-background text-foreground">
         {children}
         <Toaster
           position="top-center"

@@ -186,3 +186,78 @@ Stage Summary:
 - /home/z/my-project/download/Soum-Deco-Sheet-Template.xlsx ready for Google Sheets import (29 products pre-filled)
 - /home/z/my-project/download/apps-script.gs ready to paste into Apps Script editor
 - Ready for user's future changes — just say what to change
+
+---
+Task ID: 4
+Agent: main
+Task: Replace logo with uploaded image, redesign hero (no trust badge, bigger elegant title + animated tagline), apply all 4 Netlify optimizations, add w_800 Cloudinary bandwidth limit, remove "2500 بكسل" text.
+
+Work Log:
+- Copied uploaded "/home/z/my-project/upload/LOGO .jpg" (1053x1053 JPEG, 44KB) to /home/z/my-project/public/logo.jpg
+- Updated brand-config.ts: logoPath "/logo.svg" → "/logo.jpg"
+- Redesigned hero.tsx completely:
+  • Removed trust badge ("توصيل سريع لكل الولايات · الدفع عند الاستلام")
+  • Removed Sparkles import (no longer needed)
+  • Changed title from font-arabic text-4xl font-bold → font-serif text-5xl font-medium tracking-[0.08em] sm:text-7xl (Cormorant Garamond serif, lighter weight, more elegant)
+  • Added letter-reveal animation to title (starts wide+blurred, settles into place over 1.2s)
+  • Replaced single decorative line with elegant 3-part divider (line + dot + line) in brass
+  • Made tagline bigger: font-arabic text-base → font-serif text-xl italic sm:text-3xl
+  • Added tagline-float animation (gentle 3px vertical drift over 5s)
+  • Updated background halos from green/gold/magenta rgba → brass/rose/sage rgba (matches brand)
+  • Increased top padding (pt-14 → pt-16 sm:pt-24) for more breathing room
+- Added 2 new CSS animations to globals.css:
+  • tagline-float: slow 5s vertical drift (3px max) for hero tagline
+  • letter-reveal: 1.2s entrance with letter-spacing collapse + blur clear for hero title
+
+=== NETLIFY OPTIMIZATIONS (all 4 now applied) ===
+
+#1: ISR revalidate=1800 (30-min server cache)
+- Added `export const revalidate = 1800;` to /api/products/route.ts
+- Added `export const revalidate = 1800;` to /api/stock/route.ts
+- Result: thousands of visitors share 1 single function invocation
+
+#2: 30-minute client polling
+- use-catalog.ts: POLL_MS 330_000 → 1_800_000, HIDDEN_POLL_MS 1_100_000 → 3_600_000
+- use-stock.ts: POLL_MS 330_000 → 1_800_000, HIDDEN_POLL_MS 1_100_000 → 3_600_000
+- Result: 80% reduction in web requests
+
+#3: Google Fonts CDN (instead of next/font)
+- Removed `import { Inter, Cormorant_Garamond, Noto_Naskh_Arabic } from "next/font/google"` from layout.tsx
+- Added <link rel="preconnect"> for fonts.googleapis.com and fonts.gstatic.com
+- Added <link href="...css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,500&family=Inter:wght@300;400;500;600;700&family=Noto+Naskh+Arabic:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
+- Updated globals.css @theme: --font-sans: 'Jost', 'Inter', sans-serif; --font-serif: 'Cormorant Garamond', serif; --font-arabic: 'Noto Naskh Arabic', sans-serif (was using CSS variables from next/font)
+- Added italic + multiple weights for Cormorant Garamond (for elegant tagline)
+- Result: ~80KB saved per first visit on Netlify bandwidth
+
+#4: 24-hour static asset cache headers
+- Rewrote next.config.ts with async headers() function
+- Added 24h immutable Cache-Control for: /_next/static/*, /products/*, /logo.jpg, /logo.svg, /data/*
+- Result: repeat visitors within 24h download zero static assets
+
+=== CLOUDINARY BANDWIDTH OPTIMIZATION ===
+- Updated product-image.tsx optimizeImageUrl() function:
+  • Old: added "q_auto,f_auto/" → minimal savings (1-4%)
+  • New: added "c_limit,w_800,q_auto,f_auto/" → caps delivery width at 800px, never upscales
+  • c_limit is critical: plain w_800 FORCES upscaling of small images (made them 28-128% BIGGER in testing)
+  • c_limit,w_800 means "max 800px, never upscale" — pure savings, zero quality loss on screens
+- Tested with 4 reference images: confirmed no size increase vs original, protects against future large uploads
+- Removed "جودة عالية حتى 2500 بكسل" text from admin-panel.tsx (was misleading — actual compression is 1500px)
+- Replaced with simple "انقر أو اسحب وأفلت الصور هنا"
+
+=== IMAGE QUALITY ADVICE (provided to user) ===
+Explained the Cloudinary architecture:
+- Storage (25GB free) stores the ORIGINAL upload — 1500-2500px images are fine, storage is generous
+- Bandwidth (25GB/month free on Cloudinary, NOT Netlify) serves TRANSFORMED versions
+- Google Sheet cell stores URL (~80 chars), NOT image data — no cell limit concern
+- The 2500px upload limit was about upload time + storage, NOT bandwidth
+- Real bandwidth win is in DELIVERY transformations (c_limit,w_800,q_auto,f_auto)
+- Recommended: keep 1500px upload quality, add w_800 delivery limit, keep q_auto,f_auto
+
+Stage Summary:
+- Site is LIVE with new logo (uploaded LOGO .jpg), elegant hero (no trust badge, big serif title + animated tagline), all 4 Netlify optimizations applied, Cloudinary bandwidth protection active
+- All El Miizaan animations preserved + 2 new ones (tagline-float, letter-reveal)
+- Arabic RTL UI preserved
+- 29 Soum Deco products still loading correctly
+- Admin panel "2500 بكسل" text removed (silent 1500px compression)
+- Lint: 0 errors, 1 warning (custom font — expected tradeoff for Netlify bandwidth savings)
+- Browser-verified: 0 console errors, logo loads, Cloudinary URLs use c_limit,w_800

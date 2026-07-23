@@ -16,7 +16,7 @@ export const BRAND = {
   /** Admin password — change before going live. */
   adminPassword: "007",
   /** Logo file path (relative to /public). */
-  logoPath: "/logo.svg",
+  logoPath: "/logo.jpg",
 
   /** Contact info — Instagram primary (replaces TikTok). */
   contact: {

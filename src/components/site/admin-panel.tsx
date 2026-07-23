@@ -486,7 +486,7 @@ function EditForm({
                   : "إضافة المزيد من الصور"}
             </span>
             <span className="text-[10px] text-gray-light">
-              انقر أو اسحب وأفلت · جودة عالية حتى 2500 بكسل
+              انقر أو اسحب وأفلت الصور هنا
             </span>
           </div>
           <input
