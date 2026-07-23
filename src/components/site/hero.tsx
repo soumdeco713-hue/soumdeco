@@ -66,19 +66,16 @@ export function Hero() {
           </div>
         </div>
 
-        {/* Brand name — SOUM (brass gold) + DECO (terracotta).
+        {/* Brand name — SOUM DECO with gray-to-gold slow gradient glow.
             Cormorant Garamond serif, semibold, tight tracking. */}
-        <h1 className="fade-up flex items-center justify-center gap-4 font-serif text-5xl font-semibold tracking-tight text-charcoal sm:text-6xl">
-          <span className="brass-text">SOUM</span>
-          <span className="text-terracotta">DECO</span>
+        <h1 className="fade-up flex items-center justify-center gap-4 font-serif text-5xl font-semibold tracking-tight sm:text-6xl">
+          <span className="text-soum-deco-glow">SOUM</span>
+          <span className="text-soum-deco-glow">DECO</span>
         </h1>
 
-        {/* Tagline — vivid gold gradient glow (no float animation).
-            Shimmering gold with a soft golden halo. */}
-        <p className="fade-up mt-3 max-w-md font-serif text-lg italic sm:text-xl">
-          <span className="text-gold-glow">
-            {BRAND.tagline}
-          </span>
+        {/* Tagline — plain italic gray, no glow. */}
+        <p className="fade-up mt-3 max-w-md font-serif text-lg italic text-gray sm:text-xl">
+          {BRAND.tagline}
         </p>
       </div>
     </section>

@@ -1104,3 +1104,21 @@
   animation: gold-shimmer 4s linear infinite;
   filter: drop-shadow(0 0 6px rgba(184, 150, 86, 0.35)) drop-shadow(0 0 12px rgba(212, 180, 106, 0.2));
 }
+
+/* ===== SOUM DECO title glow — gray to gold slow gradient =====
+   Slow shimmering gradient from warm gray to vivid gold and back.
+   Used ONLY on the hero title (SOUM DECO). */
+@keyframes soum-deco-shimmer {
+  0%   { background-position: 0% center; }
+  100% { background-position: -200% center; }
+}
+.text-soum-deco-glow {
+  background: linear-gradient(90deg, #6B6358 0%, #9A7E3A 25%, #D4B46A 50%, #9A7E3A 75%, #6B6358 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: soum-deco-shimmer 6s linear infinite;
+  filter: drop-shadow(0 0 4px rgba(184, 150, 86, 0.25)) drop-shadow(0 0 10px rgba(154, 126, 58, 0.15));
+}

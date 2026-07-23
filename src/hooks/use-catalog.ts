@@ -42,15 +42,30 @@ export function useCatalog() {
       const data = await res.json();
       if (!data || !Array.isArray(data.products)) return;
       let next: Product[] = data.products.map(normalizeProduct);
-      // If the sheet returns products, use them.
-      if (next.length > 0) {
+
+      if (data.seed === true) {
+        // ── SEED / OFFLINE MODE ──
+        // API returned seed products (no Google Sheet configured).
+        // CRITICAL: Do NOT overwrite localStorage with seed data —
+        // that would destroy admin edits (add/delete/modify).
+        // Only use seed data on the VERY FIRST visit (when localStorage
+        // key is null). After that, localStorage is the source of truth.
+        const raw = typeof window !== "undefined"
+          ? window.localStorage.getItem(CATALOG_STORAGE_KEY)
+          : null;
+        if (raw === null) {
+          // First visit ever — seed localStorage with the 29 demo products
+          saveCatalog(next);
+        } else {
+          // Admin has made edits (or intentionally cleared) — respect localStorage
+          next = loadCatalog();
+        }
+      } else if (next.length > 0) {
+        // ── SHEET MODE (real Google Sheet data) ──
+        // Sheet is the source of truth — always save to localStorage
         saveCatalog(next);
       } else {
-        // Sheet is empty — use localStorage cache if it exists.
-        // If the catalog key was NEVER set (null), seed with SEED_PRODUCTS
-        // so the storefront isn't empty on very first visit.
-        // But if the key was set (even to empty array), respect the user's
-        // choice — they may have deleted all products intentionally.
+        // Sheet is empty — use localStorage if exists, otherwise seed
         const raw = typeof window !== "undefined"
           ? window.localStorage.getItem(CATALOG_STORAGE_KEY)
           : null;

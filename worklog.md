@@ -343,3 +343,65 @@ Stage Summary:
 - All admin panel functions verified working: login, edit, category/badge fix, featured/special offer checkboxes, save/cancel
 - Drawers: menu from left, cart from right (LTR convention)
 - 0 errors, 0 warnings, 0 console errors
+
+---
+Task ID: 7
+Agent: main
+Task: Move gold glow from tagline to SOUM DECO title (gray-gold slow gradient), fix admin CRUD bug (changes not persisting), complete revision and testing.
+
+Work Log:
+
+=== CRITICAL BUG FIX: Admin CRUD not persisting ===
+ROOT CAUSE: In use-catalog.ts refresh() function, when the API returned seed products (data.seed === true), the code called saveCatalog(next) which OVERWROTE localStorage with the 29 seed products — destroying every admin edit (add/delete/modify/tick). This happened on every refresh() call (after every upsert/delete, and every 5.5 min via polling).
+
+FIX: Added a `data.seed === true` branch in refresh():
+- If localStorage key is null (first visit ever) → seed with 29 demo products
+- If localStorage has data (admin made edits) → load from localStorage (preserve edits)
+- Only real sheet data (seed === false) overwrites localStorage
+
+=== HERO GLOW SWAP ===
+- Added .text-soum-deco-glow CSS class: gray (#6B6358) → gold (#9A7E3A) → bright gold (#D4B46A) → gold → gray, 6s linear infinite, with drop-shadow glow
+- Applied to BOTH "SOUM" and "DECO" spans in the h1 title
+- Removed .text-gold-glow from tagline — now plain italic gray (text-gray)
+
+=== COMPLETE ADMIN CRUD TESTING (all verified) ===
+TEST 1 — DELETE:
+  • Started with 29 products
+  • Clicked delete on first product → confirm dialog appeared
+  • Accepted dialog → product removed
+  • Result: 28 products, deleted product gone from localStorage AND storefront ✓
+
+TEST 2 — EDIT + TICK:
+  • Opened edit form on first product
+  • Changed name from "Service a table Blanc luxe doré" to "TEST EDITED PRODUCT"
+  • Ticked "عرض في قسم العروض الخاصة" (special offer) checkbox
+  • Clicked save
+  • Result: localStorage shows {name: "TEST EDITED PRODUCT", isSpecialOffer: true} ✓
+
+TEST 3 — ADD:
+  • Clicked "إضافة منتج" (add product)
+  • Filled name="NEW TEST PRODUCT", description, category="Test Category", price=999
+  • Clicked save
+  • Result: 29 products (28+1), new product in localStorage with correct fields ✓
+
+TEST 4 — PERSISTENCE AFTER REFRESH:
+  • Refreshed the page (navigated to / then back)
+  • Result: count=29, edited product preserved (name + isSpecialOffer), added product preserved, deleted product correctly gone ✓
+  • Storefront reflected all changes: edited product showed with special offer badge, deleted product absent ✓
+
+CLEANUP: Reset localStorage to restore 29 seed products for clean state.
+
+=== FINAL VERIFICATION ===
+- 29 products in localStorage (re-seeded after cleanup)
+- First product: "Service a table Blanc Luxe" (original seed)
+- SOUM DECO title: gray-to-gold glow (text-soum-deco-glow class)
+- Tagline: plain italic gray (no glow)
+- 0 console errors, 0 page errors
+- Lint: 0 errors, 0 warnings
+
+Stage Summary:
+- ADMIN CRUD BUG FIXED: all add/edit/delete/tick/untick operations now persist correctly
+- The 29 seed products can be freely deleted, modified, or have new products added — all changes persist across page refreshes
+- When user configures a real Google Sheet, the sheet becomes source of truth (seed mode disabled)
+- Hero title has gray-gold slow gradient glow, tagline is plain
+- Complete revision done: 0 errors, all functions working perfectly
