@@ -491,3 +491,45 @@ Stage Summary:
 - Badge text (شارة العرض) still displays correctly
 - All colors consistent with the Soum Deco brand palette (brass, not red)
 - 0 errors, 0 warnings
+
+---
+Task ID: 10
+Agent: main
+Task: Revert special-offers-section.tsx to original (keep ONLY glow + badge text display). Clarify seed products have no special priority.
+
+Work Log:
+- Restored original special-offers-section.tsx from deploy zip (all original text, colors, dir="rtl", lang="ar", neon-magenta accents, 🎁 emoji, structure preserved)
+- Made ONLY 2 minimal additions to the restored original:
+  1. Added `glow-pulse border-glow` classes to the card button (elmiizaan-style glow, 4s ease-in-out)
+  2. Kept the badge text display: if p.badge is set → shows "🎁 {badge text}", otherwise shows just "🎁"
+- Reverted ALL other text/UI changes:
+  • Header: back to 🎁 emoji + "عروض" (was changed to ✧ + brass)
+  • Divider: back to magenta gradient (was changed to brass)
+  • Card border: back to border-neon-magenta/40 (was changed to brass)
+  • Badge colors: back to text-neon-magenta (was changed to brass-deep)
+  • Price color: back to text-emerald (was changed to brass-deep)
+  • All dir="rtl" lang="ar" preserved (was removed in LTR conversion)
+  • All text-right preserved (was changed to text-left)
+
+=== SEED PRODUCTS CLARIFICATION ===
+- The 29 seed products are NOT reference products, NOT special, NOT protected
+- They are just regular products with normal fields: id, name, description, category, price, image, featured (true/false), sortOrder
+- 18 of them have featured=true (because they were featured on the reference site)
+- All 29 have: isSpecialOffer=false, badge="", oldPrice=null, stock=null
+- Admin can freely: delete any, modify any, tick/untick featured, tick/untick special offer, reorder
+- They behave IDENTICALLY to products the admin adds manually
+- The only difference: they were pre-loaded (by me) instead of added by the admin
+- The "Reset" button in admin panel restores them — that's a feature, not protection
+
+=== VERIFICATION ===
+- Original magenta colors restored (text-neon-magenta found in DOM) ✓
+- glow-pulse class applied to special offer card (1 element) ✓
+- Badge text "عرض ذهبي" displays correctly ✓
+- 0 console errors, 0 page errors ✓
+- Lint: 0 errors, 0 warnings ✓
+- Reset localStorage to clean 29-product seed state
+
+Stage Summary:
+- special-offers-section.tsx is back to original EXCEPT for the 2 requested features (glow + badge text)
+- All original text, colors, structure, RTL, Arabic preserved
+- Seed products confirmed to have no special priority — they are regular products
