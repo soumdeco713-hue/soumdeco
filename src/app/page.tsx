@@ -153,9 +153,16 @@ export default function Home() {
     cart.clearCart();
   }, [cart]);
 
-  // Filter out products with no image
+  // Filter out products with no image AND skip guidance/invalid rows
+  // (rows with emoji IDs or non-URL image fields from the sheet's guidance row)
   const validProducts = catalog.products.filter(
-    (p) => p.image && p.image.trim() !== "",
+    (p) =>
+      p.image &&
+      p.image.trim() !== "" &&
+      // Skip products whose ID contains emojis or Arabic (guidance row leak)
+      !/[\u0600-\u06FF\u{1F000}-\u{1FFFF}]/u.test(p.id || "") &&
+      // Skip products whose image is not a valid URL or data URL
+      (p.image.startsWith("http") || p.image.startsWith("data:") || p.image.startsWith("/")),
   );
   const featured = validProducts.filter((p) => p.featured);
   // Special offer products are shown ONLY in the special offers section, not in All Products

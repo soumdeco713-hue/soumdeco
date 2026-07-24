@@ -900,3 +900,38 @@ Rebuilt scripts/build-sheet-template.py with:
 - apps-script.gs: ready, 314 lines ✓
 - Lint: 0 errors ✓
 - Browser: 0 console errors ✓
+
+---
+Task ID: 18
+Agent: main
+Task: Wire up Google Sheet + Cloudinary credentials, fix guidance row leak, create downloadable zip.
+
+Work Log:
+
+=== CREDENTIALS WIRED ===
+- .env: NEXT_PUBLIC_SHEET_URL = user's Google Apps Script URL (live)
+- .env: NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME = anhvhy4j
+- .env: NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET = soumdeco
+- drive-upload.ts: defaults updated to anhvhy4j/soumdeco
+
+=== GUIDANCE ROW FIX ===
+Problem: The sheet's row 2 (Arabic guidance with emojis like 🆔🏷️📝) was being read as a product by the apps-script, causing "Failed to construct URL" errors on the storefront.
+Fix: Added client-side filter in page.tsx — skips products whose ID contains emojis or Arabic characters, and whose image doesn't start with http/data/leading-slash.
+Result: 29 real products load correctly, 0 console errors.
+
+Also updated apps-script.gs (in /download/) to skip guidance rows server-side (for future re-paste).
+
+=== VERIFICATION ===
+- /api/products: ok=True, count=29, seed=False (reading from SHEET) ✓
+- /api/stock: returns stock CSV from sheet ✓
+- Storefront: 29 products in 8 category sections ✓
+- 0 console errors ✓
+- Lint: 0 errors ✓
+- Admin password: dimou2411@dz ✓
+- Cloudinary: wired (anhvhy4j / soumdeco) ✓
+
+=== DOWNLOADABLE ZIP CREATED ===
+- /download/soum-deco-website.zip (11MB, 147 files)
+- Contains: src/, public/, prisma/, db/, scripts/, upload/, .env, all config files
+- Excludes: node_modules/, .next/, logs
+- Key files verified: brand-config.ts, seed-products.ts, hero.tsx, all-products.tsx, cod-order-form.tsx, admin-panel.tsx, globals.css, logo.jpg, .env
