@@ -1060,3 +1060,72 @@
   filter: drop-shadow(0 0 4px rgba(184, 150, 86, 0.25)) drop-shadow(0 0 10px rgba(154, 126, 58, 0.15));
 }
 
+
+/* ===== Horizontal category product rows — elegant scroll ===== */
+/* Used in AllProducts section: each category has its own horizontal row */
+.cat-row-scroll {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 0.5rem;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+.cat-row-scroll::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+.cat-row-scroll > * {
+  scroll-snap-align: start;
+  flex-shrink: 0;
+}
+
+/* Category section header — small, elegant, with icon */
+.cat-section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.cat-section-header .cat-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  background: rgba(154, 126, 58, 0.08);
+  color: #9A7E3A;
+  flex-shrink: 0;
+}
+.cat-section-header h3 {
+  font-family: var(--font-serif), var(--font-arabic), serif;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #2A2520;
+  line-height: 1.2;
+}
+.cat-section-header .cat-count {
+  font-size: 0.75rem;
+  color: #6B6358;
+  font-weight: 400;
+}
+.cat-section-header .cat-divider {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(154, 126, 58, 0.3), transparent);
+  margin-left: 0.5rem;
+}
+
+/* Horizontal product card — fixed width for scroll rows */
+.product-card-h {
+  width: 9rem; /* 144px — fits ~2.5 cards on phone */
+  scroll-snap-align: start;
+}
+@media (min-width: 640px) {
+  .product-card-h {
+    width: 11rem; /* 176px on larger screens */
+  }
+}

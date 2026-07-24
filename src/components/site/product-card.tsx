@@ -38,11 +38,6 @@ export function ProductCard({ product, onClick, rupture, lowStock, index = 0 }: 
 
       <div className="relative aspect-square w-full overflow-hidden bg-stone">
         <ProductImage src={product.image} alt={product.name} fit="contain" />
-        {product.category && (
-          <span className="badge-glow absolute right-2 top-2 rounded-full border border-clay/50 bg-white/95 px-2 py-0.5 font-arabic text-[10px] font-semibold text-gray shadow-sm">
-            {product.category}
-          </span>
-        )}
         {product.badge && (
           <span
             className="absolute left-2 top-2 rounded-full border border-neon-magenta/50 bg-white px-2 py-0.5 font-arabic text-[10px] font-bold text-neon-magenta shadow-sm"

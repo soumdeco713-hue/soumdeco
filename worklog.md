@@ -596,3 +596,62 @@ Stage Summary:
 - 3 unused CSS classes removed (CSS 35KB → 32KB)
 - All wiring verified correct: lint, type check, build all pass
 - 0 errors, 0 warnings, site runs smoothly
+
+---
+Task ID: 12
+Agent: main
+Task: Redesign AllProducts to horizontal category sections with horizontal product scroll.
+
+Work Log:
+
+=== SHARED CATEGORY ICON ===
+- Extracted CategoryIcon function (365 lines, 18 icon types) from categories.tsx into new shared file: src/components/site/category-icon.tsx
+- Updated categories.tsx to import CategoryIcon from the shared file
+- Both Categories (filter buttons) and AllProducts (section headers) now use the same icon logic
+
+=== ALLPRODUCTS REDESIGN ===
+- Rewrote all-products.tsx with horizontal category sections:
+  • Each category has a small elegant header: icon (in brass-tinted square) + name + count + brass divider line
+  • Products below the header are in a horizontal scrollable row (cat-row-scroll)
+  • Horizontal scroll with snap, hidden scrollbars, smooth touch scrolling
+  • Product cards have fixed width (9rem phone, 11rem desktop) for clean horizontal layout
+- "منتجات أخرى" (Other Products) section automatically appears for products with no category
+- If a category filter is active, shows that single category as a horizontal row
+- Empty state message for when there are no products at all
+
+=== PRODUCT CARD UPDATE ===
+- Removed the category badge from product cards (was redundant since products are now grouped by category)
+- Kept: badge (شارة العرض), low-stock badge, rupture overlay
+- Cards work in both horizontal scroll (fixed width) and grid layouts
+
+=== CSS ADDITIONS ===
+- .cat-row-scroll: horizontal flex, scroll-snap-x, hidden scrollbars, touch scrolling
+- .cat-section-header: flex layout with icon + name + count + divider
+- .cat-icon-wrap: 2rem brass-tinted square for category icon
+- .product-card-h: fixed width for horizontal scroll (9rem phone, 11rem desktop)
+
+=== EDGE CASES TESTED ===
+1. Product with no category → appears in "منتجات أخرى" section ✓
+2. Delete all products in a category → category section disappears automatically ✓
+3. Add new category → new section appears automatically ✓
+4. No products at all → shows empty state message ✓
+5. Category filter active → shows single category as horizontal row ✓
+6. 29 seed products render in 8 category sections ✓
+
+=== VERIFICATION ===
+- Lint: 0 errors, 0 warnings ✓
+- TypeScript: 0 errors ✓
+- Browser: 0 console errors ✓
+- 8 category headers with icons ✓
+- 8 horizontal scroll rows ✓
+- Products grouped correctly by category ✓
+- "منتجات أخرى" section for uncategorized products ✓
+- Empty categories automatically removed ✓
+- Reset to clean 29-product seed state
+
+Stage Summary:
+- AllProducts now shows categories as horizontal sections — customers see all categories without scrolling down
+- Each category: small elegant header (icon + name + count) + horizontal product scroll
+- Products without category → "منتجات أخرى" section
+- All add/delete scenarios work perfectly: empty categories disappear, new categories appear, uncategorized products grouped
+- Charm and elegance preserved: Cormorant Garamond serif headers, brass accents, smooth scroll, no visual clutter
