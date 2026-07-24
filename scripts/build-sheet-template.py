@@ -207,6 +207,21 @@ ws_o.conditional_formatting.add(status_range, CellIsRule(operator='equal', formu
 ws_o.conditional_formatting.add(status_range, CellIsRule(operator='equal', formula=['"Delivered"'], fill=PatternFill(start_color=STATUS_DELIVERED, end_color=STATUS_DELIVERED, fill_type='solid'), font=Font(bold=True, color=WHITE, size=11)))
 ws_o.conditional_formatting.add(status_range, CellIsRule(operator='equal', formula=['"Cancelled"'], fill=PatternFill(start_color=STATUS_CANCELLED, end_color=STATUS_CANCELLED, fill_type='solid'), font=Font(bold=True, color=WHITE, size=11)))
 
+# Status dropdown (data validation) — user picks from list, no typing needed
+from openpyxl.worksheet.datavalidation import DataValidation
+status_dv = DataValidation(
+    type="list",
+    formula1='"New,Confirmed,Shipped,Delivered,Cancelled"',
+    allow_blank=True,
+    showDropDown=False,  # False = SHOW the dropdown arrow (openpyxl quirk)
+)
+status_dv.error = 'Please select a status from the dropdown'
+status_dv.errorTitle = 'Invalid status'
+status_dv.prompt = 'Click to choose: New → Confirmed → Shipped → Delivered (or Cancelled)'
+status_dv.promptTitle = 'Order Status'
+ws_o.add_data_validation(status_dv)
+status_dv.add(status_range)
+
 # ============================================================
 #  STOCK TAB
 # ============================================================
