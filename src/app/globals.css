@@ -1064,6 +1064,7 @@
 /* ===== Horizontal category product rows — elegant scroll ===== */
 /* Used in AllProducts section: each category has its own horizontal row */
 .cat-row-scroll {
+  align-items: stretch;
   display: flex;
   gap: 0.75rem;
   overflow-x: auto;
@@ -1121,11 +1122,15 @@
 
 /* Horizontal product card — fixed width for scroll rows */
 .product-card-h {
+  display: flex;
+  align-self: stretch;
   width: 9rem; /* 144px — fits ~2.5 cards on phone */
   scroll-snap-align: start;
 }
 @media (min-width: 640px) {
   .product-card-h {
+  display: flex;
+  align-self: stretch;
     width: 11rem; /* 176px on larger screens */
   }
 }

@@ -724,8 +724,8 @@ export function CodOrderForm({
         </div>
 
         {/* 8. Items / quantities.
-            For single-item orders we ALWAYS show the 4-button selector (1, 2, 3, 4).
-            The +/- stepper has been removed entirely — this is the ONLY quantity selector.
+            For single-item orders we show the 4 quick-select buttons (1, 2, 3, 4)
+            PLUS a number input for ordering more than 4 pieces (any quantity).
             The ✨ emoji appears on buttons that match a tier (when `quantityTiers` is provided). */}
         {items.length === 1 ? (
           <div>
@@ -772,6 +772,38 @@ export function CodOrderForm({
                   </div>
                 );
               })}
+              {/* "+" separator + number input for ordering more than 4 pieces.
+                  Keeps the 4 quick-select buttons intact while allowing any quantity. */}
+              <span className="font-arabic text-lg text-gray-light self-center mx-1">+</span>
+              <div className="flex flex-col items-center">
+                <input
+                  type="number"
+                  min={5}
+                  value={items[0].quantity > 4 ? items[0].quantity : ""}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (isNaN(v) || v < 1) return;
+                    if (v >= 1 && v <= 4) {
+                      setSingleQty(v);
+                    } else {
+                      setSingleQty(v);
+                    }
+                  }}
+                  onFocus={(e) => {
+                    // Clear the value if it's currently 1-4 (so user can type a new number)
+                    if (items[0].quantity <= 4) {
+                      e.target.value = "";
+                    }
+                  }}
+                  placeholder="5+"
+                  aria-label="كمية مخصصة"
+                  className={`flex h-10 w-14 items-center justify-center rounded-full border-2 px-1 text-center font-arabic text-sm font-bold outline-none transition-all sm:h-11 sm:w-16 ${
+                    items[0].quantity > 4
+                      ? "border-transparent bg-animated-black text-white shadow-md"
+                      : "border-clay/40 bg-night/60 text-charcoal focus:border-neon-magenta/50"
+                  }`}
+                />
+              </div>
             </div>
             {activeTier && tierBenefitLine(activeTier) && (
               <p className="mt-3 text-center font-arabic text-[11px] font-medium text-neon-magenta">

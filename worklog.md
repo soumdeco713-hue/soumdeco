@@ -711,3 +711,61 @@ Stage Summary:
 - "منتجات أخرى" is a regular category (button + filterable + same treatment)
 - Special offer cards glow more evidently (stronger brass halo, same 4s speed)
 - All edge cases handled: empty categories disappear, new categories appear, uncategorized grouped
+
+---
+Task ID: 14
+Agent: main
+Task: Make hero title thinner, add quantity input for >4pcs, fix product card height inconsistency.
+
+Work Log:
+
+=== FIX #1: HERO TITLE — THINNER + SIMPLER + ELEGANT ===
+- Changed font weight: font-semibold (600) → font-light (300) — much thinner, more elegant
+- Changed letter-spacing: tracking-tight (-0.025em) → tracking-[0.15em] — wider, more refined
+- Kept: gap-4 (space between SOUM and DECO), text-soum-deco-glow (gray-to-gold gradient glow)
+- Kept: font-serif (Cormorant Garamond), text-5xl sm:text-6xl (same size)
+- Verified: font-light class applied, gap-4 preserved
+
+=== FIX #2: QUANTITY INPUT FOR >4PCS ===
+- Kept the 4 quick-select buttons (1, 2, 3, 4) exactly as they were
+- Added a "+" separator and a number input after the 4 buttons
+- Input features:
+  • Placeholder "5+" indicates it's for quantities >4
+  • min={5} attribute
+  • Styled identically to the buttons (same height, border, bg)
+  • When value >4: gets the active style (bg-animated-black, white text)
+  • When value 1-4: buttons are active, input is empty
+  • onFocus clears the input if current qty is 1-4 (so user can type fresh)
+  • aria-label="كمية مخصصة" for accessibility
+- Tested: typing 7 sets quantity to 7, total calculates correctly (16600 × 7 = 116200 DA)
+- Updated comment to reflect the new behavior
+
+=== FIX #3: PRODUCT CARD HEIGHT — ALL IDENTICAL ===
+ROOT CAUSE: Product cards had different heights because:
+1. Titles used line-clamp-2 (could be 1 or 2 lines) — different title heights
+2. The button didn't have w-full, so in horizontal rows it didn't stretch to card width
+3. Without stretching, the image (aspect-square) was smaller on some cards
+
+FIX (3 changes):
+1. Title: min-h-[2.5rem] → h-10 (fixed 2-line height, 40px)
+2. Price: min-h-[1.25rem] → h-5 (fixed height, 20px)
+3. Button: added h-full w-full (stretches to fill the product-card-h wrapper)
+4. CSS: added align-items: stretch to .cat-row-scroll (forces all cards in a row to same height)
+5. CSS: added display: flex + align-self: stretch to .product-card-h
+
+RESULT: All 29 product cards are now EXACTLY 264px tall — allSame: true
+
+=== VERIFICATION ===
+- Lint: 0 errors, 0 warnings ✓
+- TypeScript: 0 errors ✓
+- Hero title: font-light + tracking-[0.15em] + gap-4 all applied ✓
+- Product cards: all 29 cards = 264px (was 195-264px, 6 different heights) ✓
+- Quantity input: typing 7 → quantity=7, total=116,200 DA (16600×7) ✓
+- 4 quick-select buttons still work ✓
+- 0 console errors ✓
+
+Stage Summary:
+- Hero title: thin, elegant, light weight (300), wide letter-spacing, gold glow preserved, gap preserved
+- Order form: 4 buttons (1-4) + number input for any quantity (5+), total calculates correctly
+- Product cards: ALL identical height (264px) regardless of title length
+- All 3 issues fixed and tested, 0 errors

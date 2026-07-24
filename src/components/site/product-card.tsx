@@ -18,13 +18,11 @@ export function ProductCard({ product, onClick, rupture, lowStock, index = 0 }: 
     <button
       type="button"
       onClick={() => onClick?.(product)}
-      className="group relative flex flex-col overflow-hidden rounded-2xl border border-clay/40 bg-white text-left transition-transform duration-300 hover:-translate-y-1.5 hover:border-gray/40 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-mid/40 active:scale-[0.98]"
+      className="group relative flex h-full w-full flex-col overflow-hidden rounded-2xl border border-clay/40 bg-white text-left transition-transform duration-300 hover:-translate-y-1.5 hover:border-gray/40 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-mid/40 active:scale-[0.98]"
       style={{
         boxShadow: "0 2px 12px -4px rgba(74, 85, 104, 0.15)",
         transitionDelay: `${Math.min(index * 30, 240)}ms`,
       }}
-     
-     
     >
       {/* Hover elegant gray glow */}
       <div
@@ -61,11 +59,14 @@ export function ProductCard({ product, onClick, rupture, lowStock, index = 0 }: 
         )}
       </div>
       <div className="flex flex-1 flex-col gap-1 p-3">
-        <h3 className="line-clamp-2 font-arabic text-sm font-bold leading-snug">
+        {/* Title — fixed 2-line height so all cards are identical.
+            h-10 (2.5rem) reserves exactly 2 lines; line-clamp-2 truncates long titles. */}
+        <h3 className="line-clamp-2 h-10 overflow-hidden font-arabic text-sm font-bold leading-snug">
           <span className="text-blue-black">{product.name}</span>
         </h3>
+        {/* Price — fixed height to match across all cards */}
         <p
-          className={`font-arabic text-sm font-bold ${
+          className={`font-arabic text-sm font-bold h-5 ${
             product.price === null ? "italic text-gray-light" : "text-emerald"
           }`}
         >
