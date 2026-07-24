@@ -279,33 +279,6 @@ ws_s.conditional_formatting.add(stock_range, CellIsRule(operator='equal', formul
 ws_s.conditional_formatting.add(stock_range, CellIsRule(operator='between', formula=['1', '3'], fill=PatternFill(start_color='FFD700', end_color='FFD700', fill_type='solid'), font=Font(bold=True, color='1C1815')))
 ws_s.conditional_formatting.add(stock_range, CellIsRule(operator='greaterThan', formula=['3'], fill=PatternFill(start_color='2F7D5B', end_color='2F7D5B', fill_type='solid'), font=Font(bold=True, color='FFFFFF')))
 
-# =======================
-# SHIPPING TAB (NEW — multiple companies)
-# =======================
-ws_sh = wb.create_sheet('Shipping')
-shipping_headers = ['Company', 'Wilaya Code', 'Wilaya Name', 'Stop Desk Price', 'Home Price', 'Delay (days)']
-shipping_guidance = ['اسم شركة التوصيل', 'رقم الولاية (1-58)', 'اسم الولاية', 'سعر التوصيل للمكتب (دج)', 'سعر التوصيل للمنزل (دج)', 'مدة التوصيل (أيام)']
-
-for col_idx, h in enumerate(shipping_headers, 1):
-    cell = ws_sh.cell(row=1, column=col_idx, value=h)
-    cell.font = header_font; cell.fill = header_fill; cell.alignment = header_align; cell.border = thin_border
-for col_idx, g in enumerate(shipping_guidance, 1):
-    cell = ws_sh.cell(row=2, column=col_idx, value=g)
-    cell.font = guidance_font; cell.fill = guidance_fill; cell.alignment = guidance_align; cell.border = thin_border
-
-# Pre-fill shipping data (2 companies × 58 wilayas = 116 rows)
-for row_idx, row_data in enumerate(SHIPPING_DATA, start=3):
-    for col_idx, val in enumerate(row_data, 1):
-        cell = ws_sh.cell(row=row_idx, column=col_idx, value=val)
-        cell.font = data_font
-        cell.alignment = center_align if col_idx > 1 else data_align
-        cell.border = thin_border
-
-shipping_widths = [22, 14, 22, 18, 18, 14]
-for col_idx, w in enumerate(shipping_widths, 1):
-    ws_sh.column_dimensions[get_column_letter(col_idx)].width = w
-ws_sh.row_dimensions[1].height = 28; ws_sh.row_dimensions[2].height = 36; ws_sh.freeze_panes = 'A3'
-
 # ---- Save ----
 output_path = '/home/z/my-project/download/Soum-Deco-Sheet-Template.xlsx'
 wb.save(output_path)
@@ -313,4 +286,3 @@ print(f'✓ Saved: {output_path}')
 print(f'  Products tab: {len(products)} products')
 print(f'  Orders tab: empty (headers + Company column for multiple shipping companies)')
 print(f'  Stock tab: {len(products)} product names pre-filled')
-print(f'  Shipping tab: {len(SHIPPING_DATA)} rows (2 companies × 58 wilayas)')

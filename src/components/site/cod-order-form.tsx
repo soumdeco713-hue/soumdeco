@@ -650,9 +650,9 @@ export function CodOrderForm({
           </select>
         </div>
 
-        {/* 5. Shipping speed — سريع vs عادي */}
+        {/* 5. Shipping company — client chooses which company */}
         <div>
-          <label className={labelClass}>سرعة التوصيل</label>
+          <label className={labelClass}>شركة التوصيل · Société de livraison</label>
           <div className="grid grid-cols-2 gap-2">
             {(["express", "economique"] as ShippingSpeed[]).map((s) => (
               <button
@@ -670,7 +670,7 @@ export function CodOrderForm({
             ))}
           </div>
           <p className="mt-1.5 font-arabic text-[10px] text-gray-light">
-            📦 نوفّر التوصيل عبر Yalidine Express لجميع الولايات
+            📦 اختر شركة التوصيل المناسبة لك
           </p>
         </div>
 

@@ -112,13 +112,13 @@ export function getShippingPrice(
 }
 
 export const SHIPPING_SPEED_LABELS: Record<ShippingSpeed, string> = {
-  express: "Express",
+  express: "Yalidine Express",
   economique: "Économique",
 };
 
 export const SHIPPING_SPEED_LABELS_AR: Record<ShippingSpeed, string> = {
-  express: "توصيل سريع",
-  economique: "توصيل عادي",
+  express: "Yalidine Express",
+  economique: "Économique",
 };
 
 export const DELIVERY_TYPE_LABELS: Record<DeliveryType, string> = {
@@ -130,70 +130,3 @@ export const DELIVERY_TYPE_LABELS_AR: Record<DeliveryType, string> = {
   stop_desk: "مكتب التوصيل",
   home: "توصيل للمنزل",
 };
-
-// ============================================================
-//  MULTI-COMPANY SHIPPING SUPPORT (prepared for future use)
-// ============================================================
-//  When a Google Sheet with a "Shipping" tab is configured, the
-//  /api/shipping route returns an array of ShippingCompanyEntry.
-//  Each entry defines the price for one company in one wilaya.
-//
-//  The admin can add/remove companies from the Shipping tab —
-//  the website will automatically show all available companies.
-//
-//  Until the sheet is configured, FALLBACK_SHIPPING provides the
-//  same express/economique prices that are hardcoded above.
-
-export type ShippingCompanyEntry = {
-  company: string;
-  wilayaCode: number;
-  wilayaName: string;
-  stopDesk: number;
-  home: number;
-  delay: number;
-};
-
-// Wilaya names (1-58) — used for the fallback shipping data
-const WILAYA_NAMES: Record<number, string> = {
-  1: "Adrar", 2: "Chlef", 3: "Laghouat", 4: "Oum El Bouaghi", 5: "Batna",
-  6: "Béjaïa", 7: "Biskra", 8: "Béchar", 9: "Blida", 10: "Bouira",
-  11: "Tamanrasset", 12: "Tébessa", 13: "Tlemcen", 14: "Tiaret", 15: "Tizi Ouzou",
-  16: "Alger", 17: "Djelfa", 18: "Jijel", 19: "Sétif", 20: "Saïda",
-  21: "Skikda", 22: "Sidi Bel Abbès", 23: "Annaba", 24: "Guelma", 25: "Constantine",
-  26: "Médéa", 27: "Mostaganem", 28: "M'Sila", 29: "Mascara", 30: "Ouargla",
-  31: "Oran", 32: "El Bayadh", 33: "Illizi", 34: "Bordj Bou Arréridj", 35: "Boumerdès",
-  36: "El Tarf", 37: "Tindouf", 38: "Tissemsilt", 39: "El Oued", 40: "Khenchela",
-  41: "Souk Ahras", 42: "Tipaza", 43: "Mila", 44: "Aïn Defla", 45: "Naâma",
-  46: "Aïn Témouchent", 47: "Ghardaïa", 48: "Relizane", 49: "El M'ghair", 50: "El Menia",
-  51: "Ouled Djellal", 52: "Bordj Baji Mokhtar", 53: "Béni Abbès", 54: "Timimoun",
-  55: "Touggourt", 56: "Djanet", 57: "In Salah", 58: "In Guezzam",
-};
-
-// Build fallback shipping data from the hardcoded SHIPPING_TABLE
-// This is used when no Google Sheet is configured (offline / demo mode).
-export const FALLBACK_SHIPPING: ShippingCompanyEntry[] = Object.entries(
-  SHIPPING_TABLE,
-).flatMap(([code, row]) => {
-  const codeNum = Number(code);
-  const wilayaName = WILAYA_NAMES[codeNum] || `Wilaya ${codeNum}`;
-  return [
-    {
-      company: "Yalidine Express",
-      wilayaCode: codeNum,
-      wilayaName,
-      stopDesk: row.express.stopDesk,
-      home: row.express.home,
-      delay: row.express.delay,
-    },
-    {
-      company: "Économique",
-      wilayaCode: codeNum,
-      wilayaName,
-      stopDesk: row.economique.stopDesk,
-      home: row.economique.home,
-      delay: row.economique.delay,
-    },
-  ];
-});
-
-

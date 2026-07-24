@@ -823,3 +823,41 @@ Added the full infrastructure for multiple shipping companies (not yet implement
 - The /api/shipping endpoint is ready but not yet used by the order form
 - When user is ready to implement multi-company UI, the infrastructure is in place
 - Sheet template has the Shipping tab ready for when user pastes the apps-script
+
+---
+Task ID: 16
+Agent: main
+Task: Revert sheet/API multi-company changes — just add simple client-side company selector in order form.
+
+Work Log:
+
+=== REVERTED (per user request — keep it simple) ===
+1. Removed /api/shipping route (deleted entire /src/app/api/shipping/ directory)
+2. Restored original apps-script.gs (no serveShipping function)
+3. Rebuilt xlsx template WITHOUT Shipping tab (back to 3 tabs: Products, Orders, Stock)
+4. Removed multi-company shipping additions from shipping.ts (FALLBACK_SHIPPING, ShippingCompanyEntry, WILAYA_NAMES)
+
+=== SIMPLE COMPANY SELECTOR (client-side only) ===
+The existing express/economique system was ALREADY a company selector — just mislabeled as "speed".
+- Relabeled SHIPPING_SPEED_LABELS_AR:
+  • express: "توصيل سريع" → "Yalidine Express"
+  • economique: "توصيل عادي" → "Économique"
+- Relabeled the order form section:
+  • "سرعة التوصيل" → "شركة التوصيل · Société de livraison"
+  • Help text: "نوفّر التوصيل عبر Yalidine Express" → "اختر شركة التوصيل المناسبة لك"
+- The selected company is already sent to the sheet's Company column (existing wiring, no changes needed)
+
+=== VERIFICATION ===
+- Lint: 0 errors, 0 warnings ✓
+- Browser: company selector shows "Yalidine Express" + "Économique" buttons ✓
+- Label: "شركة التوصيل · Société de livraison" ✓
+- 0 console errors ✓
+- xlsx: 3 tabs only (Products, Orders, Stock) — no Shipping tab ✓
+- apps-script.gs: original (no shipping endpoint) ✓
+- No /api/shipping route ✓
+
+Stage Summary:
+- SIMPLE approach: client chooses company via 2 buttons (Yalidine Express / Économique)
+- NO sheet involvement for shipping — prices are hardcoded in shipping.ts
+- Selected company is sent to sheet's Company column (existing behavior)
+- All multi-company infrastructure reverted (no complexity)
