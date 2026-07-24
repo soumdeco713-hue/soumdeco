@@ -769,3 +769,57 @@ Stage Summary:
 - Order form: 4 buttons (1-4) + number input for any quantity (5+), total calculates correctly
 - Product cards: ALL identical height (264px) regardless of title length
 - All 3 issues fixed and tested, 0 errors
+
+---
+Task ID: 15
+Agent: main
+Task: Fix hero letter-spacing, prepare multi-company shipping architecture, update sheet + apps-script.
+
+Work Log:
+
+=== FIX #1: HERO TITLE — NO LETTER-SPACING, SMALLER ===
+- Changed tracking-[0.15em] → tracking-normal (no extra space between letters)
+- Changed text-5xl sm:text-6xl → text-4xl sm:text-5xl (smaller, more elegant)
+- Kept: gap-4 (16px gap between SOUM and DECO only), font-light (300), font-serif
+- Verified: letterSpacing="normal", fontSize="48px", fontWeight="300", gap="16px"
+
+=== FIX #2: MULTI-COMPANY SHIPPING ARCHITECTURE PREPARED ===
+Added the full infrastructure for multiple shipping companies (not yet implemented in UI — ready for when user says to implement):
+
+1. xlsx template (Soum-Deco-Sheet-Template.xlsx):
+   - NEW "Shipping" tab with columns: Company | Wilaya Code | Wilaya Name | Stop Desk Price | Home Price | Delay (days)
+   - Pre-filled with 116 rows (2 companies × 58 wilayas): Yalidine Express + Économique
+   - Admin can add/remove companies from this tab directly
+
+2. apps-script.gs (in /download/):
+   - Added SHIPPING_SHEET = 'Shipping' constant
+   - Added ?action=shipping endpoint to doGet()
+   - Added serveShipping() function: reads Shipping tab, returns JSON array
+   - Returns: [{ company, wilayaCode, wilayaName, stopDesk, home, delay }, ...]
+   - If no Shipping tab exists → returns empty array (website falls back to hardcoded)
+
+3. /api/shipping/route.ts (NEW):
+   - GET /api/shipping → fetches from sheet's ?action=shipping
+   - Falls back to FALLBACK_SHIPPING when no sheet configured
+   - Returns: { ok, shipping: [...], source: "sheet" | "fallback" }
+
+4. shipping.ts updates:
+   - Added ShippingCompanyEntry type: { company, wilayaCode, wilayaName, stopDesk, home, delay }
+   - Added WILAYA_NAMES record (58 wilaya names)
+   - Added FALLBACK_SHIPPING: 116 entries built from existing SHIPPING_TABLE
+   - Current express/economique system preserved (backward compatible)
+   - Fixed declaration order: WILAYA_NAMES before FALLBACK_SHIPPING
+
+=== VERIFICATION ===
+- /api/shipping returns 116 entries, source="fallback" ✓
+- Sample: Yalidine Express → Wilaya 1 (Adrar): desk=1750DA, home=1850DA, delay=4d ✓
+- Lint: 0 errors, 0 warnings ✓
+- TypeScript: 0 errors ✓
+- Browser: 0 console errors ✓
+- Hero title: letterSpacing="normal", fontSize="48px", fontWeight="300", gap="16px" ✓
+
+=== CURRENT STATE (backward compatible) ===
+- The website still uses the current express/economique shipping system
+- The /api/shipping endpoint is ready but not yet used by the order form
+- When user is ready to implement multi-company UI, the infrastructure is in place
+- Sheet template has the Shipping tab ready for when user pastes the apps-script

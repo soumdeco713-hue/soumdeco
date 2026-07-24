@@ -19,6 +19,7 @@
 var ORDERS_SHEET = 'Orders';
 var STOCK_SHEET = 'Stock';
 var PRODUCTS_SHEET = 'Products';
+var SHIPPING_SHEET = 'Shipping';
 var PRODUCTS_COLS = ['id', 'name', 'description', 'category', 'price', 'image', 'images', 'featured', 'isSpecialOffer', 'variations', 'variants', 'stock', 'highlights', 'sortOrder', 'badge', 'oldPrice', 'quantityTiers'];
 var IMG_SEP = '~~~';
 
@@ -35,6 +36,7 @@ function doGet(e) {
   var action = String(p.action || '').toLowerCase();
   try {
     if (action === 'stock') return serveStock();
+    if (action === 'shipping') return serveShipping();
     if (action === 'products') return serveProducts();
     if (action === 'order') return doCreateOrderFromParams(p);
     if (action === 'product_delete') return doDeleteProduct(p.id || '');
@@ -97,6 +99,40 @@ function serveStock() {
     }).join(',');
   }).join('\n');
   return ContentService.createTextOutput(csv).setMimeType(ContentService.MimeType.CSV);
+}
+
+
+// ============================================================
+//  SHIPPING — multiple companies
+// ============================================================
+//  Reads the Shipping tab and returns all shipping prices as JSON.
+//  Each row: [Company, Wilaya Code, Wilaya Name, Stop Desk Price, Home Price, Delay]
+//  Returns: [{ company, wilayaCode, wilayaName, stopDesk, home, delay }, ...]
+//  The website uses this to show shipping company options + prices per wilaya.
+
+function serveShipping() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHIPPING_SHEET);
+  if (!sheet) {
+    // No Shipping tab — return empty array (website falls back to hardcoded prices)
+    return jsonOut([]);
+  }
+  var values = sheet.getDataRange().getValues();
+  if (values.length < 2) return jsonOut([]);
+  var out = [];
+  for (var i = 1; i < values.length; i++) {
+    var r = values[i];
+    if (!r[0] && !r[1]) continue; // skip empty rows
+    out.push({
+      company: String(r[0] || ''),
+      wilayaCode: Number(r[1]) || 0,
+      wilayaName: String(r[2] || ''),
+      stopDesk: Number(r[3]) || 0,
+      home: Number(r[4]) || 0,
+      delay: Number(r[5]) || 0
+    });
+  }
+  return jsonOut(out);
 }
 
 // ============================================================

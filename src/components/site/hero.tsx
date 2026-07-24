@@ -67,9 +67,10 @@ export function Hero() {
         </div>
 
         {/* Brand name — SOUM DECO with gray-to-gold slow gradient glow.
-            Cormorant Garamond serif, light weight (300), wide letter-spacing
-            for an elegant, thin, refined look. */}
-        <h1 className="fade-up flex items-center justify-center gap-4 font-serif text-5xl font-light tracking-[0.15em] sm:text-6xl">
+            Cormorant Garamond serif, light weight (300), normal letter-spacing
+            (no extra space between letters — only the gap-4 between SOUM and DECO).
+            Smaller size for a more refined, elegant look. */}
+        <h1 className="fade-up flex items-center justify-center gap-4 font-serif text-4xl font-light tracking-normal sm:text-5xl">
           <span className="text-soum-deco-glow">SOUM</span>
           <span className="text-soum-deco-glow">DECO</span>
         </h1>
