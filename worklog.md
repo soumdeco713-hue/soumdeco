@@ -861,3 +861,42 @@ Stage Summary:
 - NO sheet involvement for shipping — prices are hardcoded in shipping.ts
 - Selected company is sent to sheet's Company column (existing behavior)
 - All multi-company infrastructure reverted (no complexity)
+
+---
+Task ID: 17
+Agent: main
+Task: Update admin password, redesign xlsx template (beautiful/guided/colored), output apps-script for user.
+
+Work Log:
+
+=== 1. ADMIN PASSWORD UPDATED ===
+- brand-config.ts: adminPassword "007" → "dimou2411@dz"
+- Browser-tested: login with new password works, dashboard opens with all products
+
+=== 2. XLSX TEMPLATE REDESIGNED (beautiful, guided, colored) ===
+Rebuilt scripts/build-sheet-template.py with:
+- Colored tabs: Products (brass #9A7E3A), Orders (blue #3080FF), Stock (green #2F7D5B)
+- Dark charcoal headers (#2A2520) with white bold text + brass bottom border
+- Light brass guidance row (#F5EFE2) with italic muted text + emojis (🆔🏷️📝📂💰🖼️ etc.)
+- Zebra stripes on data rows (cream #FAF8F4 / white alternating)
+- Brass-tinted featured column (#E8D9B0) for featured products
+- Vivid status colors on Orders: New=blue, Confirmed=green, Shipped=yellow, Delivered=dark green, Cancelled=red
+- Stock colors: 0=red, 1-3=yellow, >3=green
+- Frozen header rows (freeze_panes='A3')
+- 3 tabs only: Products (29 products), Orders (empty), Stock (29 product names pre-filled)
+- NO Shipping tab
+
+=== 3. APPS-SCRIPT.GS READY ===
+- /home/z/my-project/download/apps-script.gs (314 lines)
+- 3 tabs supported: Products, Orders, Stock
+- Endpoints: ?action=products, ?action=stock, ?action=order, ?action=product_create, ?action=product_delete, ?action=product_reset
+- setupAllSheets() function to initialize all tabs
+- onStockEdit() trigger for automatic stock decrement on "Confirmed" orders
+- Output in chat for user to copy-paste
+
+=== VERIFICATION ===
+- Admin password: dimou2411@dz ✓ (login tested)
+- xlsx: 3 tabs, colored, guided, beautiful ✓
+- apps-script.gs: ready, 314 lines ✓
+- Lint: 0 errors ✓
+- Browser: 0 console errors ✓

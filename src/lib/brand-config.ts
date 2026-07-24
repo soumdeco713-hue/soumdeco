@@ -14,7 +14,7 @@ export const BRAND = {
   /** Brand tagline — shown under the logo in the hero. */
   tagline: "L'art de sublimer votre intérieur",
   /** Admin password — change before going live. */
-  adminPassword: "007",
+  adminPassword: "dimou2411@dz",
   /** Logo file path (relative to /public). */
   logoPath: "/logo.jpg",
 
