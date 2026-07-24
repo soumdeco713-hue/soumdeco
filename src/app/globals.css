@@ -1129,3 +1129,27 @@
     width: 11rem; /* 176px on larger screens */
   }
 }
+
+/* ===== Special offer enhanced glow — more evident than glow-pulse =====
+   Same style as glow-pulse but with stronger/brighter values so special
+   offer cards stand out more. Used ONLY on special offer cards. */
+@keyframes special-glow-pulse {
+  0%, 100% {
+    box-shadow:
+      0 4px 18px -5px rgba(42, 37, 32, 0.20),
+      0 0 0 1px rgba(154, 126, 58, 0.30),
+      0 0 28px -6px rgba(154, 126, 58, 0.35),
+      0 0 50px -10px rgba(184, 150, 86, 0.25);
+  }
+  50% {
+    box-shadow:
+      0 8px 34px -6px rgba(42, 37, 32, 0.28),
+      0 0 0 2px rgba(154, 126, 58, 0.50),
+      0 0 44px -4px rgba(154, 126, 58, 0.55),
+      0 0 72px -8px rgba(184, 150, 86, 0.40);
+  }
+}
+.special-glow-pulse {
+  animation: special-glow-pulse 4s ease-in-out infinite;
+  will-change: box-shadow;
+}

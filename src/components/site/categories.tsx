@@ -10,15 +10,25 @@ type CategoriesProps = {
   onSelect: (category: string) => void;
 };
 
+/** The label used for products that have no category assigned. Must match AllProducts. */
+const OTHER_CATEGORY = "منتجات أخرى";
 
 export function Categories({ products, active, onSelect }: CategoriesProps) {
   const categories = useMemo(() => {
     const set = new Set<string>();
+    let hasUncategorized = false;
     products.forEach((p) => {
       const c = (p.category || "").trim();
-      if (c) set.add(c);
+      if (c) {
+        set.add(c);
+      } else {
+        hasUncategorized = true;
+      }
     });
-    return Array.from(set);
+    const arr = Array.from(set);
+    // Add "Other Products" as a regular category if there are uncategorized products
+    if (hasUncategorized) arr.push(OTHER_CATEGORY);
+    return arr;
   }, [products]);
 
   if (categories.length === 0) return null;
@@ -63,6 +73,7 @@ export function Categories({ products, active, onSelect }: CategoriesProps) {
           {categories.map((cat) => {
             const isActive = active === cat;
             const activeAnim = isActive ? getCategoryActiveClass(cat) : "";
+            const isOther = cat === OTHER_CATEGORY;
             return (
               <button
                 key={cat}
@@ -74,7 +85,15 @@ export function Categories({ products, active, onSelect }: CategoriesProps) {
                     : "border-clay/40 bg-white text-gray hover:border-gray/50 hover:text-charcoal"
                 }`}
               >
-                <CategoryIcon name={cat} />
+                {isOther ? (
+                  <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="2" />
+                    <circle cx="5" cy="12" r="2" />
+                    <circle cx="19" cy="12" r="2" />
+                  </svg>
+                ) : (
+                  <CategoryIcon name={cat} />
+                )}
                 <span className="line-clamp-1 text-center">{cat}</span>
               </button>
             );

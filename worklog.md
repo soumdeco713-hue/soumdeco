@@ -655,3 +655,59 @@ Stage Summary:
 - Products without category → "منتجات أخرى" section
 - All add/delete scenarios work perfectly: empty categories disappear, new categories appear, uncategorized products grouped
 - Charm and elegance preserved: Cormorant Garamond serif headers, brass accents, smooth scroll, no visual clutter
+
+---
+Task ID: 13
+Agent: main
+Task: Add scroll arrows, fix category filtering bug, treat Other Products as regular category, increase special offer glow.
+
+Work Log:
+
+=== FIX #1: SCROLL ARROWS ===
+- Added left/right chevron arrows to each CategoryRow in AllProducts
+- Arrows appear/disappear based on scroll position (canScrollLeft, canScrollRight state)
+- Clicking an arrow scrolls by one card width + gap (smooth scroll)
+- Arrows styled: white/90 bg, brass border, backdrop-blur, hover to charcoal
+- Arrows disappear at start/end of scroll (no dead arrows)
+
+=== FIX #2: CATEGORY FILTERING BUG (false category) ===
+ROOT CAUSE: When a category was selected, AllProducts showed <CategoryRow name={activeCategory} products={products} /> — passing ALL products, not filtered. So clicking "Coussins" showed all 29 products under the "Coussins" header.
+
+FIX: Added proper filtering logic:
+- filteredProducts = useMemo that filters by activeCategory
+- If activeCategory === OTHER_CATEGORY → filters products with empty category
+- Else → filters products where category matches activeCategory
+- CategoryRow now receives filteredProducts (not all products)
+- Empty filter result shows "لا توجد منتجات في هذه الفئة" message
+
+=== FIX #3: OTHER PRODUCTS AS REGULAR CATEGORY ===
+- Updated Categories.tsx: if any product has empty category, add OTHER_CATEGORY ("منتجات أخرى") to the categories list
+- Updated Categories.tsx: render the "other" icon (3 dots) for OTHER_CATEGORY button
+- Updated AllProducts.tsx: products with empty category are grouped under OTHER_CATEGORY
+- OTHER_CATEGORY now appears in: category buttons grid, AllProducts horizontal sections, AND can be filtered
+- Both components share the same OTHER_CATEGORY constant
+
+=== FIX #4: STRONGER SPECIAL OFFER GLOW ===
+- Created new .special-glow-pulse CSS class (stronger than .glow-pulse):
+  • 0%/100%: 4px shadow + 1px brass border + 28px brass glow + 50px bright brass outer glow
+  • 50%: 8px shadow + 2px brass border (0.50 opacity) + 44px brass glow (0.55) + 72px bright brass outer (0.40)
+  • 4s ease-in-out infinite (same speed as glow-pulse, just stronger values)
+- Updated special-offers-section.tsx: glow-pulse border-glow → special-glow-pulse border-glow
+- Original .glow-pulse kept for other potential uses (not currently used elsewhere)
+
+=== VERIFICATION (all scenarios tested) ===
+1. Arrows: 4 arrow buttons appear after scrolling, disappear at start/end ✓
+2. Category filter: clicking "Coussins" shows ONLY 2 Coussin products (not 29) ✓
+3. Other Products: appears as category button, clicking filters to uncategorized products ✓
+4. Special glow: special-glow-pulse class applied to special offer card ✓
+5. 0 console errors throughout all tests ✓
+6. Lint: 0 errors, 0 warnings ✓
+7. Reset to clean 29-product seed state (8 categories, no uncategorized)
+
+Stage Summary:
+- All 4 issues fixed and tested
+- Horizontal scroll rows now have elegant left/right arrows
+- Category filtering works correctly (no more false category bug)
+- "منتجات أخرى" is a regular category (button + filterable + same treatment)
+- Special offer cards glow more evidently (stronger brass halo, same 4s speed)
+- All edge cases handled: empty categories disappear, new categories appear, uncategorized grouped

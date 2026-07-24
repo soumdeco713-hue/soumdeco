@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import { Product } from "@/lib/products";
 import { ProductCard } from "./product-card";
 import { CategoryIcon } from "./category-icon";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 type AllProductsProps = {
   products: Product[];
@@ -13,19 +14,25 @@ type AllProductsProps = {
   isLowStock?: (product: Product) => boolean;
 };
 
+/** The label used for products that have no category assigned. */
+const OTHER_CATEGORY = "منتجات أخرى";
+
 /**
  * AllProducts — horizontal category sections.
  *
  * Each category is shown as a small elegant header (icon + name + count + divider),
- * with its products in a horizontal scrollable row below.
+ * with its products in a horizontal scrollable row below (with left/right arrows).
  *
- * Products without a category are grouped under "منتجات أخرى" (Other Products).
+ * Products without a category are grouped under "منتجات أخرى" (Other Products),
+ * which is treated as a regular category — it appears in the category buttons
+ * and can be filtered like any other category.
  *
  * Edge cases handled:
  *  - Empty category → not rendered (no empty sections)
- *  - Product with no category → goes to "Other Products" section
+ *  - Product with no category → goes to "منتجات أخرى" section
  *  - Deleting last product in a category → category section disappears automatically
  *  - Adding a new category → new section appears automatically
+ *  - Category filter active → shows ONLY that category's products (correct filtering)
  *  - No products at all → shows empty state message
  */
 export function AllProducts({
@@ -36,17 +43,13 @@ export function AllProducts({
   isLowStock,
 }: AllProductsProps) {
   // Group products by category — preserve insertion order
-  const { categorized, uncategorized, categoryOrder } = useMemo(() => {
+  // Products with no category are assigned to OTHER_CATEGORY
+  const { categorized, categoryOrder } = useMemo(() => {
     const map = new Map<string, Product[]>();
     const order: string[] = [];
-    const uncategorized: Product[] = [];
 
     for (const p of products) {
-      const cat = (p.category || "").trim();
-      if (!cat) {
-        uncategorized.push(p);
-        continue;
-      }
+      const cat = (p.category || "").trim() || OTHER_CATEGORY;
       if (!map.has(cat)) {
         map.set(cat, []);
         order.push(cat);
@@ -54,12 +57,20 @@ export function AllProducts({
       map.get(cat)!.push(p);
     }
 
-    return { categorized: map, uncategorized, categoryOrder: order };
+    return { categorized: map, categoryOrder: order };
   }, [products]);
 
-  // If a category filter is active, show only that category (horizontal row)
-  // Otherwise, show all categories as horizontal sections
+  // If a category filter is active, show only that category's products
   const isFiltered = activeCategory !== "";
+
+  // Get the products for the filtered category (or all if not filtered)
+  const filteredProducts = useMemo(() => {
+    if (!isFiltered) return products;
+    if (activeCategory === OTHER_CATEGORY) {
+      return products.filter((p) => !((p.category || "").trim()));
+    }
+    return products.filter((p) => (p.category || "").trim() === activeCategory);
+  }, [products, activeCategory, isFiltered]);
 
   return (
     <section
@@ -83,14 +94,20 @@ export function AllProducts({
             لا توجد منتجات.
           </p>
         ) : isFiltered ? (
-          /* Filtered view — show single category as horizontal row */
-          <CategoryRow
-            name={activeCategory}
-            products={products}
-            onProductClick={onProductClick}
-            isRupture={isRupture}
-            isLowStock={isLowStock}
-          />
+          /* Filtered view — show only the selected category's products */
+          filteredProducts.length === 0 ? (
+            <p className="py-10 text-center font-arabic text-sm text-gray-light">
+              لا توجد منتجات في هذه الفئة.
+            </p>
+          ) : (
+            <CategoryRow
+              name={activeCategory}
+              products={filteredProducts}
+              onProductClick={onProductClick}
+              isRupture={isRupture}
+              isLowStock={isLowStock}
+            />
+          )
         ) : (
           /* Default view — all categories as horizontal sections */
           <div className="space-y-8">
@@ -105,21 +122,10 @@ export function AllProducts({
                   onProductClick={onProductClick}
                   isRupture={isRupture}
                   isLowStock={isLowStock}
+                  isOther={cat === OTHER_CATEGORY}
                 />
               );
             })}
-
-            {/* Uncategorized products — "منتجات أخرى" (Other Products) */}
-            {uncategorized.length > 0 && (
-              <CategoryRow
-                name="منتجات أخرى"
-                products={uncategorized}
-                onProductClick={onProductClick}
-                isRupture={isRupture}
-                isLowStock={isLowStock}
-                forceIcon="other"
-              />
-            )}
           </div>
         )}
       </div>
@@ -130,7 +136,7 @@ export function AllProducts({
 /**
  * CategoryRow — a single category section with:
  *  - Small elegant header (icon + name + count + divider)
- *  - Horizontal scrollable row of product cards
+ *  - Horizontal scrollable row of product cards with left/right arrows
  */
 type CategoryRowProps = {
   name: string;
@@ -138,7 +144,7 @@ type CategoryRowProps = {
   onProductClick?: (product: Product) => void;
   isRupture?: (product: Product) => boolean;
   isLowStock?: (product: Product) => boolean;
-  forceIcon?: "other"; // for uncategorized products
+  isOther?: boolean; // true for "منتجات أخرى"
 };
 
 function CategoryRow({
@@ -147,8 +153,40 @@ function CategoryRow({
   onProductClick,
   isRupture,
   isLowStock,
-  forceIcon,
+  isOther,
 }: CategoryRowProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  // Check scroll position to show/hide arrows
+  const checkScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 4);
+  };
+
+  useEffect(() => {
+    checkScroll();
+    // Re-check on resize
+    const onResize = () => checkScroll();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [products]);
+
+  // Scroll by one card width (with smooth behavior)
+  const scrollBy = (dir: "left" | "right") => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const cardWidth = el.querySelector(".product-card-h")?.getBoundingClientRect().width ?? 150;
+    const gap = 12; // 0.75rem gap
+    el.scrollBy({
+      left: dir === "left" ? -(cardWidth + gap) : cardWidth + gap,
+      behavior: "smooth",
+    });
+  };
+
   if (products.length === 0) return null;
 
   return (
@@ -156,7 +194,7 @@ function CategoryRow({
       {/* Category header — small, elegant, with icon */}
       <div className="cat-section-header">
         <div className="cat-icon-wrap">
-          {forceIcon === "other" ? (
+          {isOther ? (
             <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="2" />
               <circle cx="5" cy="12" r="2" />
@@ -171,19 +209,50 @@ function CategoryRow({
         <div className="cat-divider" />
       </div>
 
-      {/* Horizontal scrollable product row */}
-      <div className="cat-row-scroll">
-        {products.map((p, i) => (
-          <div key={p.id} className="product-card-h">
-            <ProductCard
-              product={p}
-              index={i}
-              onClick={onProductClick}
-              rupture={isRupture?.(p)}
-              lowStock={isLowStock?.(p)}
-            />
-          </div>
-        ))}
+      {/* Horizontal scrollable product row with arrows */}
+      <div className="relative">
+        {/* Left arrow */}
+        {canScrollLeft && (
+          <button
+            type="button"
+            onClick={() => scrollBy("left")}
+            aria-label="السابق"
+            className="absolute left-0 top-1/2 z-10 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-clay/50 bg-white/90 text-charcoal shadow-md backdrop-blur-sm transition-all hover:bg-charcoal hover:text-cream hover:border-charcoal focus:outline-none"
+          >
+            <ChevronLeft className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+        )}
+
+        {/* Right arrow */}
+        {canScrollRight && (
+          <button
+            type="button"
+            onClick={() => scrollBy("right")}
+            aria-label="التالي"
+            className="absolute right-0 top-1/2 z-10 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-clay/50 bg-white/90 text-charcoal shadow-md backdrop-blur-sm transition-all hover:bg-charcoal hover:text-cream hover:border-charcoal focus:outline-none"
+          >
+            <ChevronRight className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+        )}
+
+        {/* Scrollable row */}
+        <div
+          ref={scrollRef}
+          onScroll={checkScroll}
+          className="cat-row-scroll"
+        >
+          {products.map((p, i) => (
+            <div key={p.id} className="product-card-h">
+              <ProductCard
+                product={p}
+                index={i}
+                onClick={onProductClick}
+                rupture={isRupture?.(p)}
+                lowStock={isLowStock?.(p)}
+              />
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
