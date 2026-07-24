@@ -158,6 +158,22 @@ for row_idx in range(3, 3 + len(products)):
     ws.row_dimensions[row_idx].height = 55
 ws.freeze_panes = 'A3'  # freeze header + guidance rows
 
+# Dropdowns for featured + isSpecialOffer columns (true/false) — no typing needed
+from openpyxl.worksheet.datavalidation import DataValidation
+featured_col_letter = get_column_letter(PRODUCTS_COLS.index('featured') + 1)
+special_col_letter = get_column_letter(PRODUCTS_COLS.index('isSpecialOffer') + 1)
+bool_dv = DataValidation(
+    type="list",
+    formula1='"true,false"',
+    allow_blank=True,
+    showDropDown=False,  # False = SHOW the dropdown arrow (openpyxl quirk)
+)
+bool_dv.prompt = 'Click to choose: true or false'
+bool_dv.promptTitle = 'Yes / No'
+ws.add_data_validation(bool_dv)
+bool_dv.add(f'{featured_col_letter}3:{featured_col_letter}1000')
+bool_dv.add(f'{special_col_letter}3:{special_col_letter}1000')
+
 # ============================================================
 #  ORDERS TAB
 # ============================================================
@@ -208,7 +224,6 @@ ws_o.conditional_formatting.add(status_range, CellIsRule(operator='equal', formu
 ws_o.conditional_formatting.add(status_range, CellIsRule(operator='equal', formula=['"Cancelled"'], fill=PatternFill(start_color=STATUS_CANCELLED, end_color=STATUS_CANCELLED, fill_type='solid'), font=Font(bold=True, color=WHITE, size=11)))
 
 # Status dropdown (data validation) — user picks from list, no typing needed
-from openpyxl.worksheet.datavalidation import DataValidation
 status_dv = DataValidation(
     type="list",
     formula1='"New,Confirmed,Shipped,Delivered,Cancelled"',
