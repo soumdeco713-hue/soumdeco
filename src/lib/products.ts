@@ -984,6 +984,7 @@ function normalizeProduct(p: any): Product | null {
                p.featured === "1" ||
                (typeof p.featured === "string" &&
                 p.featured.toLowerCase() === "true")),
+    inStock: p.inStock !== false, // default true unless explicitly false
     isSpecialOffer: (p.isSpecialOffer === true ||
                      p.isSpecialOffer === 1 ||
                      p.isSpecialOffer === "1" ||

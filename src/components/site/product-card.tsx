@@ -67,7 +67,7 @@ export function ProductCard({ product, onClick, rupture, lowStock, index = 0 }: 
       </div>
       <div className="flex flex-1 flex-col gap-1 p-3">
         <h3 className="line-clamp-2 font-arabic text-sm font-bold leading-snug">
-          <span className="text-blue-black-animated">{product.name}</span>
+          <span className="text-blue-black">{product.name}</span>
         </h3>
         <p
           className={`font-arabic text-sm font-bold ${

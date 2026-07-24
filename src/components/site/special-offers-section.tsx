@@ -47,7 +47,7 @@ export function SpecialOffersSection({
             <span className="text-neon-magenta text-sm">🎁</span>
           </div>
           <h2 className="font-arabic text-3xl font-bold sm:text-4xl">
-            <span className="text-blue-black-animated">عروض خاصة</span>
+            <span className="text-blue-black">عروض خاصة</span>
           </h2>
           <div
             className="mx-auto mt-3 h-[2px] w-20 rounded-full"
@@ -110,7 +110,7 @@ export function SpecialOffersSection({
                 </div>
                 <div className="flex flex-1 flex-col gap-1 p-3">
                   <h3 className="line-clamp-2 font-arabic text-sm font-bold leading-snug">
-                    <span className="text-blue-black-animated">{p.name}</span>
+                    <span className="text-blue-black">{p.name}</span>
                   </h3>
                   <p
                     className={`font-arabic text-sm font-bold ${

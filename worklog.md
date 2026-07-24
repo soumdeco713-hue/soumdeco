@@ -533,3 +533,66 @@ Stage Summary:
 - special-offers-section.tsx is back to original EXCEPT for the 2 requested features (glow + badge text)
 - All original text, colors, structure, RTL, Arabic preserved
 - Seed products confirmed to have no special priority — they are regular products
+
+---
+Task ID: 11
+Agent: main
+Task: Complete code scan — fix errors, verify wiring, optimize for phone CPU.
+
+Work Log:
+
+=== CRITICAL BUG FIX ===
+- products.ts normalizeProduct() was missing the required `inStock` field in its return object
+- This caused a TypeScript error and could cause runtime issues when components accessed product.inStock
+- Fixed: added `inStock: p.inStock !== false` (defaults to true unless explicitly false)
+
+=== CPU OPTIMIZATION FOR PHONES ===
+1. Replaced text-blue-black-animated (8s background-position shimmer) with text-blue-black (static gradient) on ALL product cards:
+   - product-card.tsx: 29 cards on home page were running 29 simultaneous shimmer animations
+   - special-offers-section.tsx: product names in special offers grid
+   - Result: 29 continuous background-position animations REMOVED — biggest CPU win
+   - Kept animated version for section titles only (4 elements total: all-products, categories, brand-story, footer)
+
+2. Made cat-glow and badge-glow STATIC (were continuous 5s/4s box-shadow animations):
+   - Was: 8+ category buttons each running continuous box-shadow pulse = 8 repaint loops
+   - Now: no continuous animation on category buttons
+   - The .cat-glow and .badge-glow classes still exist (for compatibility) but have no animation
+
+3. Removed 3 unused CSS animation classes:
+   - text-gold-glow (replaced by text-soum-deco-glow, not used anywhere)
+   - tagline-float (removed from hero, not used)
+   - letter-reveal (removed from hero, was causing hydration issues)
+   - CSS file: 35KB → 32KB (smaller = faster parse on phones)
+
+4. Infinite animations reduced: 25 → 21 (removed 4 unused)
+
+=== CODE CLEANUP ===
+- Removed debug console.log from api/order/route.ts (was logging customer data in dev mode)
+- Kept console.error for actual error handling (appropriate)
+
+=== VERIFICATION ===
+- Lint: 0 errors, 0 warnings ✓
+- TypeScript: 0 errors in src/ ✓ (inStock bug fixed)
+- Build: succeeds ✓
+- Browser: 0 console errors, 0 page errors ✓
+- 29 products render correctly ✓
+- All sections present: Hero, Featured Carousel, Categories, All Products, Brand Story, Footer ✓
+- Animated shimmer: only 4 elements (section titles) — down from 33+ (was 29 product cards + 4 titles)
+- Static gradient: 29 elements (all product cards) — zero CPU cost
+- CSS size: 32KB (was 35KB)
+
+=== REMAINING INFINITE ANIMATIONS (all acceptable) ===
+- soum-deco-shimmer (hero title): 1 element, 6s — the brand centerpiece
+- blue-black-shimmer (section titles): 4 elements, 8s — elegant accent
+- shimmer-line (skeleton loaders): only during loading, stops when content arrives
+- glow-pulse + border-glow (special offers): only on special offer cards (0-3 typically)
+- brass-shimmer (gradient borders, badge shimmer): 2 elements max
+- Others (neon-pulse, float-strong, etc.): defined but not actively used in current layout
+
+Stage Summary:
+- Critical inStock bug FIXED
+- Phone CPU optimized: 29 continuous shimmer animations removed from product grid
+- Category button glows made static (was 8 continuous box-shadow animations)
+- 3 unused CSS classes removed (CSS 35KB → 32KB)
+- All wiring verified correct: lint, type check, build all pass
+- 0 errors, 0 warnings, site runs smoothly

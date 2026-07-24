@@ -57,13 +57,7 @@ export async function POST(req: NextRequest) {
         );
       }
     } else {
-      // Dev mode — no sheet configured. Log the order but accept it.
-      console.log("[order] No sheet URL configured — order accepted but not saved:", {
-        product: body.product,
-        fullName: body.fullName,
-        phone,
-        wilaya: body.wilaya,
-      });
+      // Dev mode — no sheet configured. Accept the order (no persistence).
     }
 
     return NextResponse.json({ ok: true });
