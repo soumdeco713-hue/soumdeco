@@ -8,7 +8,7 @@
 // - Automatic image optimization + CDN delivery
 // - Permanent URLs (https://res.cloudinary.com/{cloud}/image/upload/...)
 
-const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || "soumdeco";
+const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || "anhvhy4j";
 const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "soumdeco";
 
 /**

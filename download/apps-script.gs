@@ -91,11 +91,17 @@ function serveStock() {
     sheet.getRange(1, 1, 1, 2).setValues([['Product Name','Stock Count']]);
   }
   var values = sheet.getDataRange().getValues();
-  var csv = values.map(function(r){
-    return r.map(function(c){
+  // Build CSV, skipping the guidance row (row 2) which contains Arabic hints
+  var rows = [];
+  for (var i = 0; i < values.length; i++) {
+    var r = values[i];
+    // Skip guidance row (row 2, index 1) — detect by non-ASCII chars in first cell
+    if (i === 1 && r[0] && /[\u0600-\u06FF\u{1F000}-\u{1FFFF}]/u.test(String(r[0]))) continue;
+    rows.push(r.map(function(c){
       return '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"';
-    }).join(',');
-  }).join('\n');
+    }).join(','));
+  }
+  var csv = rows.join('\n');
   return ContentService.createTextOutput(csv).setMimeType(ContentService.MimeType.CSV);
 }
 
@@ -129,9 +135,15 @@ function serveProducts() {
   if (values.length < 2) return jsonOut([]);
   var header = values[0];
   var out = [];
+  // Start from row 2 (index 1). Skip guidance row (row 2) if it contains
+  // Arabic/emoji hints instead of real product data.
   for (var i = 1; i < values.length; i++) {
     var r = values[i];
     if (!r[0]) continue;
+    // Skip the guidance row — detect it by checking if the id cell contains
+    // non-ASCII characters (emojis/Arabic) which real product IDs never have.
+    var idStr = String(r[0]);
+    if (/[\u0600-\u06FF\u{1F000}-\u{1FFFF}]/u.test(idStr)) continue;
     var obj = {};
     for (var j = 0; j < header.length; j++) obj[header[j]] = r[j];
     obj.price = (obj.price===''||obj.price===null||obj.price===undefined)?null:Number(obj.price);
