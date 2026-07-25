@@ -94,19 +94,45 @@ export function AllProducts({
             لا توجد منتجات.
           </p>
         ) : isFiltered ? (
-          /* Filtered view — show only the selected category's products */
+          /* Filtered view — show selected category's products in a VERTICAL GRID
+             (different from the default horizontal-scroll layout) */
           filteredProducts.length === 0 ? (
             <p className="py-10 text-center font-arabic text-sm text-gray-light">
               لا توجد منتجات في هذه الفئة.
             </p>
           ) : (
-            <CategoryRow
-              name={activeCategory}
-              products={filteredProducts}
-              onProductClick={onProductClick}
-              isRupture={isRupture}
-              isLowStock={isLowStock}
-            />
+            <div>
+              {/* Category header */}
+              <div className="cat-section-header mb-4">
+                <div className="cat-icon-wrap">
+                  {activeCategory === OTHER_CATEGORY ? (
+                    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="2" />
+                      <circle cx="5" cy="12" r="2" />
+                      <circle cx="19" cy="12" r="2" />
+                    </svg>
+                  ) : (
+                    <CategoryIcon name={activeCategory} />
+                  )}
+                </div>
+                <h3>{activeCategory}</h3>
+                <span className="cat-count">({filteredProducts.length})</span>
+                <div className="cat-divider" />
+              </div>
+              {/* Vertical grid — 2 cols mobile, 3 cols tablet, 4 cols desktop */}
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
+                {filteredProducts.map((p, i) => (
+                  <ProductCard
+                    key={p.id}
+                    product={p}
+                    index={i}
+                    onClick={onProductClick}
+                    rupture={isRupture?.(p)}
+                    lowStock={isLowStock?.(p)}
+                  />
+                ))}
+              </div>
+            </div>
           )
         ) : (
           /* Default view — all categories as horizontal sections */

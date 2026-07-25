@@ -364,6 +364,133 @@ function CategoryIcon({ name }: { name: string }) {
     );
   }
 
+  // MIRRORS
+  if (
+    key.includes("miroir") ||
+    key.includes("mirror") ||
+    key.includes("مراه") ||
+    key.includes("مرايه")
+  ) {
+    return (
+      <svg viewBox="0 0 24 24" className={common} {...stroke}>
+        <ellipse cx="12" cy="10" rx="7" ry="9" />
+        <path d="M12 1v2M12 19v3M5 10h14" />
+      </svg>
+    );
+  }
+
+  // LAMPS / NIGHTLIGHTS / VEILLEUSE
+  if (
+    key.includes("lampe") ||
+    key.includes("veilleuse") ||
+    key.includes("lamp") ||
+    key.includes("nightlight") ||
+    key.includes("lighting") ||
+    key.includes("مصباح") ||
+    key.includes("اناره")
+  ) {
+    return (
+      <svg viewBox="0 0 24 24" className={common} {...stroke}>
+        <path d="M9 2h6l3 7H6l3-7Z" />
+        <path d="M12 9v9M9 22h6" />
+      </svg>
+    );
+  }
+
+  // VASES / JARS / POTTERY
+  if (
+    key.includes("vase") ||
+    key.includes("jarr") ||
+    key.includes("jar") ||
+    key.includes("pottery") ||
+    key.includes("poterie") ||
+    key.includes("vase") ||
+    key.includes("مزهرية") ||
+    key.includes("جره") ||
+    key.includes("وعاء")
+  ) {
+    return (
+      <svg viewBox="0 0 24 24" className={common} {...stroke}>
+        <path d="M8 3h8v3l-1 2a6 6 0 0 1 3 5v6a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3v-6a6 6 0 0 1 3-5L8 6V3Z" />
+        <path d="M9 3h6" />
+      </svg>
+    );
+  }
+
+  // COOKWARE / POTS / COCOTTE
+  if (
+    key.includes("cocotte") ||
+    key.includes("marmite") ||
+    key.includes("casserol") ||
+    key.includes("pot ") ||
+    key.includes("pressure") ||
+    key.includes("autocuiseur") ||
+    key.includes("قدر") ||
+    key.includes("حله")
+  ) {
+    return (
+      <svg viewBox="0 0 24 24" className={common} {...stroke}>
+        <path d="M5 4h14v3H5zM5 7h14l-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 7Z" />
+        <path d="M9 4V2M15 4V2" />
+      </svg>
+    );
+  }
+
+  // BLENDER / MIXER
+  if (
+    key.includes("blend") ||
+    key.includes("mixeur") ||
+    key.includes("mixer") ||
+    key.includes("robot") ||
+    key.includes("خلاط")
+  ) {
+    return (
+      <svg viewBox="0 0 24 24" className={common} {...stroke}>
+        <path d="M8 2h8l-1 10a3 3 0 0 1-3 3 3 3 0 0 1-3-3L8 2Z" />
+        <path d="M9 15h6M10 15v5M14 15v5M8 22h8" />
+      </svg>
+    );
+  }
+
+  // FURNITURE / MEUBLES / CABINETS
+  if (
+    key.includes("meuble") ||
+    key.includes("mobilier") ||
+    key.includes("armoire") ||
+    key.includes("cabinet") ||
+    key.includes("rangements") ||
+    key.includes("porte") ||
+    key.includes("اخذه") ||
+    key.includes("خزانه") ||
+    key.includes("مكتب")
+  ) {
+    return (
+      <svg viewBox="0 0 24 24" className={common} {...stroke}>
+        <rect x="4" y="3" width="16" height="18" rx="1" />
+        <path d="M4 9h16M12 3v18M8 6h2M14 6h2M8 12h2M14 12h2" />
+      </svg>
+    );
+  }
+
+  // COFFEE / TEA SERVICE
+  if (
+    key.includes("cafe") ||
+    key.includes("café") ||
+    key.includes("coffee") ||
+    key.includes("tea") ||
+    key.includes("the") ||
+    key.includes("thé") ||
+    key.includes("قهوه") ||
+    key.includes("شاي")
+  ) {
+    return (
+      <svg viewBox="0 0 24 24" className={common} {...stroke}>
+        <path d="M4 8h12v6a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V8Z" />
+        <path d="M16 9h2a2 2 0 0 1 0 4h-2M8 4v2M12 4v2" />
+      </svg>
+    );
+  }
+
   // DEFAULT: tag icon
   return (
     <svg viewBox="0 0 24 24" className={common} {...stroke}>

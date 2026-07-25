@@ -935,3 +935,40 @@ Also updated apps-script.gs (in /download/) to skip guidance rows server-side (f
 - Contains: src/, public/, prisma/, db/, scripts/, upload/, .env, all config files
 - Excludes: node_modules/, .next/, logs
 - Key files verified: brand-config.ts, seed-products.ts, hero.tsx, all-products.tsx, cod-order-form.tsx, admin-panel.tsx, globals.css, logo.jpg, .env
+
+---
+Task ID: 19
+Agent: main
+Task: Fix quantity input on phone, category filter vertical grid, add more category icon shapes.
+
+Work Log:
+
+=== FIX #1: QUANTITY INPUT — LOCAL STATE ===
+Problem: On phone, typing "10" in the quantity input would set quantity to 1 (first digit), clear the input, then "0" would fail. Multi-digit quantities were impossible.
+Root cause: Controlled input with value={items[0].quantity > 4 ? qty : ""} — typing "1" set qty to 1, which made the input value "" again.
+Fix: Added local state `customQty` (string) that holds the input text independently. The actual quantity updates via setSingleQty() on every change, but the input display is controlled by customQty — so typing "10" shows "10" in the input while quantity updates to 10.
+- Clicking buttons 1-4 clears customQty (input shows empty, button is active)
+- Typing any number ≥1 in input sets customQty + updates quantity
+- onBlur clears customQty if invalid
+- onKeyDown Enter blurs the input
+- inputMode="numeric" for better phone keyboard
+Tested: qty=10 → total 166,000 DA ✓, qty=7 → total 116,200 DA ✓, click button 3 → input clears ✓
+
+=== FIX #2: CATEGORY FILTER — VERTICAL GRID ===
+Problem: When selecting a category, products showed in horizontal scroll (same as default view — no visual difference).
+Fix: When isFiltered is true, render products in a vertical grid (grid-cols-2 sm:grid-cols-3 lg:grid-cols-4) instead of a CategoryRow with horizontal scroll.
+- Category header still shows (icon + name + count + divider)
+- Grid layout differentiates filtered view from default horizontal sections
+Tested: clicking "Coussins" → 2 products in vertical grid ✓
+
+=== FIX #3: MORE CATEGORY ICON SHAPES ===
+Added 7 new icon shapes to category-icon.tsx:
+1. Mirrors (miroir/mirror/مراه) — ellipse with stand
+2. Lamps/Nightlights (lampe/veilleuse/lamp/مصباح) — lamp shape
+3. Vases/Jars/Pottery (vase/jarr/jar/pottery/مزهرية/جره) — vase shape
+4. Cookware/Pots/Cocotte (cocotte/marmite/casserol/قدر) — pot shape
+5. Blender/Mixer (blend/mixeur/mixer/خلاط) — blender shape
+6. Furniture/Meubles (meuble/mobilier/armoire/rangements/خزانه) — cabinet shape
+7. Coffee/Tea Service (cafe/café/coffee/tea/قهوه/شاي) — cup shape
+Total icon types now: 18 (was 11) + default tag icon = 19 shapes
+All 8 current categories now have specific matching icons.

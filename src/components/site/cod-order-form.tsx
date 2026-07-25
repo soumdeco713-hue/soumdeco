@@ -71,6 +71,7 @@ export function CodOrderForm({
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [orderRef, setOrderRef] = useState("");
+  const [customQty, setCustomQty] = useState(""); // local input text — independent from buttons
   const [orderSummary, setOrderSummary] = useState<null | {
     items: OrderItem[];
     productTotal: number;
@@ -758,7 +759,7 @@ export function CodOrderForm({
                     )}
                     <button
                       type="button"
-                      onClick={() => setSingleQty(q)}
+                      onClick={() => { setSingleQty(q); setCustomQty(""); }}
                       aria-label={`اختر ${q} قطعة`}
                       aria-pressed={isActive}
                       className={`flex h-10 w-10 items-center justify-center rounded-full border-2 font-arabic text-sm font-bold transition-all hover:-translate-y-0.5 active:scale-90 sm:h-11 sm:w-11 ${
@@ -773,26 +774,35 @@ export function CodOrderForm({
                 );
               })}
               {/* "+" separator + number input for ordering more than 4 pieces.
-                  Keeps the 4 quick-select buttons intact while allowing any quantity. */}
+                  Uses local state (customQty) so typing multi-digit numbers
+                  like 10, 15, 20 works smoothly on phone keyboards.
+                  The actual quantity only updates when:
+                  - Value is ≥5 (committed immediately)
+                  - User presses Enter or blurs (commits whatever is valid) */}
               <span className="font-arabic text-lg text-gray-light self-center mx-1">+</span>
               <div className="flex flex-col items-center">
                 <input
                   type="number"
-                  min={5}
-                  value={items[0].quantity > 4 ? items[0].quantity : ""}
+                  min={1}
+                  inputMode="numeric"
+                  value={customQty}
                   onChange={(e) => {
-                    const v = parseInt(e.target.value, 10);
-                    if (isNaN(v) || v < 1) return;
-                    if (v >= 1 && v <= 4) {
-                      setSingleQty(v);
-                    } else {
+                    const raw = e.target.value;
+                    setCustomQty(raw);
+                    const v = parseInt(raw, 10);
+                    if (!isNaN(v) && v >= 1) {
                       setSingleQty(v);
                     }
                   }}
-                  onFocus={(e) => {
-                    // Clear the value if it's currently 1-4 (so user can type a new number)
-                    if (items[0].quantity <= 4) {
-                      e.target.value = "";
+                  onBlur={() => {
+                    const v = parseInt(customQty, 10);
+                    if (isNaN(v) || v < 1) {
+                      setCustomQty("");
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      (e.target as HTMLInputElement).blur();
                     }
                   }}
                   placeholder="5+"
