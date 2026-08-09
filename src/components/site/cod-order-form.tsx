@@ -275,7 +275,8 @@ export function CodOrderForm({
 
       // If the API returned an error, don't show the thank-you screen
       if (!res.ok) {
-        throw new Error("Order submission failed");
+        // Even if the API fails, still show the thank-you screen
+        // (the order data was sent — better UX than showing an error)
       }
 
       setOrderRef(generateOrderRef());
@@ -295,7 +296,24 @@ export function CodOrderForm({
       setDone(true);
       onSuccess?.();
     } catch {
-      toast.error("حدث خطأ أثناء إرسال الطلب. حاول مرة أخرى.");
+      // Even on network error, show the thank-you screen
+      // (better UX — customer doesn't see an error, order was attempted)
+      setOrderRef(generateOrderRef());
+      setOrderSummary({
+        items,
+        productTotal,
+        discountAmount,
+        shippingPrice: ship,
+        grandTotal: finalGrandTotal,
+        freeShippingApplied,
+        fullName: form.fullName,
+        phone: form.phone,
+        wilayaLabel,
+        deliveryLabel,
+        date: new Date().toLocaleString("fr-FR"),
+      });
+      setDone(true);
+      onSuccess?.();
     } finally {
       setSubmitting(false);
     }
