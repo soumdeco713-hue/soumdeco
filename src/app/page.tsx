@@ -328,6 +328,7 @@ export default function Home() {
               products={allProductsList}
               activeCategory={activeCategory}
               onProductClick={handleProductClick}
+              onSelectCategory={setActiveCategory}
               isRupture={isRupture}
               isLowStock={isLowStock}
             />

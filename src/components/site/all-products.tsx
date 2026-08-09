@@ -10,6 +10,7 @@ type AllProductsProps = {
   products: Product[];
   activeCategory: string;
   onProductClick?: (product: Product) => void;
+  onSelectCategory?: (category: string) => void;
   isRupture?: (product: Product) => boolean;
   isLowStock?: (product: Product) => boolean;
 };
@@ -39,6 +40,7 @@ export function AllProducts({
   products,
   activeCategory,
   onProductClick,
+  onSelectCategory,
   isRupture,
   isLowStock,
 }: AllProductsProps) {
@@ -48,7 +50,11 @@ export function AllProducts({
     const map = new Map<string, Product[]>();
     const order: string[] = [];
 
-    for (const p of products) {
+    // Sort products by sortOrder DESCENDING — newest products appear first.
+    // Admin can still manually reorder via the move up/down buttons (which swap sortOrder values).
+    const sorted = [...products].sort((a, b) => (b.sortOrder ?? 0) - (a.sortOrder ?? 0));
+
+    for (const p of sorted) {
       const cat = (p.category || "").trim() || OTHER_CATEGORY;
       if (!map.has(cat)) {
         map.set(cat, []);
@@ -146,6 +152,7 @@ export function AllProducts({
                   name={cat}
                   products={catProducts}
                   onProductClick={onProductClick}
+                  onShowAll={onSelectCategory}
                   isRupture={isRupture}
                   isLowStock={isLowStock}
                   isOther={cat === OTHER_CATEGORY}
@@ -168,6 +175,7 @@ type CategoryRowProps = {
   name: string;
   products: Product[];
   onProductClick?: (product: Product) => void;
+  onShowAll?: (category: string) => void;
   isRupture?: (product: Product) => boolean;
   isLowStock?: (product: Product) => boolean;
   isOther?: boolean; // true for "منتجات أخرى"
@@ -177,6 +185,7 @@ function CategoryRow({
   name,
   products,
   onProductClick,
+  onShowAll,
   isRupture,
   isLowStock,
   isOther,
@@ -233,6 +242,15 @@ function CategoryRow({
         <h3>{name}</h3>
         <span className="cat-count">({products.length})</span>
         <div className="cat-divider" />
+        {onShowAll && (
+          <button
+            type="button"
+            onClick={() => onShowAll(name)}
+            className="font-arabic text-[11px] text-brass-deep hover:text-brass transition-colors whitespace-nowrap mr-2"
+          >
+            عرض الكل ←
+          </button>
+        )}
       </div>
 
       {/* Horizontal scrollable product row with arrows */}

@@ -164,6 +164,8 @@ function doCreateProduct(p) {
   var sheet = ensureProductsSheet();
   if (findProductRow_(sheet, p.id) >= 0) return doUpdateProduct(p);
   sheet.appendRow(buildProductRow_(p));
+  // Auto-add product name to Stock tab so admin only needs to set the stock count
+  addToStockTab_(p.name || '');
   return jsonOut({ ok: true });
 }
 
@@ -179,8 +181,48 @@ function doDeleteProduct(id) {
   var sheet = ensureProductsSheet();
   var rowIdx = findProductRow_(sheet, id);
   if (rowIdx < 0) return jsonOut({ ok: false, error: 'not found' });
+  // Get product name before deleting (so we can also remove from Stock tab)
+  var productName = sheet.getRange(rowIdx + 2, 2).getValue(); // column B = name
   sheet.deleteRow(rowIdx + 2);
+  // Also remove from Stock tab
+  removeFromStockTab_(productName);
   return jsonOut({ ok: true });
+}
+
+// Auto-add product name to Stock tab when a product is created.
+// Admin only needs to set the stock count — the name is pre-filled.
+function addToStockTab_(productName) {
+  if (!productName) return;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(STOCK_SHEET);
+  if (!sheet) return;
+  // Check if product already exists in Stock tab
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    var names = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < names.length; i++) {
+      if (String(names[i][0] || '').trim() === productName.trim()) return; // already exists
+    }
+  }
+  // Add new row with product name + empty stock count (unlimited)
+  sheet.appendRow([productName, '']);
+}
+
+// Remove product from Stock tab when a product is deleted.
+function removeFromStockTab_(productName) {
+  if (!productName) return;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(STOCK_SHEET);
+  if (!sheet) return;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  var values = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0] || '').trim() === productName.trim()) {
+      sheet.deleteRow(i + 2);
+      return;
+    }
+  }
 }
 
 function doResetProducts() {

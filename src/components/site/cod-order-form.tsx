@@ -5,9 +5,9 @@ import { toast } from "sonner";
 import { Check, Send, Heart, Sparkles } from "lucide-react";
 import {
   getShippingPrice,
-  ShippingSpeed,
+  ShippingCompany,
   DeliveryType,
-  SHIPPING_SPEED_LABELS_AR,
+  SHIPPING_COMPANY_LABELS_AR,
   DELIVERY_TYPE_LABELS_AR,
 } from "@/lib/shipping";
 import { formatPrice, QuantityTier } from "@/lib/products";
@@ -38,7 +38,7 @@ type FormState = {
   phone: string;
   wilaya: string;
   commune: string;
-  speed: ShippingSpeed;
+  company: ShippingCompany;
   delivery: DeliveryType;
   notes: string;
 };
@@ -63,7 +63,7 @@ export function CodOrderForm({
     phone: "",
     wilaya: "",
     commune: "",
-    speed: "express",
+    company: "zr_express",
     delivery: "stop_desk",
     notes: "",
   });
@@ -105,15 +105,9 @@ export function CodOrderForm({
   // Returns null until BOTH wilaya AND commune are selected.
   const normalShippingPrice = useMemo(() => {
     if (!form.wilaya || !form.commune) return null;
-    const result = getShippingPrice(form.wilaya, form.speed, form.delivery);
+    const result = getShippingPrice(form.wilaya, form.company, form.delivery);
     return result ? result.price : null;
-  }, [form.wilaya, form.commune, form.speed, form.delivery]);
-
-  const shippingDelay = useMemo(() => {
-    if (!form.wilaya || !form.commune) return null;
-    const result = getShippingPrice(form.wilaya, form.speed, form.delivery);
-    return result ? result.delay : null;
-  }, [form.wilaya, form.commune, form.speed, form.delivery]);
+  }, [form.wilaya, form.commune, form.company, form.delivery]);
 
   // Active tier — only for single-item orders where the parent passed `quantityTiers`.
   // Used to compute discount and free-shipping benefits.
@@ -224,7 +218,7 @@ export function CodOrderForm({
     const wilayaLabel =
       wilayas.find((w) => w.code === form.wilaya)?.name || form.wilaya;
     const deliveryLabel = DELIVERY_TYPE_LABELS_AR[form.delivery];
-    const companyLabel = SHIPPING_SPEED_LABELS_AR[form.speed];
+    const companyLabel = SHIPPING_COMPANY_LABELS_AR[form.company];
     const ship = shippingPrice ?? 0;
     const finalGrandTotal = productTotalAfterDiscount + ship;
 
@@ -237,11 +231,9 @@ export function CodOrderForm({
       const totalUnitPrice = items.reduce((s, i) => s + (i.price ?? 0), 0);
 
       // Combine user notes with variation summary (if any)
-      const speedNote = shippingDelay !== null
-        ? `${SHIPPING_SPEED_LABELS_AR[form.speed]} — ${shippingDelay} ${shippingDelay === 1 ? "يوم" : "أيام"}`
-        : SHIPPING_SPEED_LABELS_AR[form.speed];
+      const companyNote = SHIPPING_COMPANY_LABELS_AR[form.company];
 
-      const combinedNotes = [extraNotes, form.notes, speedNote]
+      const combinedNotes = [extraNotes, form.notes, companyNote]
         .filter((s) => s && s.trim())
         .join(" · ");
 
@@ -269,7 +261,7 @@ export function CodOrderForm({
           total: productTotalAfterDiscount,
           shippingPrice: ship,
           grandTotal: finalGrandTotal,
-          shippingCompany: form.speed,
+          shippingCompany: form.company,
           shippingCompanyLabel: companyLabel,
           fullName: form.fullName,
           phone: form.phone.replace(/\D/g, ""),
@@ -655,18 +647,18 @@ export function CodOrderForm({
         <div>
           <label className={labelClass}>شركة التوصيل · Société de livraison</label>
           <div className="grid grid-cols-2 gap-2">
-            {(["express", "economique"] as ShippingSpeed[]).map((s) => (
+            {(["zr_express", "ecom_delivery"] as ShippingCompany[]).map((s) => (
               <button
                 key={s}
                 type="button"
-                onClick={() => set("speed", s)}
+                onClick={() => set("company", s)}
                 className={`font-arabic text-[12px] rounded-lg border px-3 py-2.5 font-medium transition-colors ${
-                  form.speed === s
+                  form.company === s
                     ? "border-charcoal bg-charcoal/10 text-charcoal"
                     : "border-clay/40 bg-night/40 text-gray hover:border-charcoal/50 hover:text-charcoal"
                 }`}
               >
-                {SHIPPING_SPEED_LABELS_AR[s]}
+                {SHIPPING_COMPANY_LABELS_AR[s]}
               </button>
             ))}
           </div>
@@ -706,16 +698,6 @@ export function CodOrderForm({
                   ? "0 دج (مجاني 🎉)"
                   : formatPrice(normalShippingPrice)}
               </span>
-              {shippingDelay !== null && !freeShippingApplied && (
-                <span className="font-arabic text-[11px] text-gray-light">
-                  ⏱️ مدة التوصيل: {shippingDelay} {shippingDelay === 1 ? "يوم" : "أيام"}
-                </span>
-              )}
-              {freeShippingApplied && (
-                <span className="font-arabic text-[11px] text-gray-light">
-                  ⏱️ مدة التوصيل: {shippingDelay} {shippingDelay === 1 ? "يوم" : "أيام"}
-                </span>
-              )}
             </div>
           ) : (
             <span className="font-arabic text-gray-light">

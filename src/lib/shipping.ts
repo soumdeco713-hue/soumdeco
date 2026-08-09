@@ -1,77 +1,78 @@
 // Shipping data for SOUM DECO — copied EXACTLY from soumdeco.netlify.app
-// Two options per delivery type (stop_desk / home):
-// - express: faster, more expensive (Yalidine Express)
-// - economique: slower, cheaper (Économique)
+// Two shipping companies:
+// - zr_express: ZR Express
+// - ecom_delivery: Ecom Delivery
+// Each company has stopDesk + home prices per wilaya (no delay, no express/economique)
 
-export type ShippingSpeed = "express" | "economique";
+export type ShippingCompany = "zr_express" | "ecom_delivery";
 export type DeliveryType = "stop_desk" | "home";
 
 type WilayaShipping = {
-  express: { stopDesk: number; home: number; delay: number };
-  economique: { stopDesk: number; home: number; delay: number };
+  zr_express: { stopDesk: number; home: number };
+  ecom_delivery: { stopDesk: number; home: number };
 };
 
-// 58 wilayas — prices in DA, delay in days
+// 58 wilayas — prices in DA
 // Prices copied EXACTLY from soumdeco.netlify.app reference site
 const SHIPPING_TABLE: Record<number, WilayaShipping> = {
-  1:  { express: { stopDesk: 900,  home: 1300,  delay: 4 }, economique: { stopDesk: 750, home: 1100, delay: 4 } }, // Adrar
-  2:  { express: { stopDesk: 450,  home: 800,  delay: 1 }, economique: { stopDesk: 400, home: 680, delay: 1 } }, // Chlef
-  3:  { express: { stopDesk: 550,  home: 900,  delay: 3 }, economique: { stopDesk: 500, home: 800, delay: 3 } }, // Laghouat
-  4:  { express: { stopDesk: 450,  home: 800,  delay: 1 }, economique: { stopDesk: 400, home: 680, delay: 1 } }, // Oum El Bouaghi
-  5:  { express: { stopDesk: 450,  home: 800,  delay: 1 }, economique: { stopDesk: 400, home: 700, delay: 1 } }, // Batna
-  6:  { express: { stopDesk: 450,  home: 800,  delay: 2 }, economique: { stopDesk: 400, home: 700, delay: 2 } }, // Béjaïa
-  7:  { express: { stopDesk: 550,  home: 900,  delay: 3 }, economique: { stopDesk: 500, home: 800, delay: 3 } }, // Biskra
-  8:  { express: { stopDesk: 650,  home: 1000,  delay: 4 }, economique: { stopDesk: 700, home: 1000, delay: 4 } }, // Béchar
-  9:  { express: { stopDesk: 400,  home: 600,  delay: 2 }, economique: { stopDesk: 350, home: 500, delay: 2 } }, // Blida
-  10:  { express: { stopDesk: 450,  home: 700,  delay: 2 }, economique: { stopDesk: 400, home: 600, delay: 2 } }, // Bouira
-  11:  { express: { stopDesk: 1050,  home: 1500,  delay: 5 }, economique: { stopDesk: 1050, home: 1500, delay: 5 } }, // Tamanrasset
-  12:  { express: { stopDesk: 450,  home: 800,  delay: 2 }, economique: { stopDesk: 450, home: 720, delay: 2 } }, // Tébessa
-  13:  { express: { stopDesk: 500,  home: 900,  delay: 2 }, economique: { stopDesk: 400, home: 700, delay: 2 } }, // Tlemcen
-  14:  { express: { stopDesk: 450,  home: 800,  delay: 2 }, economique: { stopDesk: 400, home: 700, delay: 2 } }, // Tiaret
-  15:  { express: { stopDesk: 450,  home: 700,  delay: 2 }, economique: { stopDesk: 400, home: 600, delay: 2 } }, // Tizi Ouzou
-  16:  { express: { stopDesk: 300,  home: 400,  delay: 1 }, economique: { stopDesk: 300, home: 400, delay: 1 } }, // Alger
-  17:  { express: { stopDesk: 500,  home: 900,  delay: 2 }, economique: { stopDesk: 500, home: 800, delay: 2 } }, // Djelfa
-  18:  { express: { stopDesk: 450,  home: 800,  delay: 2 }, economique: { stopDesk: 400, home: 700, delay: 2 } }, // Jijel
-  19:  { express: { stopDesk: 450,  home: 750,  delay: 1 }, economique: { stopDesk: 400, home: 680, delay: 1 } }, // Sétif
-  20:  { express: { stopDesk: 500,  home: 900,  delay: 2 }, economique: { stopDesk: 450, home: 730, delay: 2 } }, // Saïda
-  21:  { express: { stopDesk: 450,  home: 800,  delay: 2 }, economique: { stopDesk: 400, home: 700, delay: 2 } }, // Skikda
-  22:  { express: { stopDesk: 450,  home: 800,  delay: 2 }, economique: { stopDesk: 400, home: 700, delay: 2 } }, // Sidi Bel Abbès
-  23:  { express: { stopDesk: 450,  home: 800,  delay: 1 }, economique: { stopDesk: 450, home: 700, delay: 1 } }, // Annaba
-  24:  { express: { stopDesk: 450,  home: 800,  delay: 1 }, economique: { stopDesk: 400, home: 700, delay: 1 } }, // Guelma
-  25:  { express: { stopDesk: 450,  home: 800,  delay: 1 }, economique: { stopDesk: 400, home: 680, delay: 1 } }, // Constantine
-  26:  { express: { stopDesk: 450,  home: 750,  delay: 2 }, economique: { stopDesk: 400, home: 600, delay: 2 } }, // Médéa
-  27:  { express: { stopDesk: 450,  home: 800,  delay: 2 }, economique: { stopDesk: 400, home: 700, delay: 2 } }, // Mostaganem
-  28:  { express: { stopDesk: 500,  home: 800,  delay: 2 }, economique: { stopDesk: 400, home: 700, delay: 2 } }, // M'Sila
-  29:  { express: { stopDesk: 450,  home: 800,  delay: 2 }, economique: { stopDesk: 400, home: 700, delay: 2 } }, // Mascara
-  30:  { express: { stopDesk: 600,  home: 900,  delay: 3 }, economique: { stopDesk: 550, home: 900, delay: 3 } }, // Ouargla
-  31:  { express: { stopDesk: 450,  home: 700,  delay: 2 }, economique: { stopDesk: 400, home: 580, delay: 2 } }, // Oran
-  32:  { express: { stopDesk: 600,  home: 1000,  delay: 3 }, economique: { stopDesk: 700, home: 970, delay: 3 } }, // El Bayadh
-  33:  { express: { stopDesk: 1050,  home: 1500,  delay: 5 }, economique: { stopDesk: 1050, home: 1500, delay: 5 } }, // Illizi
-  34:  { express: { stopDesk: 450,  home: 750,  delay: 1 }, economique: { stopDesk: 400, home: 680, delay: 1 } }, // Bordj Bou Arréridj
-  35:  { express: { stopDesk: 450,  home: 700,  delay: 2 }, economique: { stopDesk: 350, home: 530, delay: 2 } }, // Boumerdès
-  36:  { express: { stopDesk: 450,  home: 800,  delay: 1 }, economique: { stopDesk: 450, home: 730, delay: 1 } }, // El Tarf
-  37:  { express: { stopDesk: 750,  home: 1100,  delay: 5 }, economique: { stopDesk: 750, home: 1100, delay: 5 } }, // Tindouf
-  38:  { express: { stopDesk: 520,  home: 850,  delay: 2 }, economique: { stopDesk: 400, home: 700, delay: 2 } }, // Tissemsilt
-  39:  { express: { stopDesk: 650,  home: 900,  delay: 3 }, economique: { stopDesk: 550, home: 900, delay: 3 } }, // El Oued
-  40:  { express: { stopDesk: 450,  home: 800,  delay: 2 }, economique: { stopDesk: 400, home: 700, delay: 2 } }, // Khenchela
-  41:  { express: { stopDesk: 450,  home: 800,  delay: 1 }, economique: { stopDesk: 450, home: 730, delay: 1 } }, // Souk Ahras
-  42:  { express: { stopDesk: 450,  home: 700,  delay: 2 }, economique: { stopDesk: 350, home: 530, delay: 2 } }, // Tipaza
-  43:  { express: { stopDesk: 450,  home: 800,  delay: 1 }, economique: { stopDesk: 400, home: 700, delay: 1 } }, // Mila
-  44:  { express: { stopDesk: 450,  home: 850,  delay: 2 }, economique: { stopDesk: 400, home: 700, delay: 2 } }, // Aïn Defla
-  45:  { express: { stopDesk: 600,  home: 1000,  delay: 4 }, economique: { stopDesk: 550, home: 930, delay: 4 } }, // Naâma
-  46:  { express: { stopDesk: 450,  home: 800,  delay: 2 }, economique: { stopDesk: 400, home: 700, delay: 2 } }, // Aïn Témouchent
-  47:  { express: { stopDesk: 550,  home: 900,  delay: 3 }, economique: { stopDesk: 500, home: 850, delay: 3 } }, // Ghardaïa
-  48:  { express: { stopDesk: 450,  home: 800,  delay: 2 }, economique: { stopDesk: 400, home: 700, delay: 2 } }, // Relizane
-  49:  { express: { stopDesk: 550,  home: 900,  delay: 3 }, economique: { stopDesk: 550, home: 930, delay: 3 } }, // El M'ghair
-  50:  { express: { stopDesk: 550,  home: 900,  delay: 3 }, economique: { stopDesk: 500, home: 850, delay: 3 } }, // El Menia
-  51:  { express: { stopDesk: 550,  home: 900,  delay: 3 }, economique: { stopDesk: 500, home: 800, delay: 3 } }, // Ouled Djellal
-  52:  { express: { stopDesk: 1050,  home: 1500,  delay: 4 }, economique: { stopDesk: 750, home: 1000, delay: 4 } }, // Bordj Baji Mokhtar
-  53:  { express: { stopDesk: 900,  home: 1000,  delay: 4 }, economique: { stopDesk: 950, home: 1400, delay: 4 } }, // Béni Abbès
-  54:  { express: { stopDesk: 900,  home: 1300,  delay: 5 }, economique: { stopDesk: 750, home: 1100, delay: 5 } }, // Timimoun
-  55:  { express: { stopDesk: 600,  home: 900,  delay: 3 }, economique: { stopDesk: 550, home: 930, delay: 3 } }, // Touggourt
-  56:  { express: { stopDesk: 1050,  home: 1500,  delay: 5 }, economique: { stopDesk: 1050, home: 1500, delay: 5 } }, // Djanet
-  57:  { express: { stopDesk: 1120,  home: 1400,  delay: 5 }, economique: { stopDesk: 550, home: 930, delay: 5 } }, // In Salah
-  58:  { express: { stopDesk: 1120,  home: 1400,  delay: 5 }, economique: { stopDesk: 500, home: 850, delay: 5 } }, // In Guezzam
+  1:  { zr_express: { stopDesk: 900,  home: 1300  }, ecom_delivery: { stopDesk: 750, home: 1100 } }, // Adrar
+  2:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 400, home: 680 } }, // Chlef
+  3:  { zr_express: { stopDesk: 550,  home: 900  }, ecom_delivery: { stopDesk: 500, home: 800 } }, // Laghouat
+  4:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 400, home: 680 } }, // Oum El Bouaghi
+  5:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 400, home: 700 } }, // Batna
+  6:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 400, home: 700 } }, // Béjaïa
+  7:  { zr_express: { stopDesk: 550,  home: 900  }, ecom_delivery: { stopDesk: 500, home: 800 } }, // Biskra
+  8:  { zr_express: { stopDesk: 650,  home: 1000  }, ecom_delivery: { stopDesk: 700, home: 1000 } }, // Béchar
+  9:  { zr_express: { stopDesk: 400,  home: 600  }, ecom_delivery: { stopDesk: 350, home: 500 } }, // Blida
+  10:  { zr_express: { stopDesk: 450,  home: 700  }, ecom_delivery: { stopDesk: 400, home: 600 } }, // Bouira
+  11:  { zr_express: { stopDesk: 1050,  home: 1500  }, ecom_delivery: { stopDesk: 1050, home: 1500 } }, // Tamanrasset
+  12:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 450, home: 720 } }, // Tébessa
+  13:  { zr_express: { stopDesk: 500,  home: 900  }, ecom_delivery: { stopDesk: 400, home: 700 } }, // Tlemcen
+  14:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 400, home: 700 } }, // Tiaret
+  15:  { zr_express: { stopDesk: 450,  home: 700  }, ecom_delivery: { stopDesk: 400, home: 600 } }, // Tizi Ouzou
+  16:  { zr_express: { stopDesk: 300,  home: 400  }, ecom_delivery: { stopDesk: 300, home: 400 } }, // Alger
+  17:  { zr_express: { stopDesk: 500,  home: 900  }, ecom_delivery: { stopDesk: 500, home: 800 } }, // Djelfa
+  18:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 400, home: 700 } }, // Jijel
+  19:  { zr_express: { stopDesk: 450,  home: 750  }, ecom_delivery: { stopDesk: 400, home: 680 } }, // Sétif
+  20:  { zr_express: { stopDesk: 500,  home: 900  }, ecom_delivery: { stopDesk: 450, home: 730 } }, // Saïda
+  21:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 400, home: 700 } }, // Skikda
+  22:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 400, home: 700 } }, // Sidi Bel Abbès
+  23:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 450, home: 700 } }, // Annaba
+  24:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 400, home: 700 } }, // Guelma
+  25:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 400, home: 680 } }, // Constantine
+  26:  { zr_express: { stopDesk: 450,  home: 750  }, ecom_delivery: { stopDesk: 400, home: 600 } }, // Médéa
+  27:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 400, home: 700 } }, // Mostaganem
+  28:  { zr_express: { stopDesk: 500,  home: 800  }, ecom_delivery: { stopDesk: 400, home: 700 } }, // M'Sila
+  29:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 400, home: 700 } }, // Mascara
+  30:  { zr_express: { stopDesk: 600,  home: 900  }, ecom_delivery: { stopDesk: 550, home: 900 } }, // Ouargla
+  31:  { zr_express: { stopDesk: 450,  home: 700  }, ecom_delivery: { stopDesk: 400, home: 580 } }, // Oran
+  32:  { zr_express: { stopDesk: 600,  home: 1000  }, ecom_delivery: { stopDesk: 700, home: 970 } }, // El Bayadh
+  33:  { zr_express: { stopDesk: 1050,  home: 1500  }, ecom_delivery: { stopDesk: 1050, home: 1500 } }, // Illizi
+  34:  { zr_express: { stopDesk: 450,  home: 750  }, ecom_delivery: { stopDesk: 400, home: 680 } }, // Bordj Bou Arréridj
+  35:  { zr_express: { stopDesk: 450,  home: 700  }, ecom_delivery: { stopDesk: 350, home: 530 } }, // Boumerdès
+  36:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 450, home: 730 } }, // El Tarf
+  37:  { zr_express: { stopDesk: 750,  home: 1100  }, ecom_delivery: { stopDesk: 750, home: 1100 } }, // Tindouf
+  38:  { zr_express: { stopDesk: 520,  home: 850  }, ecom_delivery: { stopDesk: 400, home: 700 } }, // Tissemsilt
+  39:  { zr_express: { stopDesk: 650,  home: 900  }, ecom_delivery: { stopDesk: 550, home: 900 } }, // El Oued
+  40:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 400, home: 700 } }, // Khenchela
+  41:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 450, home: 730 } }, // Souk Ahras
+  42:  { zr_express: { stopDesk: 450,  home: 700  }, ecom_delivery: { stopDesk: 350, home: 530 } }, // Tipaza
+  43:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 400, home: 700 } }, // Mila
+  44:  { zr_express: { stopDesk: 450,  home: 850  }, ecom_delivery: { stopDesk: 400, home: 700 } }, // Aïn Defla
+  45:  { zr_express: { stopDesk: 600,  home: 1000  }, ecom_delivery: { stopDesk: 550, home: 930 } }, // Naâma
+  46:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 400, home: 700 } }, // Aïn Témouchent
+  47:  { zr_express: { stopDesk: 550,  home: 900  }, ecom_delivery: { stopDesk: 500, home: 850 } }, // Ghardaïa
+  48:  { zr_express: { stopDesk: 450,  home: 800  }, ecom_delivery: { stopDesk: 400, home: 700 } }, // Relizane
+  49:  { zr_express: { stopDesk: 550,  home: 900  }, ecom_delivery: { stopDesk: 550, home: 930 } }, // El M'ghair
+  50:  { zr_express: { stopDesk: 550,  home: 900  }, ecom_delivery: { stopDesk: 500, home: 850 } }, // El Menia
+  51:  { zr_express: { stopDesk: 550,  home: 900  }, ecom_delivery: { stopDesk: 500, home: 800 } }, // Ouled Djellal
+  52:  { zr_express: { stopDesk: 1050,  home: 1500  }, ecom_delivery: { stopDesk: 750, home: 1000 } }, // Bordj Baji Mokhtar
+  53:  { zr_express: { stopDesk: 900,  home: 1000  }, ecom_delivery: { stopDesk: 950, home: 1400 } }, // Béni Abbès
+  54:  { zr_express: { stopDesk: 900,  home: 1300  }, ecom_delivery: { stopDesk: 750, home: 1100 } }, // Timimoun
+  55:  { zr_express: { stopDesk: 600,  home: 900  }, ecom_delivery: { stopDesk: 550, home: 930 } }, // Touggourt
+  56:  { zr_express: { stopDesk: 1050,  home: 1500  }, ecom_delivery: { stopDesk: 1050, home: 1500 } }, // Djanet
+  57:  { zr_express: { stopDesk: 1120,  home: 1400  }, ecom_delivery: { stopDesk: 550, home: 930 } }, // In Salah
+  58:  { zr_express: { stopDesk: 1120,  home: 1400  }, ecom_delivery: { stopDesk: 500, home: 850 } }, // In Guezzam
 };
 
 // Daira codes 59-69 map to parent wilayas
@@ -88,46 +89,44 @@ function resolveWilayaCode(code: string | number): number {
 
 export type ShippingPriceResult = {
   price: number;
-  delay: number;
-  speed: ShippingSpeed;
+  company: ShippingCompany;
   deliveryLabel: string;
 };
 
 export function getShippingPrice(
   wilayaCode: string | number,
-  speed: ShippingSpeed,
+  company: ShippingCompany,
   deliveryType: DeliveryType,
 ): ShippingPriceResult | null {
   const resolved = resolveWilayaCode(wilayaCode);
   const row = SHIPPING_TABLE[resolved];
   if (!row) return null;
-  const tier = row[speed];
+  const tier = row[company];
   const key = deliveryType === "stop_desk" ? "stopDesk" : "home";
   return {
     price: tier[key],
-    delay: tier.delay,
-    speed,
-    deliveryLabel: deliveryType === "stop_desk" ? "مكتب التوصيل" : "توصيل للمنزل",
+    company,
+    deliveryLabel: deliveryType === "stop_desk" ? "مكتب" : "توصيل للمنزل",
   };
 }
 
-export const SHIPPING_SPEED_LABELS: Record<ShippingSpeed, string> = {
-  express: "Yalidine Express",
-  economique: "Économique",
+export const SHIPPING_COMPANY_LABELS: Record<ShippingCompany, string> = {
+  zr_express: "ZR Express",
+  ecom_delivery: "Ecom Delivery",
 };
 
-export const SHIPPING_SPEED_LABELS_AR: Record<ShippingSpeed, string> = {
-  express: "Yalidine Express",
-  economique: "Économique",
+export const SHIPPING_COMPANY_LABELS_AR: Record<ShippingCompany, string> = {
+  zr_express: "ZR Express",
+  ecom_delivery: "Ecom Delivery",
 };
 
 export const DELIVERY_TYPE_LABELS: Record<DeliveryType, string> = {
-  stop_desk: "مكتب التوصيل",
+  stop_desk: "مكتب",
   home: "توصيل للمنزل",
 };
 
 export const DELIVERY_TYPE_LABELS_AR: Record<DeliveryType, string> = {
-  stop_desk: "مكتب التوصيل",
+  stop_desk: "مكتب",
   home: "توصيل للمنزل",
 };
 

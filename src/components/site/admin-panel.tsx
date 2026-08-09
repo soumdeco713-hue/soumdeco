@@ -38,18 +38,17 @@ type AdminPanelProps = {
   onClose: () => void;
 };
 
-// Resize image to high quality for Cloudinary.
-// Settings:
-//   - maxSize: 1500px (balanced quality + storage)
-//   - quality: 0.93 (high quality JPEG)
+// Resize image for optimal quality + storage.
+// Settings (optimized for Cloudflare R2 — 9500 products in 10GB):
+//   - maxSize: 850px (sharp on all screens, ~70KB per image)
+//   - quality: 0.85 (visually identical to 0.93, half the size)
+//   - Format: WebP (30% smaller than JPEG)
 //   - Max 5 photos per product
 //   - PNG transparency preserved when source is PNG
-//   - Fallback budget: if Cloudinary is NOT configured, progressively
-//     reduce quality until ~400KB to fit in base64.
 async function resizeImage(
   file: File,
-  maxSize = 1500,
-  budget = 400_000,
+  maxSize = 850,
+  budget = 200_000,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -78,26 +77,24 @@ async function resizeImage(
         ctx.imageSmoothingQuality = "high";
         ctx.drawImage(img, 0, 0, width, height);
 
-        // Preserve PNG transparency; otherwise use JPEG at max quality.
+        // Use WebP for all images (30% smaller than JPEG, supported everywhere).
+        // Preserve PNG transparency by keeping PNG format for PNG sources.
         const isPng = file.type === "image/png";
-        const isWebp = file.type === "image/webp";
-        let quality = 0.93;
-        let mimeType = isPng ? "image/png" : "image/jpeg";
+        let quality = 0.85;
+        let mimeType = isPng ? "image/png" : "image/webp";
         let dataUrl = canvas.toDataURL(mimeType, quality);
 
-        // Fallback: if Cloudinary is NOT configured, the base64 goes
-        // directly to the sheet. Progressively reduce quality until it
-        // fits within the budget. PNG has no quality param → fall back to JPEG.
+        // Fallback: progressively reduce quality until it fits within the budget.
         if (dataUrl.length > budget) {
-          mimeType = "image/jpeg";
-          quality = 0.95;
+          mimeType = "image/webp";
+          quality = 0.80;
           dataUrl = canvas.toDataURL(mimeType, quality);
-          while (dataUrl.length > budget && quality > 0.55) {
+          while (dataUrl.length > budget && quality > 0.50) {
             quality -= 0.05;
             dataUrl = canvas.toDataURL(mimeType, quality);
           }
           // If still too large, reduce resolution
-          while (dataUrl.length > budget && width > 800) {
+          while (dataUrl.length > budget && width > 400) {
             width = Math.round(width * 0.85);
             height = Math.round(height * 0.85);
             canvas.width = width;
@@ -238,7 +235,7 @@ function EditForm({
       const newPhotos: string[] = [];
       for (const f of toProcess) {
         try {
-          const dataUrl = await resizeImage(f, 1500, 400_000);
+          const dataUrl = await resizeImage(f, 850, 200_000);
           newPhotos.push(dataUrl);
         } catch {
           // skip failed image
