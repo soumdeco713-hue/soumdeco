@@ -1,0 +1,17 @@
+name = "soumdeco"
+compatibility_date = "2024-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# R2 bucket for product images (free egress — unlimited bandwidth)
+[[r2_buckets]]
+binding = "IMAGES_BUCKET"
+bucket_name = "soumdeco-images"
+
+# KV namespace for 3-minute product/stock cache
+[[kv_namespaces]]
+binding = "CATALOG_KV"
+id = "YOUR_KV_NAMESPACE_ID"
+
+# Cloudflare Pages settings
+[site]
+bucket = ".vercel/output/static"

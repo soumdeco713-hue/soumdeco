@@ -51,7 +51,6 @@ export function AllProducts({
     const order: string[] = [];
 
     // Sort products by sortOrder DESCENDING — newest products appear first.
-    // Admin can still manually reorder via the move up/down buttons (which swap sortOrder values).
     const sorted = [...products].sort((a, b) => (b.sortOrder ?? 0) - (a.sortOrder ?? 0));
 
     for (const p of sorted) {
@@ -62,6 +61,14 @@ export function AllProducts({
       }
       map.get(cat)!.push(p);
     }
+
+    // Sort category sections by product count (most products first).
+    // "منتجات أخرى" (Other) always appears last.
+    order.sort((a, b) => {
+      if (a === OTHER_CATEGORY) return 1;
+      if (b === OTHER_CATEGORY) return -1;
+      return (map.get(b)?.length ?? 0) - (map.get(a)?.length ?? 0);
+    });
 
     return { categorized: map, categoryOrder: order };
   }, [products]);

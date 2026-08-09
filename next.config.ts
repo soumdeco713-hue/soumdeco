@@ -1,13 +1,15 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  // Cloudflare Pages: no 'standalone' output (Cloudflare uses its own build)
   typescript: {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
-  // NOTE: 24h Cache-Control headers temporarily REMOVED for dev.
-  // Will be re-applied when pushing to production. See NETLIFY-OPTIMIZATION-GUIDE.md.
+  // Cloudflare doesn't support next/image optimizer — we pre-optimize on upload
+  images: {
+    unoptimized: true,
+  },
 };
 
 export default nextConfig;

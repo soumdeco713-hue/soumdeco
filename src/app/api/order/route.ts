@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sheetSubmitOrder, getSheetBaseUrl } from "@/lib/sheet";
 
+// Cloudflare edge runtime — orders are NEVER cached
+export const runtime = "edge";
+
 const PHONE_REGEX = /^0[567]\d{8}$/;
 
 export async function POST(req: NextRequest) {

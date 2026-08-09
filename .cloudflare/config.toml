@@ -1,0 +1,9 @@
+# Cloudflare Pages build configuration
+[build]
+command = "npx @cloudflare/next-on-pages"
+upload_format = "service-worker"
+
+[build.environment]
+NEXT_PUBLIC_SHEET_URL = "https://script.google.com/macros/s/AKfycbzUqywmIIQ6D4clXmnJNRFfLYJ_FhjTlXyUqGQ3GZmPxDNZUKW3QeVUY071pZwwk52X/exec"
+NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME = "anhvhy4j"
+NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET = "soumdeco"

@@ -485,7 +485,7 @@ for col_idx, h in enumerate(company_headers, 1):
     cell.alignment = center_align; cell.border = thin_border
 
 # Company rows
-companies = ['Yalidine Express', 'Économique']
+companies = ['ZR Express', 'Ecom Delivery']
 for i, company in enumerate(companies):
     row_idx = start_row + 2 + i
     c1 = ws_st.cell(row=row_idx, column=1, value=company)

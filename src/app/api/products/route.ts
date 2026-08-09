@@ -16,14 +16,48 @@ import {
 } from "@/lib/sheet";
 import { SEED_PRODUCTS } from "@/lib/seed-products";
 
-// NOTE: Netlify ISR (revalidate=1800) temporarily REMOVED for dev.
-// Will be re-applied when pushing to production. See NETLIFY-OPTIMIZATION-GUIDE.md.
+// Cloudflare edge runtime + KV cache (3 minutes)
+export const runtime = "edge";
+
+// Simple KV-backed cache (falls back to no-cache if KV not available)
+async function getCachedProducts(env?: any): Promise<SheetProduct[] | null> {
+  if (!env?.CATALOG_KV) return null;
+  try {
+    const cached = await env.CATALOG_KV.get("products", "json");
+    if (cached && Array.isArray(cached) && cached.length > 0) return cached;
+  } catch {}
+  return null;
+}
+
+async function setCachedProducts(products: SheetProduct[], env?: any): Promise<void> {
+  if (!env?.CATALOG_KV) return;
+  try {
+    await env.CATALOG_KV.put("products", JSON.stringify(products), { expirationTtl: 180 });
+  } catch {}
+}
+
+async function invalidateCache(env?: any): Promise<void> {
+  if (!env?.CATALOG_KV) return;
+  try {
+    await env.CATALOG_KV.delete("products");
+  } catch {}
+}
 
 // GET /api/products → list all products
-// Tries the configured Google Sheet first. Falls back to SEED_PRODUCTS
-// (29 Soum Deco reference products) when the sheet is unreachable or
-// no sheet URL is configured (offline / demo mode).
-export async function GET() {
+// Tries KV cache (3 min) → Google Sheet → SEED_PRODUCTS fallback
+export async function GET(req: NextRequest) {
+  const env = (req as any).env || (globalThis as any).env;
+
+  // 1. Check KV cache
+  const cached = await getCachedProducts(env);
+  if (cached) {
+    return NextResponse.json(
+      { ok: true, products: cached, source: "kv" },
+      { headers: { "Cache-Control": "public, max-age=60, stale-while-revalidate=300" } },
+    );
+  }
+
+  // 2. Cache miss — fetch from Google Sheet
   const sheetUrl = getSheetBaseUrl();
   let products: SheetProduct[] = [];
   let usedSeed = false;
@@ -31,48 +65,41 @@ export async function GET() {
   if (sheetUrl) {
     try {
       const fetched = await sheetListProducts();
-      // If the sheet returns at least one product, use it.
       if (Array.isArray(fetched) && fetched.length > 0) {
         products = fetched;
+        await setCachedProducts(products, env);
       } else {
         products = SEED_PRODUCTS;
         usedSeed = true;
       }
     } catch {
-      // Sheet unreachable (network error, timeout, etc.) → fall back to seed
-      products = SEED_PRODUCTS;
-      usedSeed = true;
+      // Sheet unreachable — try stale cache, then seed
+      const stale = await getCachedProducts(env);
+      products = stale || SEED_PRODUCTS;
+      usedSeed = !stale;
     }
   } else {
-    // No sheet configured → demo / offline mode
     products = SEED_PRODUCTS;
     usedSeed = true;
   }
 
   return NextResponse.json(
     { ok: true, products, seed: usedSeed },
-    {
-      headers: {
-        // Browser caches for 60s, then serves stale while revalidating.
-        "Cache-Control": "public, max-age=60, stale-while-revalidate=300",
-      },
-    },
+    { headers: { "Cache-Control": "public, max-age=60, stale-while-revalidate=300" } },
   );
 }
 
-// POST /api/products → create or update product (uploads images to Drive first)
-// POST /api/products?action=reset → wipe all products
+// POST /api/products → create or update product (uploads images to Cloudinary/R2 first)
 export async function POST(req: NextRequest) {
+  const env = (req as any).env || (globalThis as any).env;
   const url = new URL(req.url);
   const action = url.searchParams.get("action");
 
   if (action === "reset") {
-    // Dev mode: no sheet configured → accept (handled locally)
     const sheetUrl = getSheetBaseUrl();
     let ok = true;
-    if (sheetUrl) {
-      ok = await sheetResetProducts();
-    }
+    if (sheetUrl) ok = await sheetResetProducts();
+    await invalidateCache(env);
     return NextResponse.json({ ok });
   }
 
@@ -80,22 +107,15 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json(
-      { ok: false, error: "Invalid JSON" },
-      { status: 400 },
-    );
+    return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
   }
 
   const id = String(body?.id ?? "").trim();
   const name = String(body?.name ?? "").trim();
   if (!id || !name) {
-    return NextResponse.json(
-      { ok: false, error: "Missing id or name" },
-      { status: 400 },
-    );
+    return NextResponse.json({ ok: false, error: "Missing id or name" }, { status: 400 });
   }
 
-  // Normalize images: accept array or string
   let imagesArray: string[] = [];
   if (Array.isArray(body.images)) {
     imagesArray = body.images.filter((s: any) => String(s).trim() !== "");
@@ -103,100 +123,68 @@ export async function POST(req: NextRequest) {
     imagesArray = body.images.split("~~~").filter((s) => s.trim() !== "");
   }
 
-  // Upload images to Cloudinary (falls back to base64 if Cloudinary fails)
   try {
     imagesArray = await uploadImagesToDrive(imagesArray, id);
-  } catch {
-    // If Cloudinary upload fails entirely, keep the original base64 images
-  }
+  } catch {}
 
   const imagesStr = joinImageStrings(imagesArray);
   const coverImage = imagesArray[0] || String(body.image ?? "");
 
-  // Encode variations (array → string) — kept for backward compat with old sheets.
   let variationsStr = "";
-  if (Array.isArray(body.variations)) {
-    variationsStr = joinVariations(body.variations);
-  } else if (typeof body.variations === "string") {
-    variationsStr = body.variations;
-  }
+  if (Array.isArray(body.variations)) variationsStr = joinVariations(body.variations);
+  else if (typeof body.variations === "string") variationsStr = body.variations;
 
-  // Encode variants (array → string) — new color/size model with price adjustments.
   let variantsStr = "";
-  if (Array.isArray(body.variants)) {
-    variantsStr = joinVariants(body.variants);
-  } else if (typeof body.variants === "string") {
-    variantsStr = body.variants;
-  }
+  if (Array.isArray(body.variants)) variantsStr = joinVariants(body.variants);
+  else if (typeof body.variants === "string") variantsStr = body.variants;
 
-  // Encode highlights (array → newline-separated string)
   let highlightsStr = "";
-  if (Array.isArray(body.highlights)) {
-    highlightsStr = joinHighlights(body.highlights);
-  } else if (typeof body.highlights === "string") {
-    highlightsStr = body.highlights;
-  }
+  if (Array.isArray(body.highlights)) highlightsStr = joinHighlights(body.highlights);
+  else if (typeof body.highlights === "string") highlightsStr = body.highlights;
 
   const product: SheetProduct = {
-    id,
-    name,
+    id, name,
     description: String(body.description ?? ""),
     category: String(body.category ?? ""),
-    price:
-      body.price === null ||
-      body.price === undefined ||
-      body.price === ""
-        ? null
-        : Number(body.price),
+    price: body.price === null || body.price === undefined || body.price === "" ? null : Number(body.price),
     image: coverImage,
     images: imagesStr,
     featured: Boolean(body.featured),
     isSpecialOffer: Boolean(body.isSpecialOffer),
     variations: variationsStr,
     variants: variantsStr,
-    stock:
-      body.stock === null ||
-      body.stock === undefined ||
-      body.stock === ""
-        ? null
-        : Number(body.stock),
+    stock: body.stock === null || body.stock === undefined || body.stock === "" ? null : Number(body.stock),
     highlights: highlightsStr,
     sortOrder: body.sortOrder === null || body.sortOrder === undefined ? 999 : Number(body.sortOrder),
     badge: String(body.badge ?? ""),
     oldPrice: body.oldPrice === null || body.oldPrice === undefined || body.oldPrice === "" ? null : Number(body.oldPrice),
     quantityTiers: Array.isArray(body.quantityTiers)
-      ? body.quantityTiers
-          .filter((t: any) => t && typeof t.qty === "number")
-          .map((t: any) => `${t.qty}:${t.freeShipping || "none"}:${t.discountAmount || 0}`)
-          .join(",")
+      ? body.quantityTiers.filter((t: any) => t && typeof t.qty === "number").map((t: any) => `${t.qty}:${t.freeShipping || "none"}:${t.discountAmount || 0}`).join(",")
       : String(body.quantityTiers ?? ""),
   };
 
-  // If no sheet URL is configured (dev mode), accept the product (stored in localStorage only).
-  // If the sheet IS configured, sync to it and report the result.
   const sheetUrl = getSheetBaseUrl();
   let ok = true;
-  if (sheetUrl) {
-    ok = await sheetUpsertProduct(product);
-  }
+  if (sheetUrl) ok = await sheetUpsertProduct(product);
+
+  // Invalidate KV cache so admin sees the change
+  await invalidateCache(env);
+
   return NextResponse.json({ ok, product });
 }
 
 // DELETE /api/products?id=... → delete by id
 export async function DELETE(req: NextRequest) {
+  const env = (req as any).env || (globalThis as any).env;
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
-  if (!id) {
-    return NextResponse.json(
-      { ok: false, error: "Missing id" },
-      { status: 400 },
-    );
-  }
-  // Dev mode: no sheet configured → accept (handled locally)
+  if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
+
   const sheetUrl = getSheetBaseUrl();
   let ok = true;
-  if (sheetUrl) {
-    ok = await sheetDeleteProduct(id);
-  }
+  if (sheetUrl) ok = await sheetDeleteProduct(id);
+
+  await invalidateCache(env);
+
   return NextResponse.json({ ok });
 }
