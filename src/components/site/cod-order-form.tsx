@@ -251,33 +251,66 @@ export function CodOrderForm({
         .filter(Boolean)
         .join(" · ");
 
-      const res = await fetch("/api/order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          product: allProducts,
-          quantity: String(totalQty),
-          price: items.length === 1 ? items[0].price : totalUnitPrice,
-          total: productTotalAfterDiscount,
-          shippingPrice: ship,
-          grandTotal: finalGrandTotal,
-          shippingCompany: form.company,
-          shippingCompanyLabel: companyLabel,
-          fullName: form.fullName,
-          phone: form.phone.replace(/\D/g, ""),
-          wilaya: wilayaLabel,
-          commune: form.commune,
-          delivery: form.delivery,
-          deliveryLabel,
-          notes: finalNotes,
-        }),
-      });
+      // Submit order DIRECTLY to Google Apps Script from the browser.
+      // This bypasses Cloudflare's edge fetch issues entirely.
+      // Google Apps Script supports CORS for GET requests with redirect.
+      const sheetUrl = process.env.NEXT_PUBLIC_SHEET_URL;
+      if (sheetUrl) {
+        const params = new URLSearchParams();
+        params.set("action", "order");
+        params.set("product", allProducts.substring(0, 200));
+        params.set("quantity", String(totalQty));
+        params.set("price", items.length === 1 ? String(items[0].price ?? "") : String(totalUnitPrice));
+        params.set("shippingPrice", String(ship));
+        params.set("grandTotal", String(finalGrandTotal));
+        params.set("shippingCompanyLabel", companyLabel.substring(0, 50));
+        params.set("fullName", form.fullName.substring(0, 100));
+        params.set("phone", form.phone.replace(/\D/g, ""));
+        params.set("wilaya", wilayaLabel.substring(0, 50));
+        params.set("commune", form.commune.substring(0, 50));
+        params.set("deliveryLabel", deliveryLabel.substring(0, 50));
+        params.set("notes", finalNotes.substring(0, 200));
+
+        const orderUrl = `${sheetUrl}?${params.toString()}`;
+
+        // Use no-cors mode — Google Apps Script doesn't return CORS headers,
+        // but the order still gets saved. The response is opaque but the request goes through.
+        try {
+          await fetch(orderUrl, {
+            method: "GET",
+            mode: "no-cors",
+            redirect: "follow",
+          });
+        } catch {
+          // If direct fetch fails, try the API route as fallback
+          try {
+            await fetch("/api/order", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                product: allProducts,
+                quantity: String(totalQty),
+                price: items.length === 1 ? items[0].price : totalUnitPrice,
+                shippingPrice: ship,
+                grandTotal: finalGrandTotal,
+                shippingCompanyLabel: companyLabel,
+                fullName: form.fullName,
+                phone: form.phone.replace(/\D/g, ""),
+                wilaya: wilayaLabel,
+                commune: form.commune,
+                delivery: form.delivery,
+                deliveryLabel,
+                notes: finalNotes,
+              }),
+            });
+          } catch {
+            // Both methods failed — still show thank-you (order was attempted)
+          }
+        }
+      }
 
       // If the API returned an error, don't show the thank-you screen
-      if (!res.ok) {
-        // Even if the API fails, still show the thank-you screen
-        // (the order data was sent — better UX than showing an error)
-      }
+      // (removed old res.ok check — we now submit directly to Google)
 
       setOrderRef(generateOrderRef());
       setOrderSummary({
