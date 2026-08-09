@@ -9,6 +9,9 @@ export type CartItem = {
   price: number | null;
   image: string;
   quantity: number;
+  /** Variant info (e.g. "أحمر / كبير") — if set, items with same productId
+   *  but different variantKey are treated as separate line items. */
+  variantKey?: string;
 };
 
 export function useCart() {
@@ -42,7 +45,12 @@ export function useCart() {
       const current: CartItem[] = JSON.parse(
         window.localStorage.getItem(CART_STORAGE_KEY) || "[]",
       );
-      const idx = current.findIndex((i) => i.productId === item.productId);
+      // Match by productId AND variantKey (if provided)
+      // This ensures different colors/sizes of the same product are separate line items
+      const variantKey = item.variantKey || "";
+      const idx = current.findIndex(
+        (i) => i.productId === item.productId && (i.variantKey || "") === variantKey,
+      );
       let next: CartItem[];
       if (idx >= 0) {
         next = [...current];
@@ -64,10 +72,16 @@ export function useCart() {
         persist(items.filter((i) => i.productId !== productId));
         return;
       }
+      // Only update the first matching item (variantKey is embedded in productId for UI)
+      let updated = false;
       persist(
-        items.map((i) =>
-          i.productId === productId ? { ...i, quantity } : i,
-        ),
+        items.map((i) => {
+          if (i.productId === productId && !updated) {
+            updated = true;
+            return { ...i, quantity };
+          }
+          return i;
+        }),
       );
     },
     [items, persist],
@@ -75,7 +89,17 @@ export function useCart() {
 
   const removeItem = useCallback(
     (productId: string) => {
-      persist(items.filter((i) => i.productId !== productId));
+      // Remove only the first matching item
+      let removed = false;
+      persist(
+        items.filter((i) => {
+          if (i.productId === productId && !removed) {
+            removed = true;
+            return false;
+          }
+          return true;
+        }),
+      );
     },
     [items, persist],
   );

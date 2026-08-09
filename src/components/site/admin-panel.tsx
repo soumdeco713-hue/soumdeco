@@ -204,7 +204,7 @@ function EditForm({
 
   const photos = getProductImages(draft);
   // Allow up to 5 high-quality photos per product.
-  const MAX_PHOTOS = 5;
+  const MAX_PHOTOS = 8;
 
   const syncPhotos = (next: string[]) => {
     const cleaned = next.filter((s) => s && s.trim() !== "");
@@ -786,6 +786,16 @@ function EditForm({
                       <option value={2}>2 قطعة</option>
                       <option value={3}>3 قطع</option>
                       <option value={4}>4 قطع</option>
+                      <option value={5}>5 قطع</option>
+                      <option value={6}>6 قطع</option>
+                      <option value={7}>7 قطع</option>
+                      <option value={8}>8 قطع</option>
+                      <option value={9}>9 قطع</option>
+                      <option value={10}>10 قطع</option>
+                      <option value={15}>15 قطعة</option>
+                      <option value={20}>20 قطعة</option>
+                      <option value={50}>50 قطعة</option>
+                      <option value={100}>100 قطعة</option>
                     </select>
                     <select
                       value={t.freeShipping}
@@ -1030,106 +1040,137 @@ export function AdminPanel({
               اختر منتجاً للتعديل أو اضغط لإضافة منتج جديد
             </p>
 
-            {/* Product list — ordered by sortOrder */}
+            {/* Product list — grouped by category, ordered by sortOrder within category */}
             <div className="overflow-hidden rounded-2xl border border-clay/40 bg-night-soft/70 backdrop-blur-md">
               {products.length === 0 ? (
                 <p className="p-8 text-center font-arabic text-sm text-gray-light">
                   لا توجد منتجات. اضغط على «إضافة منتج».
                 </p>
               ) : (
-                <ul className="divide-y divide-clay/40">
-                  {products.map((p, idx) => {
-                    const imgs = getProductImages(p);
-                    const cover = imgs[0] || "";
-                    const photoCount = imgs.length;
-                    const isFirst = idx === 0;
-                    const isLast = idx === products.length - 1;
-                    return (
-                      <li
-                        key={p.id}
-                        className="flex items-center gap-3 p-3"
-                      >
-                        {/* Position number + up/down arrows */}
-                        <div className="flex flex-col items-center gap-0.5">
-                          <button
-                            type="button"
-                            onClick={() => onMove(p.id, "up")}
-                            disabled={isFirst}
-                            aria-label="تحريك للأعلى"
-                            title="تحريك للأعلى"
-                            className="flex h-6 w-6 items-center justify-center rounded-md text-gray transition-colors hover:bg-emerald/10 hover:text-emerald disabled:opacity-25 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray"
-                          >
-                            <ArrowUp className="h-3.5 w-3.5" />
-                          </button>
-                          <span className="flex h-5 w-5 items-center justify-center rounded-full border border-emerald/30 bg-emerald/10 font-arabic text-[10px] font-bold text-emerald">
-                            {idx + 1}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => onMove(p.id, "down")}
-                            disabled={isLast}
-                            aria-label="تحريك للأسفل"
-                            title="تحريك للأسفل"
-                            className="flex h-6 w-6 items-center justify-center rounded-md text-gray transition-colors hover:bg-emerald/10 hover:text-emerald disabled:opacity-25 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray"
-                          >
-                            <ArrowDown className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
+                (() => {
+                  // Group products by category, then sort each category by sortOrder
+                  const grouped: Record<string, typeof products> = {};
+                  products.forEach((p) => {
+                    const cat = (p.category || "").trim() || "بدون فئة";
+                    if (!grouped[cat]) grouped[cat] = [];
+                    grouped[cat].push(p);
+                  });
+                  // Sort each category's products by sortOrder
+                  Object.keys(grouped).forEach((cat) => {
+                    grouped[cat].sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+                  });
+                  // Get category order (sorted alphabetically for consistency)
+                  const cats = Object.keys(grouped).sort();
 
-                        <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg bg-night">
-                          {cover ? (
-                            <img
-                              src={cover}
-                              alt={p.name}
-                              className="h-full w-full object-contain"
-                            />
-                          ) : (
-                            <div className="flex h-full w-full items-center justify-center">
-                              <ImageIcon className="h-5 w-5 text-gray-light" />
-                            </div>
-                          )}
-                          {photoCount > 1 && (
-                            <span className="absolute bottom-0 left-0 rounded-tr bg-ink/70 px-1 text-[9px] font-semibold text-cream">
-                              {photoCount}
-                            </span>
-                          )}
+                  let globalIdx = 0;
+                  return (
+                    <ul className="divide-y divide-clay/40">
+                      {cats.map((cat) => (
+                        <div key={cat}>
+                          {/* Category header */}
+                          <li className="bg-clay/20 px-3 py-1.5">
+                            <p className="font-arabic text-xs font-bold text-brass-deep">
+                              {cat} ({grouped[cat].length})
+                            </p>
+                          </li>
+                          {/* Products in this category */}
+                          {grouped[cat].map((p, catIdx) => {
+                            const imgs = getProductImages(p);
+                            const cover = imgs[0] || "";
+                            const photoCount = imgs.length;
+                            const isFirst = catIdx === 0;
+                            const isLast = catIdx === grouped[cat].length - 1;
+                            globalIdx++;
+                            return (
+                              <li
+                                key={p.id}
+                                className="flex items-center gap-3 p-3"
+                              >
+                                {/* Position number (within category) + up/down arrows */}
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => onMove(p.id, "up")}
+                                    disabled={isFirst}
+                                    aria-label="تحريك للأعلى"
+                                    title="تحريك للأعلى"
+                                    className="flex h-6 w-6 items-center justify-center rounded-md text-gray transition-colors hover:bg-emerald/10 hover:text-emerald disabled:opacity-25 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray"
+                                  >
+                                    <ArrowUp className="h-3.5 w-3.5" />
+                                  </button>
+                                  <span className="flex h-5 w-5 items-center justify-center rounded-full border border-emerald/30 bg-emerald/10 font-arabic text-[10px] font-bold text-emerald">
+                                    {catIdx + 1}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => onMove(p.id, "down")}
+                                    disabled={isLast}
+                                    aria-label="تحريك للأسفل"
+                                    title="تحريك للأسفل"
+                                    className="flex h-6 w-6 items-center justify-center rounded-md text-gray transition-colors hover:bg-emerald/10 hover:text-emerald disabled:opacity-25 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray"
+                                  >
+                                    <ArrowDown className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+
+                                <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg bg-night">
+                                  {cover ? (
+                                    <img
+                                      src={cover}
+                                      alt={p.name}
+                                      className="h-full w-full object-contain"
+                                    />
+                                  ) : (
+                                    <div className="flex h-full w-full items-center justify-center">
+                                      <ImageIcon className="h-5 w-5 text-gray-light" />
+                                    </div>
+                                  )}
+                                  {photoCount > 1 && (
+                                    <span className="absolute bottom-0 left-0 rounded-tr bg-ink/70 px-1 text-[9px] font-semibold text-cream">
+                                      {photoCount}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate font-arabic text-sm font-medium text-charcoal">
+                                    {p.name || "(بدون اسم)"}
+                                  </p>
+                                  <p className="font-arabic text-xs text-emerald">
+                                    {formatPrice(p.price)}
+                                  </p>
+                                  <p className="font-arabic text-xs text-gray-light">
+                                    {p.category || "بدون فئة"}
+                                    {p.featured ? " · مميّز" : ""}
+                                    {p.isSpecialOffer ? " · 🎁 عرض خاص" : ""}
+                                    {p.badge ? ` · ${p.badge}` : ""}
+                                  </p>
+                                </div>
+                                <div className="flex gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditing(p)}
+                                    aria-label="تعديل"
+                                    className="flex h-9 w-9 items-center justify-center rounded-full text-charcoal hover:bg-emerald/10"
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDelete(p)}
+                                    aria-label="حذف"
+                                    className="flex h-9 w-9 items-center justify-center rounded-full text-terracotta hover:bg-terracotta/10"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              </li>
+                            );
+                          })}
                         </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-arabic text-sm font-medium text-charcoal">
-                            {p.name || "(بدون اسم)"}
-                          </p>
-                          <p className="font-arabic text-xs text-emerald">
-                            {formatPrice(p.price)}
-                          </p>
-                          <p className="font-arabic text-xs text-gray-light">
-                            {p.category || "بدون فئة"}
-                            {p.featured ? " · مميّز" : ""}
-                            {p.isSpecialOffer ? " · 🎁 عرض خاص" : ""}
-                            {p.badge ? ` · ${p.badge}` : ""}
-                          </p>
-                        </div>
-                        <div className="flex gap-1">
-                          <button
-                            type="button"
-                            onClick={() => setEditing(p)}
-                            aria-label="تعديل"
-                            className="flex h-9 w-9 items-center justify-center rounded-full text-charcoal hover:bg-emerald/10"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(p)}
-                            aria-label="حذف"
-                            className="flex h-9 w-9 items-center justify-center rounded-full text-terracotta hover:bg-terracotta/10"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
+                      ))}
+                    </ul>
+                  );
+                })()
               )}
             </div>
 
