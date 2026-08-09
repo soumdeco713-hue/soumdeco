@@ -4,13 +4,3 @@ compatibility_flags = ["nodejs_compat"]
 
 # Required by Cloudflare Pages
 pages_build_output_dir = ".vercel/output/static"
-
-# R2 bucket for product images (free egress — unlimited bandwidth)
-[[r2_buckets]]
-binding = "IMAGES_BUCKET"
-bucket_name = "soumdeco-images"
-
-# KV namespace for 3-minute product/stock cache
-[[kv_namespaces]]
-binding = "CATALOG_KV"
-id = "YOUR_KV_NAMESPACE_ID"
