@@ -144,30 +144,31 @@ export async function sheetSubmitOrder(payload: {
   const base = getSheetBaseUrl();
   if (!base) return false;
   try {
-    const params = new URLSearchParams();
-    params.set("action", "order");
-    params.set("timestamp", new Date().toISOString());
-    params.set("product", payload.product || "");
-    params.set("quantity", String(payload.quantity || "1"));
-    params.set(
+    // Use POST with form data — more reliable on Cloudflare edge runtime
+    // (avoids URL length limits and redirect issues with GET)
+    const formData = new FormData();
+    formData.set("action", "order");
+    formData.set("product", payload.product || "");
+    formData.set("quantity", String(payload.quantity || "1"));
+    formData.set(
       "price",
       payload.price === null || payload.price === undefined
         ? ""
         : String(payload.price),
     );
-    params.set("shippingPrice", String(payload.shippingPrice ?? 0));
-    params.set("grandTotal", String(payload.grandTotal ?? 0));
-    params.set("shippingCompanyLabel", payload.shippingCompanyLabel || "");
-    params.set("fullName", payload.fullName || "");
-    params.set("phone", payload.phone || "");
-    params.set("wilaya", payload.wilaya || "");
-    params.set("commune", payload.commune || "");
-    params.set("deliveryLabel", payload.deliveryLabel || "");
-    params.set("notes", payload.notes || "");
+    formData.set("shippingPrice", String(payload.shippingPrice ?? 0));
+    formData.set("grandTotal", String(payload.grandTotal ?? 0));
+    formData.set("shippingCompanyLabel", payload.shippingCompanyLabel || "");
+    formData.set("fullName", payload.fullName || "");
+    formData.set("phone", payload.phone || "");
+    formData.set("wilaya", payload.wilaya || "");
+    formData.set("commune", payload.commune || "");
+    formData.set("deliveryLabel", payload.deliveryLabel || "");
+    formData.set("notes", payload.notes || "");
 
-    const url = `${base}?${params.toString()}`;
-    const res = await fetch(url, {
-      method: "GET",
+    const res = await fetch(base, {
+      method: "POST",
+      body: formData,
       redirect: "follow",
     });
     return res.ok;
