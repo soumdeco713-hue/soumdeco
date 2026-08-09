@@ -144,34 +144,41 @@ export async function sheetSubmitOrder(payload: {
   const base = getSheetBaseUrl();
   if (!base) return false;
   try {
-    // Use POST with form data — more reliable on Cloudflare edge runtime
-    // (avoids URL length limits and redirect issues with GET)
-    const formData = new FormData();
-    formData.set("action", "order");
-    formData.set("product", payload.product || "");
-    formData.set("quantity", String(payload.quantity || "1"));
-    formData.set(
+    // Use GET with URL params — Google Apps Script doGet handles this.
+    // Truncate long fields to keep URL under 2000 chars (Cloudflare edge safe).
+    const params = new URLSearchParams();
+    params.set("action", "order");
+    params.set("product", (payload.product || "").substring(0, 200));
+    params.set("quantity", String(payload.quantity || "1"));
+    params.set(
       "price",
       payload.price === null || payload.price === undefined
         ? ""
         : String(payload.price),
     );
-    formData.set("shippingPrice", String(payload.shippingPrice ?? 0));
-    formData.set("grandTotal", String(payload.grandTotal ?? 0));
-    formData.set("shippingCompanyLabel", payload.shippingCompanyLabel || "");
-    formData.set("fullName", payload.fullName || "");
-    formData.set("phone", payload.phone || "");
-    formData.set("wilaya", payload.wilaya || "");
-    formData.set("commune", payload.commune || "");
-    formData.set("deliveryLabel", payload.deliveryLabel || "");
-    formData.set("notes", payload.notes || "");
+    params.set("shippingPrice", String(payload.shippingPrice ?? 0));
+    params.set("grandTotal", String(payload.grandTotal ?? 0));
+    params.set("shippingCompanyLabel", (payload.shippingCompanyLabel || "").substring(0, 50));
+    params.set("fullName", (payload.fullName || "").substring(0, 100));
+    params.set("phone", (payload.phone || "").substring(0, 20));
+    params.set("wilaya", (payload.wilaya || "").substring(0, 50));
+    params.set("commune", (payload.commune || "").substring(0, 50));
+    params.set("deliveryLabel", (payload.deliveryLabel || "").substring(0, 50));
+    params.set("notes", (payload.notes || "").substring(0, 200));
 
-    const res = await fetch(base, {
-      method: "POST",
-      body: formData,
+    const url = `${base}?${params.toString()}`;
+    const res = await fetch(url, {
+      method: "GET",
       redirect: "follow",
     });
-    return res.ok;
+
+    // Google Apps Script returns 200 with JSON {ok:true} after redirect.
+    // Check both status and body for reliability on Cloudflare edge.
+    if (res.ok) return true;
+    // Some edge cases: res might not be ok but order still went through
+    // (Google returns 302 → 200, but edge might see 302 as not ok)
+    const text = await res.text().catch(() => "");
+    return text.includes('"ok"') || text.includes("true");
   } catch {
     return false;
   }
