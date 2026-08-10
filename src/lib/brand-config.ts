@@ -2,7 +2,7 @@
 //  BRAND CONFIG — SOUM DECO
 // ============================================================
 //  French-Algerian home decor boutique (boutique de décoration).
-//  Tagline: "L'art de sublimer votre intérieur"
+//  Tagline: "L'élégance au cœur de votre maison"
 //  Instagram: @soumdecodz · Based in Alger · COD in 58 wilayas.
 //  Phone: 0541 645 727 (as shown on soumdeco.netlify.app)
 // ============================================================
@@ -12,7 +12,7 @@ export const BRAND = {
   name: "SOUM DECO",
   nameLatin: "SoumDecoDZ",
   /** Brand tagline — shown under the logo in the hero. */
-  tagline: "L'art de sublimer votre intérieur",
+  tagline: "L'élégance au cœur de votre maison",
   /** Admin password — change before going live. */
   adminPassword: "dimou2411@dz",
   /** Logo file path (relative to /public). */

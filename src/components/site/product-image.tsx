@@ -29,9 +29,6 @@ type ProductImageProps = {
  * For CLOUDINARY URLs: apply transformation params:
  *   "card" (default) → c_limit,w_400,q_auto,f_auto (~10 KB)
  *   "full" → c_limit,w_800,q_auto,f_auto (~21 KB)
- *
- * Why c_limit? Plain w_400 FORCES upscaling. c_limit,w_400 = "max 400px,
- * never upscale" — pure savings.
  */
 function optimizeImageUrl(src: string, size: "card" | "full" = "card"): string {
   // Local paths (Cloudflare Pages) — serve as-is, no transformation needed
@@ -50,7 +47,6 @@ function optimizeImageUrl(src: string, size: "card" | "full" = "card"): string {
 
 /**
  * Build the Cloudinary fallback URL for a local /images/products/ path.
- * (Kept for future use if we re-enable the hot/cold tier.)
  */
 function buildCloudinaryFallback(localPath: string): string | null {
   if (!localPath.startsWith("/images/products/")) return null;
@@ -73,11 +69,13 @@ export function ProductImage({
 }: ProductImageProps) {
   // Track image load errors for Cloudinary fallback
   const [useFallback, setUseFallback] = useState(false);
+  // Track whether the image has finished loading (for fade-in)
+  const [loaded, setLoaded] = useState(false);
 
-  // Reset error state when src changes (prevents leak where one 404
-  // causes ALL subsequent images to use the fallback)
+  // Reset error + loaded state when src changes
   useEffect(() => {
     setUseFallback(false);
+    setLoaded(false);
   }, [src]);
 
   const isDataUrl = src.startsWith("data:");
@@ -89,7 +87,6 @@ export function ProductImage({
   const effectiveSrc = useFallback && cloudinaryFallback ? cloudinaryFallback : src;
 
   // Skip Next.js Image optimizer for data URLs and external URLs
-  // (Cloudinary does its own optimization via URL params)
   const unoptimized = isDataUrl || isExternalUrl || (effectiveSrc !== src);
 
   // Apply Cloudinary optimization based on size variant
@@ -106,25 +103,35 @@ export function ProductImage({
   }
 
   return (
-    <div className={`relative h-full w-full overflow-hidden ${className}`}>
+    <div
+      className={`relative h-full w-full overflow-hidden ${className}`}
+      style={{
+        // Warm cream background — prevents the "white flash" while images load.
+        // Matches the site's background color (#FAF8F4) so it's invisible.
+        backgroundColor: "#FAF8F4",
+      }}
+    >
       <Image
         src={optimizedSrc}
         alt={alt}
         fill
-        // Responsive sizes hint — helps the browser pick the right image
         sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
-        className={objectClass}
+        className={`${objectClass} transition-opacity duration-300 ${
+          loaded ? "opacity-100" : "opacity-0"
+        }`}
         unoptimized={unoptimized}
         priority={priority}
         // AGGRESSIVE LAZY LOADING:
         // - priority=true  → eager load (above-the-fold only, LCP image)
         // - priority=false → lazy load (below-the-fold, loads on scroll into view)
-        // This cuts initial page load bandwidth by 70%+ — only visible images load.
         loading={priority ? "eager" : "lazy"}
-        // Low-quality placeholder blur (optional, improves perceived performance)
-        placeholder={priority ? undefined : "empty"}
+        // NO placeholder — we use our own fade-in + background color instead.
+        // The "empty" placeholder was causing white flashes.
         onError={() => {
           if (!useFallback) setUseFallback(true);
+        }}
+        onLoad={() => {
+          setLoaded(true);
         }}
       />
     </div>
