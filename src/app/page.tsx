@@ -128,6 +128,7 @@ export default function Home() {
       name: string;
       price: number | null;
       image: string;
+      variantKey?: string;
     }) => {
       cart.addToCart(item, 1);
     },

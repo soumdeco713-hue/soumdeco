@@ -287,8 +287,14 @@ function EditForm({
       // This makes the save fast — by the time the admin clicks Save,
       // the images are already on Cloudinary and the save is just a quick
       // POST to Apps Script with the URLs.
+      //
+      // CRITICAL: Use a TIMESTAMP-based ID so re-uploaded images get unique
+      // URLs. Without this, Cloudinary serves the OLD cached version when
+      // the admin replaces an image (same public_id = same cached URL).
+      // The timestamp ensures every upload is a fresh image.
       const { clientUploadImages } = await import("@/lib/client-sheet");
-      const tempId = draft.id || `temp-${Date.now()}`;
+      const timestamp = Date.now().toString(36); // short unique ID
+      const tempId = `${draft.id || "new"}-${timestamp}`;
       const uploadedUrls = await clientUploadImages(
         resized.map((r) => r.dataUrl),
         tempId,

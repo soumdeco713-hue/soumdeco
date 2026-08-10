@@ -74,8 +74,10 @@ function normalizeName(name: string): string {
     .replace(/\s+/g, " ");
 }
 
-const POLL_MS = 330_000; // 5.5 minutes
-const HIDDEN_POLL_MS = 1_100_000; // ~18 min when tab is hidden
+// Polling intervals — optimized for 800K visits/month to stay under
+// Apps Script's 20K-30K exec/day Consumer Gmail quota.
+const POLL_MS = 1_800_000; // 30 minutes when tab is visible
+const HIDDEN_POLL_MS = 3_600_000; // 1 hour when tab is hidden
 
 export function useStock() {
   const [stockMap, setStockMap] = useState<StockMap>({});

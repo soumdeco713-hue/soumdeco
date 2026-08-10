@@ -134,11 +134,15 @@ export function ProductPage({
   ];
 
   const handleAdd = () => {
+    // Build variantKey so the cart can distinguish items with different
+    // color/size selections (prevents merging different variants into one line item)
+    const variantKey = [selectedColor, selectedSize].filter(Boolean).join("_") || undefined;
     onAddToCart({
       productId: product.id,
-      name: product.name,
+      name: variantSummary ? `${product.name} (${variantSummary})` : product.name,
       price: adjustedPrice,
       image: currentImage,
+      variantKey,
     });
     setAdded(true);
     setTimeout(() => setAdded(false), 2000);

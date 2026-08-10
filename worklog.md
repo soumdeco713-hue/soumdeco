@@ -1676,3 +1676,690 @@ Stage Summary:
 - Total: 37 issues across 13 files.
 - The site is FUNCTIONAL for the current 83-product catalog but will FAIL silently at scale (9,500 products × 8 images, 50K visitors/day).
 - Top 3 must-fix-before-scaling: P0-1 (failed orders), P0-2 (race condition), P0-3 (admin photo preview).
+
+---
+
+============================================================
+Task ID: final-scan-v2
+Agent: sub-agent (general-purpose)
+Task: FINAL comprehensive code scan of SOUM DECO e-commerce site.
+Scope: 30 files (hooks, lib, components, app, API routes, CI, scripts, Apps Script).
+Goal: Identify ANY remaining bugs, edge cases, error-handling gaps, race conditions, data-corruption risks that could cause failures during 800K visits/month, admin operations, network errors, or quota limits.
+Method: Read every file completely, cross-reference between modules, verify previous-scan fixes (final-scan-v1) are still in place. NO code modifications — read & report only.
+============================================================
+
+# FINAL SCAN REPORT — final-scan-v2
+
+## Executive Summary — Top 5 Critical Issues (P0)
+
+The previous scan (final-scan-v1) flagged 5 P0 issues. **4 of those 5 are now FIXED** (failed-orders retry queue, race condition guard, AdminImagePreview component, saveCatalog honest return). The site has materially improved. However, this FINAL scan surfaces **5 NEW P0 issues** that will cause failures at 800K visits/month scale:
+
+### P0-1 — Apps Script quota exhaustion at 800K visits/month (HIGHEST RISK)
+- Each visitor triggers 2 Apps Script calls (`?action=products` + `?action=stock`) on initial load, plus polling every 5.5 min while the tab is open.
+- 800K visits/month ÷ 30 days = ~26,667 unique visits/day → minimum 53,334 Apps Script executions/day (assuming zero polls).
+- Consumer Gmail quota: **30,000 script executions/day + 90 min compute/day**. Workspace Standard: 200,000/day + 6 hr/day.
+- The site will START FAILING around 14:00–16:00 every day on a Consumer Gmail account (after ~30K executions or 90 min of compute, whichever comes first). After that, all product/stock/order fetches return errors until midnight Pacific time (quota reset).
+- **The KV cache in `wrangler.toml` (CATALOG_KV, 3-min TTL) is currently DEAD CODE** — the frontend bypasses `/api/products` and `/api/stock` and fetches directly from Apps Script (per `use-catalog.ts:54-62` and `use-stock.ts:99-112`). KV never runs.
+- **Fix:** Either (a) re-enable the API routes (client-side fetch goes to `/api/products` → KV → Apps Script), OR (b) upgrade Apps Script owner account to Workspace Standard, OR (c) move catalog reads to a Cloudflare Worker with KV caching.
+
+### P0-2 — Auto-sync workflow triggers Cloudflare Pages build limit (500 builds/month)
+- `.github/workflows/auto-sync-images.yml` cron: `*/15 * * * *` (every 15 min → 96 runs/day → 2,880 runs/month).
+- Each run commits only when there are changes, but at scale (admin adding products daily), commits happen on most runs.
+- The commit message includes `[skip ci]` (line 45 of auto-sync.yml). **Cloudflare Pages does NOT respect `[skip ci]`** — it builds on every push to the production branch by default.
+- 96 commits/day × 30 days = 2,880 potential Pages builds/month → **5.7× the 500-build/month free-tier limit.** After ~5 days of admin activity, builds queue / fail.
+- Also, if the repo is private, GitHub Actions free tier is 2,000 minutes/month; 96 runs × 5 min = 14,400 min → **7.2× over limit** in ~21 days. (Public repos have unlimited Actions minutes, so this only bites private repos.)
+- **Fix:** Either (a) make the repo public, OR (b) reduce cron to daily (e.g., `0 3 * * *` — once at 3 AM), OR (c) configure Cloudflare Pages to ignore `[skip ci]` commits (deploy only on tagged releases / main-branch manual deploys), OR (d) add a `paths:` filter to the workflow so it only commits when image files actually change.
+
+### P0-3 — `ignoreBuildErrors: true` STILL set in `next.config.ts:6`
+- Carried over from final-scan-v1 P0-5 — **NOT FIXED.**
+- Hides TypeScript errors silently. Broken code can ship to production without warning.
+- During this scan I confirmed at least one real divergence: `use-catalog.ts`'s local `normalizeProduct` (line 557-641) and `lib/products.ts`'s `normalizeProduct` (line 950-1044) are not identical — the lib version handles `{fr, ar}` object values for `name`/`description`/`category` fields (line 954-957), the hook version does NOT (line 558-562 just does `String(v)` which produces `"[object Object]"`).
+- This divergence is currently latent (Apps Script always returns strings), but ANY future change that returns object values for these fields would silently render `[object Object]` to users with no build error.
+- **Fix:** Set `ignoreBuildErrors: false`, run `bun run build`, fix all resulting errors. Unify the two `normalizeProduct` functions into one shared utility.
+
+### P0-4 — Cart multi-variant flow is broken (variants are silently lost)
+- `product-page.tsx` `handleAdd()` (line 136-145) calls `onAddToCart({ productId, name, price, image })` — **does NOT pass `variantKey`**.
+- `use-cart.ts` `addToCart()` (line 43-67) correctly matches by `productId AND variantKey`, but since the call site never passes `variantKey`, every add-to-cart for the same product collapses into ONE line item regardless of selected color/size.
+- The selected color/size IS captured in `variantSummary` (line 149-154 of product-page.tsx) which is passed as `extraNotes` to `CodOrderForm` — but only for direct-from-product-page checkout. The cart drawer has no variant info at all.
+- `cart.updateQuantity(productId, qty)` and `cart.removeItem(productId)` also match by `productId` only (line 76-104 of use-cart.ts). Even if `variantKey` were set, the cart drawer doesn't pass it through (cart-bar.tsx line 137-141, 166).
+- **Impact:** A customer who adds "Service a table — Blue" then "Service a table — White" sees only one cart line item (qty=2, no variant info). The order goes to the sheet as `Service a table ×2` with no color info. Store owner can't fulfill correctly.
+- **Fix:** Pass `variantKey` from `product-page.tsx` `handleAdd()` to `onAddToCart`. Update `CartDrawer` to pass `variantKey` to `onUpdateQuantity` / `onRemove`. Update `useCart.updateQuantity` / `removeItem` to match by `productId && variantKey`.
+
+### P0-5 — Admin's re-uploaded image is hidden behind stale local file
+- `use-catalog.ts:527-555` `optimizeCloudinaryUrls()` checks if a Cloudinary URL's filename (e.g., `nouveau-5bzz3-1.jpg`) is in the local manifest. If yes → rewrites to `/images/products/nouveau-5bzz3-1.jpg` (served from Cloudflare Pages).
+- When an admin replaces image #1 of product `nouveau-5bzz3` (removes old, uploads new), the new Cloudinary URL is `https://res.cloudinary.com/anhvhy4j/image/upload/v{NEW_TIMESTAMP}/nouveau-5bzz3-1.jpg` — same filename, new version segment.
+- `extractFilename()` in `image-manifest.ts:57-61` strips the `v\d+/` segment, so the filename matches the manifest entry. The URL is rewritten to `/images/products/nouveau-5bzz3-1.jpg` — but that local file is the OLD version (downloaded by `auto-sync.py` from the OLD Cloudinary URL).
+- **The admin sees the OLD image**, not their new upload. They think the upload failed, may upload again, may abandon the edit.
+- The new image only becomes visible after the next `auto-sync.py` run downloads the new version AND the manifest is rebuilt AND Cloudflare Pages deploys.
+- **Fix:** Either (a) include the Cloudinary version segment in the manifest key (so re-uploads create new manifest entries), OR (b) skip the local-path rewrite for products whose `sortOrder`/`updatedAt` is newer than the manifest's `builtAt` timestamp, OR (c) when admin re-uploads, generate a new `productId`-suffixed filename (e.g., `nouveau-5bzz3-1-{timestamp}.jpg`) instead of reusing `nouveau-5bzz3-1.jpg`.
+
+---
+
+## Per-File Findings
+
+### 1. `src/hooks/use-catalog.ts` (487 lines)
+**P0:** See P0-4 (cart variant), P0-5 (image rewrite), P0-3 (divergent normalizeProduct).
+**P1:**
+- **P1-1 Polling overrides optimistic admin state:** `refresh()` runs every 5.5 min (POLL_MS). If admin clicks Save → `upsertProduct` sets optimistic state → `clientUpsertProduct` POST is in flight → `refresh()` fires → fetches sheet (which doesn't have the new product yet) → overwrites state → admin sees their save "disappear" for ~100-3000 ms until the POST completes and `setTimeout(refresh, 100)` re-syncs. UX flicker.
+- **P1-2 `loadCatalogAsync` IndexedDB overwrite race (PARTIALLY FIXED from P0-2):** The `currentCount <= cached.length` check (line 179) prevents overwriting fresh sheet data, but if `refresh()` is still IN-FLIGHT when `loadCatalogAsync()` resolves, IndexedDB data briefly overwrites the sync-cache state. Not data-corrupting (final state is correct), but causes a UI flicker.
+- **P1-3 `loadImageManifest().then()` rewrites URLs after catalog loads (line 190-198):** When the manifest finishes loading (~200 ms after page paint), it triggers `setProducts(rewritten)`. This causes a SECOND render with rewritten URLs. The first render shows Cloudinary URLs (which work but throttle). UX: brief flash of "loading" images if Cloudinary is slow. Acceptable.
+
+**P2:**
+- **P2-1 `normalizeProduct` (local, line 557-641) doesn't handle `{fr, ar}` objects** — `toStr({fr: "a", ar: "b"})` returns `"[object Object]"`. Latent today (sheet always returns strings), but the lib version handles it. Divergence is a code-smell.
+- **P2-2 `moveProduct` `clientUpsertProduct(...).catch(() => {})` (line 450):** Fire-and-forget, no error toast. Admin moves a product, the move silently fails on the sheet (but succeeds in localStorage). On next page reload, the order reverts.
+- **P2-3 `addBlankProduct` (line 363-390):** Doesn't add to state — just returns a blank Product object. The caller (`admin-panel.tsx:handleAddBlank`) sets it as `editing`. If the admin cancels, no harm. If they save, `upsertProduct` handles persistence. OK.
+
+**Working correctly:**
+- `saveCatalog` + `saveCatalogAsync` both called (line 89, 91) — fast sync + IndexedDB fallback for large catalogs. ✓
+- Optimistic update + rollback in `upsertProduct` (line 235-314) and `deleteProduct` (line 319-360). ✓
+- Polling paused when tab hidden (POLL_MS vs HIDDEN_POLL_MS). ✓
+- Visibility listener + interval cleaned up in useEffect return (line 216-219). ✓
+- Failed-orders retry triggered on init (line 203-205). ✓
+
+### 2. `src/hooks/use-cart.ts` (123 lines)
+**P0:** See P0-4 (variants lost on add-to-cart).
+
+**P1:**
+- **P1-4 `updateQuantity` matches by `productId` only (line 76-85):** First matching item wins. If cart has 2 items with same `productId` but different `variantKey`, clicking + on the second item updates the first. Even if P0-4 is fixed, this still needs to match by `variantKey`.
+- **P1-5 `removeItem` matches by `productId` only (line 90-105):** Same issue as P1-4.
+- **P1-6 `persist` swallows localStorage quota errors silently (line 34-41):** `catch { // ignore }` — if cart exceeds localStorage quota, save fails silently. On reload, cart reverts. Customer has no idea. Should toast: "سلتك ممتلئة — يرجى إتمام الطلب."
+
+**P2:**
+- **P2-4 `JSON.parse(window.localStorage.getItem(...) || "[]")` in `addToCart` (line 45-47):** Bypasses the React state — reads directly from localStorage. If two rapid addToCart calls happen (e.g., user double-clicks), the second call's `current` is the pre-first-call state, and the second item overwrites the first. Race condition. Should use `setItems((prev) => ...)` functional update form.
+- **P2-5 Initial load reads localStorage in `useEffect` (line 21-32):** If localStorage is corrupt (throws), the catch swallows. Cart starts empty. Acceptable.
+
+**Working correctly:**
+- Hydration-safe (empty initial state). ✓
+- `clearCart` works. ✓
+- `count` derived from items (line 111). ✓
+
+### 3. `src/hooks/use-stock.ts` (177 lines)
+**P1:**
+- **P1-7 No caching layer:** `fetchStock` always hits Apps Script directly (line 99-112). Combined with `useCatalog` polling, this doubles Apps Script load. At 800K visits/month, this is a major contributor to P0-1 (quota exhaustion).
+- **P1-8 `parseCsv` is naive (line 9-62):** Doesn't handle quoted CSV values containing commas. If a product name contains a comma (e.g., "Service à café, 15 pièces"), the CSV parser splits incorrectly. Names with embedded quotes (`"`) are not properly unescaped (the regex `replace(/^"|"$/g, "")` only strips leading/trailing quotes, doesn't handle `""` → `"` escaping).
+- **P1-9 `normalizeName` (line 64-75) does Arabic normalization (alef variants, ya, ta-marbuta):** But the comparison is asymmetric — if the Stock sheet has "خدمة الطاولة" and the Products sheet has "خدمه الطاوله" (different forms), they normalize to the same key. Good. But if the Stock sheet uses French and Products uses Arabic (or vice versa), they won't match. Store owner must use consistent naming.
+
+**P2:**
+- **P2-6 `normalizedMap` is rebuilt on every `stockMap` change (line 91-97):** O(n) per stock refresh. With 9,500 products, this is 9,500 string-normalization ops every 5.5 min. Not a bottleneck but wasteful.
+- **P2-7 `getStockCount` returns `null` for unknown products (line 156-164):** Means "unlimited" — the storefront shows the product as in-stock. If the Stock sheet is misconfigured (product name doesn't match), the product appears as unlimited when it might actually be out of stock. False-positive "in stock".
+
+**Working correctly:**
+- O(1) normalized lookup map. ✓
+- Polling paused when tab hidden. ✓
+- Interval + visibility listener cleaned up (line 138-141). ✓
+
+### 4. `src/lib/products.ts` (1109 lines)
+**P0:** None new.
+**P1:** None new.
+
+**P2:**
+- **P2-8 `saveCatalog` verification (line 1046-1072) compares LENGTH only, not content:** A truncated write could pass length check if both the truncated write and the original have the same length (very unlikely, but theoretically possible). To be truly bulletproof, should compare `check === json` not `check.length === json.length`. Acceptable trade-off (length check is fast, content check would double the localStorage read).
+- **P2-9 `normalizeProduct` (line 950-1044) is the "good" version** — handles `{fr, ar}` objects, dedupes images, etc. But use-catalog.ts has its own divergent copy (see P2-1 above).
+- **P2-10 `loadCatalog` (line 905-922) uses `JSON.parse` without try/catch on the parsed result's structure:** If localStorage contains valid JSON that's not an array (e.g., a string), `parsed.map()` throws. Caught by outer try/catch (line 919), returns `[]`. OK but defensive.
+
+**Working correctly:**
+- `splitImageStrings` (line 668-689) handles ~~~, |||, |, data:, comma. ✓
+- `parseQuantityTiers` (line 827-869) correctly handles new + legacy formats, mode defaults to "exact". ✓
+- `normalizeTiers` (line 877-903) migrates legacy `{benefit, discountAmount}` to `{freeShipping, discountAmount, mode}`. ✓
+- `generateId` (line 1098-1108) creates URL-safe slugs. ✓
+
+### 5. `src/lib/client-sheet.ts` (555 lines)
+**P0:** None.
+
+**P1:**
+- **P1-10 `clientUploadImage` 400-retry block is BROKEN (line 332-360):**
+```ts
+if (res.status === 400) {
+  if (attempt === 0) {
+    const formData2 = new FormData();
+    formData2.append("file", dataUrl);
+    formData2.append("upload_preset", UPLOAD_PRESET);
+    try {
+      const res2 = await fetch(
+        `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
+        {
+          method: "POST",
+          body: formData2,
+          signal: (
+            new AbortController(),                                  // ← dead code (never assigned)
+            setTimeout(
+              () => controller.abort(),                              // ← references OUTER controller
+              IMAGE_UPLOAD_TIMEOUT_MS,
+            ),
+            controller.signal                                        // ← uses OUTER controller's signal
+          ),
+        },
+      );
+      ...
+```
+The comma operator creates a NEW `AbortController()` that's immediately discarded (dead code). The `setTimeout` references the OUTER `controller` (declared at line 300, whose `timeoutId` was already cleared at line 323). So the retry fetch DOES have an active timeout (via the outer controller's signal), but the `setTimeout` here creates a LEAKED timeout ID that's never cleared — if the fetch completes fast, the timeout fires `controller.abort()` on an already-settled signal (harmless but wasteful).
+  - **Fix:** Use a fresh `const controller2 = new AbortController(); const timeoutId2 = setTimeout(() => controller2.abort(), IMAGE_UPLOAD_TIMEOUT_MS); ... clearTimeout(timeoutId2);` pattern. Same as the outer loop.
+- **P1-11 `clientUploadImage` retry on 400 is questionable:** If Cloudinary returns 400 (bad request — e.g., preset doesn't allow `public_id`), the retry WITHOUT `public_id` succeeds. But then the image is uploaded with a Cloudinary-generated public_id (random), so the filename won't match what `clientUploadImages` expects (`{productId}-{i+j+1}`). The auto-sync.py script will download it by its Cloudinary-generated filename, which is fine, but the manifest will have an entry that doesn't match the admin's intended filename. Mostly cosmetic.
+- **P1-12 `clientUploadImages` filename index uses `i + j + 1` (line 420):** For batched uploads (2 at a time), if the FIRST image in a batch fails, the second image gets filename `{id}-2` but `{id}-1` is missing. Gap in the sequence. Cloudinary doesn't care, but the manifest will only contain `{id}-2`, so when the storefront tries to rewrite the Cloudinary URL `{id}-1` to local, it won't match — falls back to Cloudinary. Mostly OK.
+
+**P2:**
+- **P2-11 `fetchWithTimeoutAndRetry` retries on 5xx AND 429 (line 73-82):** Good. But returns the response on the final attempt even if it's a 5xx — the caller checks `res.ok` (line 118) which returns false. OK.
+- **P2-12 `clientSubmitOrder` GET URL length guard at 2000 chars (line 482):** Reasonable. If exceeded, falls back to POST with text/plain (avoids CORS preflight). Good.
+- **P2-13 `normalizeSheetProduct` doesn't dedupe image list (line 515-555):** If the sheet has duplicate image URLs in the `images` cell, they all pass through. The downstream `normalizeProduct` (in products.ts:581) dedupes via `Array.from(new Set(images))`. OK.
+
+**Working correctly:**
+- 30s AbortController timeout on all reads (line 31). ✓
+- 45s timeout on image uploads (line 42). ✓
+- Read retries: 3x with exponential backoff (line 34-35). ✓
+- Write retries: 2x (line 38-39) — avoids duplicate orders. ✓
+- Image upload NEVER returns base64 on failure (returns `""`, filtered out by `clientUploadImages` line 427). ✓ Prevents sheet overflow.
+- Skips emoji/Arabic ID rows (line 130). ✓
+
+### 6. `src/lib/image-manifest.ts` (94 lines)
+**P0:** None.
+
+**P1:**
+- **P1-13 Manifest is module-level cached and NEVER invalidated:** `manifestCache` (line 23) is set once and reused for the lifetime of the page. If the admin uploads new images and the auto-sync runs (rebuilding the manifest), the in-memory manifest is stale. Admin must refresh the page to get the new manifest. (Mostly OK — admins refresh often.)
+- **P1-14 `loadImageManifest` uses `cache: "force-cache"` (line 37):** Browsers may cache the manifest across page loads. If the manifest is rebuilt and deployed, the browser may serve the stale cached version. Next.js doesn't auto-version `/public/image-manifest.json`. Should add `?v={buildId}` query param OR set `Cache-Control: no-cache` on the file.
+
+**P2:**
+- **P2-14 `extractFilename` regex (line 58) is duplicated** in `use-catalog.ts:528`. DRY violation. Should export from image-manifest.ts.
+
+**Working correctly:**
+- O(1) lookup via `localFilesSet.has(filename)`. ✓
+- Returns null gracefully on fetch failure (line 44-46). ✓
+- Promise de-duplicated via `manifestLoadPromise` (line 33). ✓
+
+### 7. `src/lib/adaptive-storage.ts` (183 lines)
+**P0:** None.
+
+**P1:**
+- **P1-15 No `onversionchange` handler on the IndexedDB connection (line 47-51):** If another tab triggers an upgrade (e.g., the DB version is bumped in a future code change), this tab's connection gets killed silently. All subsequent reads/writes fail. Rare today (DB_VERSION=1), but will bite on the next schema migration.
+- **P1-16 `adaptiveSet` falls through to IndexedDB on quota error but does NOT remove the stale localStorage value (line 97-101):** Comment says "the old value is still in localStorage". So localStorage has the OLD value, IndexedDB has the NEW value. On next read, `adaptiveGet` returns the OLD localStorage value, ignoring the newer IndexedDB value. **STALE DATA BUG.**
+  - Reproduction: Catalog has 100 products (small, fits in localStorage). User adds products to make it 500 (overflows localStorage). `adaptiveSet` writes to IndexedDB. But localStorage still has the 100-product version. Next page load: `adaptiveGet` returns the 100-product localStorage version, ignoring the 500-product IndexedDB version. The user sees the OLD catalog.
+  - **Fix:** On quota-exceeded, REMOVE the localStorage key (so future reads fall through to IndexedDB). The current `saveCatalog` (line 1057-1064 of products.ts) DOES call `removeItem` on quota error, but `adaptiveSet` itself doesn't.
+
+**P2:**
+- **P2-15 `LOCAL_STORAGE_SAFE_LIMIT = 4_000_000` (line 70):** localStorage quota is typically 5 MB per origin. 4 MB leaves 1 MB for other keys (cart, failed-orders, etc.). Reasonable. But Safari's private browsing mode has a 0-byte quota — `setItem` throws immediately. The catch handles this and falls through to IndexedDB. ✓
+
+**Working correctly:**
+- IndexedDB `openDB()` has 5s timeout (line 18, 37). ✓
+- Handles `indexedDB === undefined` (private browsing, old browsers). ✓
+- `adaptiveGet` checks localStorage first (fast path), then IndexedDB. ✓
+
+### 8. `src/lib/failed-orders.ts` (133 lines)
+**P0:** None (this module exists and works).
+
+**P1:**
+- **P1-17 Failed orders are tied to ONE device (customer's localStorage):** If the customer clears their cookies, uses incognito, switches devices, or never returns, the failed order is permanently lost. There is NO server-side retry queue.
+  - The API route `api/order/route.ts` returns `{ ok: true, warning: "order_queued" }` on failure but doesn't actually queue anything server-side — it's a lie.
+  - **Fix:** Either (a) write failed orders to a Cloudflare KV namespace from the API route (server-side retry), OR (b) send an email/SMS notification to the admin on failed order, OR (c) accept the limitation and document it.
+- **P1-18 `saveFailedOrders` silently swallows localStorage quota errors (line 62-64):** `catch { // localStorage might be full — can't do anything }`. If localStorage is full (large catalog + large cart + many failed orders), the failed order is silently lost. No log, no fallback to IndexedDB.
+  - **Fix:** Use `adaptiveSet` from adaptive-storage.ts (which falls back to IndexedDB).
+- **P1-19 `retryFailedOrders` runs on EVERY page visit (use-catalog.ts:203-205):** If the queue has 100 failed orders, every visitor's first page load triggers 100 sequential `clientSubmitOrder` calls (each up to 30s + 2 retries = 90s). Total worst-case: 100 × 90s = 2.5 hours of background network activity on the visitor's device. Drains battery, consumes data.
+  - **Fix:** Limit to retrying N orders per visit (e.g., 5), with exponential backoff between visits.
+- **P1-20 `MAX_RETRIES = 5` but orders NEVER expire (line 16, 92-97):** After 5 retries, the order stays in the queue forever. No notification to admin. Queue grows unboundedly over time. A 30-day-old order probably isn't wanted anymore, but it's still retried if it has retryCount < 5.
+  - **Fix:** Add `MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000` (7 days). Expire orders older than this.
+- **P1-21 No `addFailedOrder` race condition protection:** If two orders fail simultaneously (very rare — would need a double-submit), `loadFailedOrders` + `push` + `saveFailedOrders` is not atomic. Second push could overwrite the first.
+  - **Fix:** Use a queue + debounce, or use IndexedDB transactions.
+
+**P2:**
+- **P2-16 `addFailedOrder` doesn't deduplicate:** If the same order is added twice (e.g., customer double-clicks Submit), both copies are saved. Retry queue then submits the order twice.
+  - **Fix:** Generate an order ID (hash of `product+phone+wilaya+timestamp`) and dedupe by it.
+
+**Working correctly:**
+- `addFailedOrder` + `retryFailedOrders` exist (FIXED from final-scan-v1 P0-1). ✓
+- `retryCount` increments on failure. ✓
+- `MAX_RETRIES` cap prevents infinite retries. ✓
+- Logs success count + still-pending count. ✓
+
+### 9. `src/lib/r2-upload.ts` (119 lines)
+**P0:** None.
+
+**P2:**
+- **P2-17 File is essentially dead code:** `wrangler.toml:23-38` has the R2 binding commented out. The `uploadImageToR2` function returns `""` (line 36-37) when `env?.PRODUCT_IMAGES` is undefined. Currently no caller invokes this (admin uploads go directly to Cloudinary via `clientUploadImage`). Kept for "future use" per the task description.
+- **P2-18 `extension` variable (line 66-70) is computed but unused:** `key` (line 72) uses `${filename}.${extension}` — wait, no, `filename` is passed in as a parameter (e.g., `productId-1`), and `extension` is appended. But the regex on line 40 captures `ext` from the data URL MIME type (e.g., `image/jpeg` → `jpg`). So `key = "{filename}.jpg"`. The `extension` IS used. False alarm — code is correct.
+- **P2-19 No retry logic:** If R2 upload fails, returns `""`. Unlike `clientUploadImage` which retries 2x. Acceptable since R2 isn't currently used.
+
+**Working correctly:**
+- Properly checks `env?.PRODUCT_IMAGES` existence. ✓
+- Handles base64 decode errors. ✓
+
+### 10. `src/components/site/product-image.tsx` (132 lines)
+**P0:** None.
+
+**P1:**
+- **P1-21 `buildCloudinaryFallback` drops the version segment (line 55-64):** Constructs `https://res.cloudinary.com/${CLOUD_NAME}/image/upload/${filename}` — no `/v{timestamp}/` segment. If the original Cloudinary URL had a version (e.g., `v1783035210`), the fallback URL is `image/upload/nouveau-5bzz3-1.jpg` (no version). Cloudinary will serve the LATEST version of that public_id, which might be the OLD image if the admin re-uploaded.
+  - Compounds P0-5 — the local file 404s → falls back to Cloudinary → which serves the wrong version.
+  - **Fix:** Preserve the version segment from the original URL when constructing the fallback.
+- **P1-22 `unoptimized={unoptimized || (effectiveSrc !== src)}` (line 93):** The `(effectiveSrc !== src)` clause is redundant. When `errorSrc` is null, `effectiveSrc === src`, so the clause is false. When `errorSrc` is set AND `src` starts with `/images/products/`, `effectiveSrc` is the Cloudinary fallback URL (http), which IS external, so `isExternalUrl` is already true. The clause is dead code (carried over from final-scan-v1 P3-3, still present).
+- **P1-23 `useFallback` state resets on src change (line 79-81):** Good — prevents the leak where one 404 causes all subsequent images to use Cloudinary. ✓ (FIXED from final-scan-v1 P1-10.)
+
+**P2:**
+- **P2-20 `optimizeImageUrl` checks `src.startsWith("/images/products/") || src.startsWith("/")` (line 38):** The `src.startsWith("/")` clause is too broad — it matches ANY root-relative path (e.g., `/favicon.ico`). The intent is "local paths served by Cloudflare Pages". Should be `src.startsWith("/images/")` or `src.startsWith("/_next/")`.
+- **P2-21 `optimizeImageUrl` Cloudinary check (line 42-47):** Only adds optimization params if none are present. If the Cloudinary URL ALREADY has `c_limit` (e.g., from a re-encoded URL), the check `!src.includes("c_limit")` is true → applies optimization again → double-rewrites. Wait, the check is `!src.includes("c_limit") && !src.includes("q_auto") && !src.includes("f_auto")`. So if ANY of these is present, no rewrite. OK — no double-rewrite. But if the URL has `c_limit,w_400` (manually optimized), the check skips. If it has `q_80` (manual quality, not auto), the check ALSO skips because `q_auto` isn't there but `c_limit` and `f_auto` aren't either — actually the AND means ALL must be absent. Let me re-read: `if (!src.includes("c_limit") && !src.includes("q_auto") && !src.includes("f_auto"))` — applies optimization only if NONE of the three are present. So if URL has `q_80` only (no c_limit, no q_auto, no f_auto), it would apply `c_limit,w_400,q_auto,f_auto` → Cloudinary ignores `q_80` and uses `q_auto`. Minor.
+
+**Working correctly:**
+- Local paths served as-is (no Cloudinary transformation). ✓
+- Cloudinary URLs optimized with `c_limit,w_{400|800},q_auto,f_auto`. ✓
+- `onError` falls back to Cloudinary. ✓
+- `useFallback` resets on src change. ✓
+- Empty src shows "لا توجد صورة" placeholder. ✓
+- Lazy loading below the fold. ✓
+
+### 11. `src/components/site/admin-panel.tsx` (1318 lines)
+**P0:** None directly (P0-5 admin re-upload is in image-manifest, not here).
+
+**P1:**
+- **P1-24 `ADMIN_PASSWORD = BRAND.adminPassword` is hardcoded `"dimou2411@dz"` (brand-config.ts:17):** Bundled into the client JS (admin-panel.tsx is `"use client"`). Anyone with devtools can read it. **SECURITY P0**, but not a functional bug.
+  - **Fix:** Move auth to a server-side API route (POST `/api/admin/login` with the password, returns a session token). Or use Cloudflare Access.
+- **P1-25 `onReset` prop is declared (line 38) but NEVER used in the UI:** No "reset catalog" button is rendered. Dead code. If the admin wants to reset, they have to call the API directly. Either remove the prop or add a button.
+- **P1-26 `handleFiles` uploads images IMMEDIATELY on select (line 242-315):** Good for UX (Save feels instant). BUT: if the admin uploads 5 images then cancels the edit (clicks "إلغاء"), the images are ALREADY on Cloudinary — orphaned. Cloudinary storage grows unboundedly with admin churn.
+  - **Fix:** Either (a) track uploaded-but-unsaved URLs and delete them on cancel, OR (b) accept the orphaned-image cost (Cloudinary free tier is 25 GB storage — at ~70 KB per image, that's ~350K orphaned images before hitting the limit. Acceptable).
+- **P1-27 `resizeImage` rejects files >15 MB (line 60-64):** Good. But the error message shows the file size in MB (rounded). If the file is exactly 15.5 MB, the message says "16 ميجابايت" (rounds up). Minor UX.
+- **P1-28 `resizeImage` canvas fallback loop (line 109-127):** If the image is still >200 KB after quality reduction, it reduces resolution by 0.85x per iteration. Could take many iterations for very-large images. Acceptable — max 5-10 iterations.
+
+**P2:**
+- **P2-22 `MAX_PHOTOS = 5` (line 231):** Comment says "9,500 products × 5 images = 47,500 files max". But Cloudflare Pages has a 20,000-file limit. 47,500 > 20,000. The auto-sync.py script has a guard (line 154-160) that stops downloading past 19,000. So new uploads beyond 19,000 stay on Cloudinary (slower, throttled, but works). OK.
+- **P2-23 `key={i}` (line 500, 859) for photos and tiers:** Using array index as React key. If the admin reorders photos (setCoverPhoto) or removes a tier, React may not properly reconcile. Should use a stable ID.
+- **P2-24 `variants.map((v, i) => v.type === "color" && (...))` (line 737, 797):** Returns `false` for non-matching variants, which React renders as nothing. But the `key={i}` uses the GLOBAL index in `variants`, not the per-section index. So color variant at index 0 and size variant at index 1 both have keys 0 and 1 — but they're in different `<div>` containers, so React keys don't collide. OK.
+
+**Working correctly:**
+- Uses `AdminImagePreview` (not raw `<img>`) — FIXED from final-scan-v1 P0-3. ✓
+- Image upload on SELECT (not on Save). ✓
+- Save validation (name, price, image required). ✓
+- `save()` is debounced against double-click (`if (saving) return` line 424). ✓
+- Optimistic update + rollback on failure. ✓
+
+### 12. `src/components/site/admin-image-preview.tsx` (60 lines)
+**P0:** None.
+
+**P1:**
+- **P1-29 Uses raw `<img>` instead of Next/Image (line 51):** No width/height attributes, no lazy loading. For admin only, but if the admin opens the panel with 9,500 products, all cover images load eagerly. Could be slow.
+  - **Fix:** Add `loading="lazy"` and `width`/`height` attributes. Or use Next/Image with `unoptimized`.
+- **P1-30 `cloudinaryUrl` construction (line 37-46) drops the version segment** — same as P1-21. Compounds P0-5.
+
+**P2:**
+- **P2-25 `useFallback` resets on src change (line 32-34):** Good — fixed from final-scan-v1 P1-10. ✓
+
+**Working correctly:**
+- Tries local path first, falls back to Cloudinary on error. ✓
+- Resets error state on src change. ✓
+
+### 13. `src/components/site/featured-carousel.tsx` (198 lines)
+**P0:** None.
+
+**P1:**
+- **P1-31 Auto-rotates every 4.5s (line 14, 35-45):** Doesn't pause on hover (line 85-86 sets `pausedRef.current = true` but the interval still fires — it just skips the index increment). Good. But on touch devices, there's no hover, so the carousel rotates forever. Could be annoying. Acceptable UX.
+- **P1-32 `count === 0` returns `null` (line 51):** If the catalog has no featured products, the entire `<section>` (with header "منتجات مميّزة") is hidden. Could be confusing — empty space where the carousel should be. Acceptable.
+
+**P2:**
+- **P2-26 `key={p.id}` for dots (line 183):** Duplicate IDs would warn. Defensive only (catalog dedupes by ID).
+- **P2-27 `priority={index === 0}` (line 112):** Only the first carousel image is priority-loaded. If the user navigates to dot 3, that image is lazy-loaded. OK.
+
+**Working correctly:**
+- `products[index] ?? products[0]` guard (line 55). ✓
+- Interval cleaned up in useEffect return (line 42-44). ✓
+- Pauses on hover. ✓
+- Resets index if out of bounds (line 47-49). ✓
+
+### 14. `src/components/site/product-card.tsx` (83 lines)
+**P0:** None.
+**P1:** None.
+
+**P2:**
+- **P2-28 `transitionDelay: ${Math.min(index * 30, 240)}ms` (line 24):** Staggered entrance animation. Caps at 240ms (8 cards). For card #9+, no additional delay. OK.
+
+**Working correctly:**
+- Uses `ProductImage` with `fit="contain"`. ✓
+- Shows badge, low-stock, rupture overlays. ✓
+- Truncates title with `line-clamp-2`. ✓
+- Clickable button. ✓
+
+### 15. `src/components/site/product-page.tsx` (499 lines)
+**P0:** See P0-4 (variants lost on add-to-cart).
+
+**P1:**
+- **P1-33 `activeTier` matches `qty === t.qty` only (line 98-101):** Doesn't honor `mode: "min"`. If a tier is "buy 2+ → free shipping", the badge doesn't show at qty 3, 4, 5. The `cod-order-form.tsx` tier matching IS correct (line 122-150), so the discount is APPLIED — just not PREVIEWED on the product page.
+  - **Fix:** Change `tiers.find((t) => t.qty === selectedQty)` to `tiers.filter((t) => (t.mode === "min" ? selectedQty >= t.qty : selectedQty === t.qty))` and pick the best (same logic as cod-order-form.tsx line 138-148).
+- **P1-34 `handleAdd` doesn't pass `variantKey` (line 136-145):** See P0-4.
+- **P1-35 `useEffect` resets state on `product?.id` change (line 53-60):** If the user navigates from product A to product B, state resets. Good. But if the user is mid-editing (e.g., selected qty=3) and the catalog refreshes (every 5.5 min), the product object reference changes (new object from refresh), triggering the useEffect → resets qty to 1. Annoying UX.
+  - **Fix:** Use `product?.id` as the dependency (already done), but ensure the refresh doesn't create a new object reference for the SAME product. Currently `refresh()` creates new objects via `normalizeProduct`, so the reference always changes. Could memoize by product ID.
+- **P1-36 `window.scrollTo` on product change (line 59):** Smooth scroll. Could be jarring if the user is mid-scroll. Acceptable.
+
+**P2:**
+- **P2-29 Related products `slice(0, 4)` (line 468):** Hardcoded 4. If the catalog has 3 same-category products, fills with 1 other. OK.
+- **P2-30 `key={p.id}` for related products (line 470):** OK (catalog dedupes).
+
+**Working correctly:**
+- Variant price adjustments applied to `adjustedPrice` (line 87-94). ✓
+- Quantity selector (1-4 + custom input). ✓
+- Escape key closes the page (line 62-68). ✓
+- Trust badges. ✓
+
+### 16. `src/components/site/cart-bar.tsx` (203 lines)
+**P0:** See P0-4 (variantKey not passed to updateQuantity/removeItem).
+
+**P1:**
+- **P1-37 `onUpdateQuantity(item.productId, item.quantity - 1)` (line 137-141):** Passes only `productId`. If the cart has multiple variants of the same product, the wrong one might be updated. Compounds P0-4.
+- **P1-38 `onRemove(item.productId)` (line 166):** Same — passes only `productId`.
+
+**P2:**
+- **P2-31 `key={`${item.productId}-${item.variantKey || ""}`}` (line 107):** Good — unique key per variant. FIXED from final-scan-v1.
+- **P2-32 `total` calculation guards against NaN (line 56-59):** Good.
+- **P2-33 `hasPricedItems && !hasUnpricedItems` (line 182):** Shows total only if ALL items have prices. Mixed cart shows "total + سعر عند الطلب". Good UX.
+
+**Working correctly:**
+- Drawer overlay click closes. ✓
+- Empty cart message. ✓
+- Total + checkout button. ✓
+
+### 17. `src/components/site/checkout-modal.tsx` (98 lines)
+**P0:** None.
+
+**P1:**
+- **P1-39 Doesn't pass `quantityTiers` to `CodOrderForm` (line 89-93):** If the cart has a single item with tiers, the customer doesn't see the tier discount/free shipping in the checkout. They only see it on the product-page direct checkout.
+  - **Fix:** Compute `quantityTiers` from the single cart item's product (look up in catalog) and pass to `CodOrderForm`.
+
+**P2:**
+- **P2-34 `useEffect` locks body scroll (line 23-35):** Good. Restores on cleanup. ✓
+- **P2-35 `cleared` state (line 21):** Set to true on order success, changes the modal title to "تم الطلب". Good UX.
+
+**Working correctly:**
+- Escape key closes. ✓
+- Body scroll lock. ✓
+- Order success → `onOrderSuccess` callback → cart cleared. ✓
+
+### 18. `src/components/site/cod-order-form.tsx` (961 lines)
+**P0:** None directly. (Order always reaches the sheet via `clientSubmitOrder` OR the failed-orders queue.)
+
+**P1:**
+- **P1-40 `catch` block on unhandled exception (line 354-376):** If `clientSubmitOrder` itself throws (not returns false — e.g., the dynamic `import("@/lib/client-sheet")` fails because the JS chunk can't be loaded), the catch block sets `done = true` and shows the thank-you screen — but does NOT save to the failed-orders queue. The order is silently lost.
+  - **Fix:** In the catch block, also call `addFailedOrder(...)` (same as the `if (!orderOk)` block on line 312-328).
+- **P1-41 `generateOrderRef` uses `Math.random()` (line 46-49):** 6 random digits = ~900K possible refs. At high order volume (50K orders/day), birthday-paradox collision after ~30 days. Two orders could get the same ref. The ref is shown to the customer and stored in the sheet — duplicates would confuse the admin.
+  - **Fix:** Use `crypto.randomUUID()` (available in all modern browsers) or include a timestamp: `SD-${Date.now().toString(36).slice(-6)}${Math.random().toString(36).slice(2,5)}`.
+- **P1-42 `handleSubmit` always shows the thank-you screen (line 336-352):** Even if the order failed to submit AND failed to save to the retry queue. Customer sees "thank you" but the order is lost. Acceptable UX (better than showing an error), but the admin has no way to know.
+  - **Fix:** Show a subtle warning toast: "تم تسجيل طلبك، لكن قد نتصل بك لتأكيد التفاصيل." if the order was queued.
+- **P1-43 `setItems(initialItems)` sync on prop change (line 90-92):** If the parent re-renders with a new `initialItems` array (even if the content is the same), `setItems` is called, triggering a re-render. Could cause infinite loops if the parent isn't memoized. Acceptable in practice.
+
+**P2:**
+- **P2-36 `PHONE_REGEX` from `use-algeria-data` (line 229):** Not shown in this file, but referenced. Assumed to be `/^0[567]\d{8}$/` (10 digits, starts with 05/06/07). ✓
+- **P2-37 `customQty` state (line 74):** Local input text. Decoupled from the actual quantity. If the user types "10", `customQty = "10"` and `items[0].quantity = 10`. If they then click the "4" button, `customQty = ""` (cleared on line 818). Good.
+- **P2-38 Tier benefit text in Arabic (line 198-222):** Hardcoded translations. If the admin sets a tier with `mode: "min"` and `freeShipping: "desk"`, the text is "🎉 توصيل مجاني (المكتب) عند شراء 2 قطعة أو أكثر!". Good UX.
+
+**Working correctly:**
+- Tier matching logic (line 122-150): correct `exact` vs `min`, picks most generous on multiple matches. ✓
+- Discount clamped to never go negative (line 170-173). ✓
+- Free shipping applied based on delivery type (line 156-162). ✓
+- Order summary saved to state for thank-you screen. ✓
+- `onSuccess` callback fires regardless of order success/failure. ✓
+
+### 19. `src/components/site/error-boundary.tsx` (156 lines)
+**P0:** None.
+
+**P1:**
+- **P1-44 `handleReload` calls `window.location.reload()` (line 41-47):** Forces a full page reload. This clears the React state but DOES NOT clear localStorage (catalog, cart, failed-orders). If the error was caused by corrupt localStorage data, the reload will hit the same error again.
+  - **Fix:** Offer a "clear cache and reload" button that clears `CATALOG_STORAGE_KEY` and `CART_STORAGE_KEY` before reloading.
+
+**P2:**
+- **P2-39 Shows error stack trace in `<details>` (line 122-149):** Good for debugging. Visible to end users (collapsed by default). Acceptable.
+
+**Working correctly:**
+- `getDerivedStateFromError` catches render errors. ✓
+- `componentDidCatch` logs to console. ✓
+- Friendly fallback UI with reload button. ✓
+
+### 20. `src/components/site/manifest-preloader.tsx` (26 lines)
+**P0:** None.
+**P1:** None.
+
+**P2:**
+- **P2-40 `loaded` state is set but never read (line 16, 20):** Dead state. The component renders `null` regardless. Could be removed.
+- **P2-41 Calls `preloadImageManifest()` on mount (line 19):** Triggers the manifest fetch. The result is cached in `image-manifest.ts:23`. Good.
+
+**Working correctly:**
+- Renders nothing (side-effect only). ✓
+- Triggered from `layout.tsx:89`. ✓
+
+### 21. `src/app/page.tsx` (377 lines)
+**P0:** None.
+
+**P1:**
+- **P1-45 `validProducts` filter (line 160-172):** Skips products with no image, emoji/Arabic IDs, or invalid image URLs. Good. But if ALL products are filtered out (e.g., sheet returns guidance rows only), `validProducts` is empty → `showSkeletons = true` forever. The user sees skeletons indefinitely.
+  - **Fix:** After ~10 seconds of loading, show a "فشل تحميل المنتجات — تحقق من الاتصال" message.
+- **P1-46 `exitToHome` (line 94-108):** Uses `history.pushState` to clear the hash, then `setView({ kind: "home" })`. If `pushState` fails (rare), falls back to `window.location.hash = ""`. The fallback triggers a `hashchange` event, which calls `checkHash` → `setView({ kind: "home" })`. So `setView` is called twice. React dedupes identical state. OK.
+- **P1-47 `handleCartItemOpen` (line 137-146):** Looks up the product by ID in `catalog.products`. If the product was deleted from the catalog (but still in the cart), `p` is undefined, and the click does nothing. Should show a toast: "هذا المنتج لم يعد متوفراً."
+
+**P2:**
+- **P2-42 Three `ErrorBoundary` instances (line 195, 228, 245):** One per view (admin, product, home). If the admin view crashes, the home view is unaffected. Good isolation.
+- **P2-43 `savedScrollRef` (line 66):** Saves scroll position when navigating to a product page, restores on return. Good UX.
+- **P2-44 `requestAnimationFrame` for scroll restore (line 88):** Waits for the home DOM to paint before scrolling. Good.
+
+**Working correctly:**
+- Hash-based routing (admin / product / home). ✓
+- ErrorBoundary wraps each view. ✓
+- Cart drawer + checkout modal. ✓
+- Skeleton loading state. ✓
+- Scroll restore on back. ✓
+
+### 22. `src/app/layout.tsx` (115 lines)
+**P0:** None.
+**P1:** None.
+
+**P2:**
+- **P2-45 `dir="ltr"` on `<html>` (line 78):** The site is Arabic (RTL content), but the HTML dir is LTR. Individual components use `dir="rtl"` or `font-arabic` to handle RTL. This is intentional (mixed LTR/RTL layout), but could cause issues with form inputs (e.g., phone number input is `dir="ltr"` on line 651 of cod-order-form.tsx). OK.
+- **P2-46 DNS prefetch for Cloudinary + Apps Script (line 81-84):** Good — saves ~100-300 ms on first fetch.
+
+**Working correctly:**
+- Fonts loaded via Next.js font optimization. ✓
+- `ManifestPreloader` rendered. ✓
+- Toaster configured. ✓
+- Metadata + OpenGraph. ✓
+
+### 23. `src/app/error.tsx` (76 lines)
+**P0:** None.
+**P1:** None.
+
+**P2:**
+- **P2-47 `reset` callback (line 58):** Next.js-provided. Resets the error boundary. Good.
+- **P2-48 Doesn't log the error to the server:** Could send to Sentry / Cloudflare Logpush. Currently just shown to the user. Acceptable for now.
+
+**Working correctly:**
+- Friendly error UI. ✓
+- Reset button. ✓
+
+### 24. `src/app/not-found.tsx` (69 lines)
+**P0:** None.
+**P1:** None.
+
+**P2:**
+- **P2-49 Link to home (line 50-65):** Good.
+
+**Working correctly:**
+- 404 page. ✓
+
+### 25. `src/app/api/products/route.ts` (237 lines)
+**P0:** None (dead code).
+
+**P1:**
+- **P1-48 This entire route is DEAD CODE:** The client (`use-catalog.ts`) fetches directly from Apps Script, bypassing this route. The KV cache (line 23-44) is never populated. Maintenance burden.
+  - **Fix:** Either (a) re-enable by changing `use-catalog.ts` to fetch from `/api/products` (which then uses KV cache → reduces Apps Script load by 100x), OR (b) delete this file and the KV namespace.
+- **P1-49 POST route's `quantityTiers` encoding drops `mode` (line 201-203):** `${qty}:${freeShipping}:${discountAmount}` — no `mode` field. If anyone calls this route, the mode is lost. The client uses `clientUpsertProduct` (direct to Apps Script) which DOES include mode. So this is a latent bug only.
+- **P1-50 POST route uses `uploadImagesToDrive` (line 167):** Uploads to Google Drive, not Cloudinary. Inconsistent with the client-side flow (which uses Cloudinary). If anyone calls this route, images go to Drive. Maintenance burden.
+
+**P2:**
+- **P2-50 GET route has 4 levels of fallback (KV → Sheet → Stale KV → Seed):** Very robust. ✓
+- **P2-51 `dedupeProducts` (line 51-61):** Good — dedupes by ID.
+
+### 26. `src/app/api/stock/route.ts` (61 lines)
+**P0:** None (dead code).
+
+**P1:**
+- **P1-51 Same as P1-48 — DEAD CODE:** Client fetches directly from Apps Script. KV cache never runs.
+- **P1-52 Returns 502 on sheet failure (line 41):** The client (`use-stock.ts`) doesn't handle non-OK responses — it just checks `if (text)`. A 502 with JSON body would set `text` to the JSON string, and `parseCsv` would return an empty map. OK.
+
+### 27. `src/app/api/order/route.ts` (80 lines)
+**P0:** None (dead code).
+
+**P1:**
+- **P1-52 Same as P1-48 — DEAD CODE:** Client uses `clientSubmitOrder` directly.
+- **P1-53 Returns `ok: true` even on failure (line 65, 74):** "Customer doesn't see an error". But the `warning: "order_queued"` field is never checked by the client (which doesn't use this route). If anyone calls this route, they'd think the order succeeded when it didn't.
+- **P1-54 No server-side retry queue:** The route logs the failure to console (line 58) but doesn't save it anywhere. If the customer's device is offline / cleared localStorage, the order is permanently lost. Compounds P1-17.
+
+### 28. `.github/workflows/auto-sync-images.yml` (46 lines)
+**P0:** See P0-2 (build limit).
+
+**P1:**
+- **P1-55 Cron `*/15 * * * *` (every 15 min) is excessive (line 5):** 96 runs/day. The script's own comment says "every 24 hours" (auto-sync.py line 7). Inconsistent.
+  - **Fix:** Change to `0 3 * * *` (once daily at 3 AM UTC) or `0 */6 * * *` (every 6 hours).
+- **P1-56 `fetch-depth: 1` (line 20):** Shallow checkout. Faster, but loses git history. For a sync script that just downloads files, this is fine.
+- **P1-57 `timeout-minutes: 5` (line 14):** If the script takes longer (e.g., downloading 1,000 images at 1s each = 16 min), it's killed mid-download. Partial state.
+  - **Fix:** Increase to 15-30 min, or split downloads into batches across multiple runs.
+
+**P2:**
+- **P2-52 `git add public/images/products/ public/image-manifest.json` (line 44):** Adds ALL changed files. If the script accidentally creates a huge file (e.g., a 1 GB image), it'd be committed. Should add a size guard.
+- **P2-53 `[skip ci]` in commit message (line 45):** Cloudflare Pages doesn't respect this. See P0-2.
+
+### 29. `scripts/auto-sync.py` (235 lines)
+**P0:** None.
+
+**P1:**
+- **P1-58 `APPS_SCRIPT_URL` is hardcoded (line 35):** Same URL as `sheet.ts:8`. If the Apps Script is redeployed (new URL), both need updating. Should use an env var.
+- **P1-59 `download_one` has no retry (line 110-123):** Single attempt per image. If Cloudinary returns a transient 429/500, the image is marked as failed and skipped. Next sync run (15 min later) will retry. OK.
+- **P1-60 `missing_items = list(missing.items())[:100]` (line 167):** "First 100 critical images" — but there's no priority. Just the first 100 in dict insertion order (= sheet row order). Not actually "critical".
+- **P1-61 `orphans = local_files - set(needed.keys())` (line 149):** Deletes orphaned files. But if a product is temporarily removed from the sheet (admin deletes, then re-adds), the local file is deleted. On re-add, the auto-sync downloads it again. Wasteful but not data-corrupting.
+- **P1-62 No file-size guard (line 113-123):** Could download a 100 MB image if Cloudinary has one. Should cap at e.g., 5 MB.
+
+**P2:**
+- **P2-54 `ThreadPoolExecutor(max_workers=8)` (line 175):** 8 parallel downloads. Reasonable.
+- **P2-55 Manifest rebuilt on every run (line 202-214):** Even if nothing changed, the manifest's `builtAt` timestamp updates. This could trigger unnecessary Cloudflare Pages builds.
+  - **Fix:** Only rebuild the manifest if files changed.
+- **P2-56 `json.dump(manifest, f)` (line 214):** No `indent=` parameter. The manifest is a single line of JSON. Hard to read. Minor.
+
+**Working correctly:**
+- Fetches products from Apps Script. ✓
+- Dedupes by ID. ✓
+- Extracts Cloudinary URLs + filenames. ✓
+- Lists local files. ✓
+- Downloads missing files in parallel. ✓
+- Deletes orphaned files. ✓
+- Checks 20K file limit before downloading. ✓
+- Rebuilds manifest. ✓
+
+### 30. `download/apps-script.gs` (518 lines)
+**P0:** None directly. (Quota concerns are runtime, not code.)
+
+**P1:**
+- **P1-63 `serveProducts` reads ALL rows via `getDataRange().getValues()` (line 137):** For 9,500 products × 17 columns = 161,500 cells. Apps Script's `getValues()` is O(n) but has a 5-minute execution limit. At ~1ms per cell, this is ~160s — under the limit. OK.
+- **P1-64 `doCreateProduct` calls `findProductRow_` (line 180):** Linear scan O(n). For 9,500 products, ~9,500 ms = 9.5s. Under the 30s timeout. OK but slow.
+- **P1-65 `onStockEdit` trigger (line 313-356):** Only handles single-item orders (`if (productName.indexOf('+') >= 0) return;` line 345). Multi-item cart orders are NOT auto-decremented. Admin must do it manually.
+- **P1-66 `decrementProductStock_` (line 361-382):** Linear scan O(n) by name. For 9,500 stock rows, ~9.5s. Under the timeout. OK.
+- **P1-67 `doResetProducts` deletes the entire sheet (line 246):** `ss.deleteSheet(sheet)` — irreversible. No confirmation. If called by mistake (e.g., the admin clicks a hidden reset button), all products are gone. The SEED_PRODUCTS fallback in the client only has 29 demo products, not the real catalog.
+  - **Fix:** Add a confirmation prompt in the admin UI before calling `clientResetProducts`.
+
+**P2:**
+- **P2-57 `doCreateOrderFromParams` doesn't validate phone (line 66-81):** The client validates via `PHONE_REGEX` (cod-order-form.tsx line 229), but the Apps Script accepts any phone. If a malicious user crafts a request directly to Apps Script, they can submit orders with invalid phones. Low risk (the Apps Script URL is public, but the impact is just bad data in the sheet).
+- **P2-58 `doCreateProduct` appends to the END of the sheet (line 181):** New products get the highest row number. The `sortOrder` field controls display order, not row position. OK.
+- **P2-59 `buildProductRow_` writes `featured` and `isSpecialOffer` as strings `'true'`/`'false'` (line 258-259):** The client (`normalizeSheetProduct` in client-sheet.ts line 530-539) handles both string and boolean. OK.
+
+**Working correctly:**
+- doGet / doPost routing. ✓
+- Products sheet auto-creates headers. ✓
+- Stock sheet auto-creates headers + fixes Arabic headers. ✓
+- Orders sheet auto-creates headers. ✓
+- Guidance row (row 2 with Arabic/emoji) is skipped. ✓
+- Duplicate IDs deduped. ✓
+- Category typo "Meubes" → "Meubles" auto-fixed. ✓
+- Stock decrement on order confirmation (manual trigger). ✓
+- `doDedupeProducts` + `doCleanupSheet` maintenance actions. ✓
+
+---
+
+## Self-Healing Assessment
+
+| Failure Mode | Self-Heals? | How | Residual Risk |
+|---|---|---|---|
+| Network error on catalog fetch (Apps Script down) | ✅ YES | `refresh()` catch block falls back to `loadCatalog()` (sync localStorage) → `loadCatalogAsync()` (IndexedDB) → `SEED_PRODUCTS`. | If localStorage + IndexedDB are both empty (first visit), shows SEED_PRODUCTS (29 demo products) — confusing if the real catalog has 9,500. |
+| Network error on stock fetch | ✅ YES | `fetchStock` catch block keeps current state. | Stock shows stale data until next successful fetch. Customer might order an out-of-stock product. |
+| Network error on order submit | ✅ YES | `clientSubmitOrder` returns false → `addFailedOrder` saves to localStorage → `retryFailedOrders` retries on next page visit. | If customer never returns, order is lost (P1-17). If localStorage is full, order is silently lost (P1-18). |
+| Network error on admin upsert | ✅ YES | Optimistic update + rollback on failure. Admin sees toast "فشل الحفظ". | The `setTimeout(refresh, 100)` after a successful POST might overwrite a concurrent admin edit (P1-1). |
+| Network error on admin delete | ✅ YES | Optimistic update + rollback. | Same as upsert. |
+| Cloudinary down during image upload | ✅ YES | `clientUploadImage` retries 2x with exponential backoff. On final failure, returns `""` (empty string), filtered out. Admin sees toast "فشل في رفع الصور". | If ALL uploads fail, admin can't save (image required). Acceptable. |
+| Local image 404 (missing file) | ✅ YES | `ProductImage` `onError` → `useFallback=true` → `effectiveSrc = cloudinaryFallback`. `AdminImagePreview` same. | The Cloudinary fallback drops the version segment (P1-21), so it might serve the wrong version. Compounds P0-5. |
+| Manifest fails to load | ✅ YES | `loadImageManifest` catch returns null. `getLocalPathSync` returns null. `optimizeCloudinaryUrls` keeps Cloudinary URLs. | Cloudinary throttling under high load (80+ images). Images load slowly but don't break. |
+| localStorage quota exceeded | ✅ YES | `saveCatalog` catch → `adaptiveSet` → IndexedDB. | Stale data bug (P1-16) — old localStorage value shadows new IndexedDB value. |
+| IndexedDB unavailable (private browsing) | ✅ YES | `openDB` returns null. `adaptiveSet` returns false. Caller (`saveCatalog`) returns false. | Cart silently fails to persist (P1-6). Failed orders silently lost (P1-18). |
+| Apps Script quota exhausted | ❌ NO | No mitigation. All fetches return errors. Site shows cached/seed data. | **P0-1 — site is effectively down for the rest of the day after quota hits.** |
+| Render error in component | ✅ YES | `ErrorBoundary` catches, shows friendly UI with reload button. | `handleReload` doesn't clear corrupt localStorage (P1-44). |
+| Cloudflare Pages build limit exceeded | ❌ NO | New commits can't deploy. Site stays on old version. | **P0-2 — admin's new products don't go live until next month's quota resets.** |
+
+---
+
+## Final Verdict: Is the site bulletproof for 800K visits/month?
+
+**NO.** The site is **functional for the current 83-product catalog at low traffic (~1K visits/day)**, but it will **FAIL at 800K visits/month** due to:
+
+1. **Apps Script quota exhaustion (P0-1):** ~52K executions/day vs 30K Consumer Gmail limit. The site breaks ~halfway through every day. The KV cache exists but is dead code (frontend bypasses it).
+
+2. **Cloudflare Pages build limit (P0-2):** The auto-sync workflow commits on every 15-min run when there are changes, triggering Pages builds. 96 builds/day max vs 500/month limit. Builds fail after ~5 days of admin activity.
+
+3. **Cart multi-variant flow broken (P0-4):** Variants are silently lost on add-to-cart. Store owner can't fulfill multi-variant orders correctly.
+
+4. **Admin re-upload shows stale image (P0-5):** Admins will be confused when their new image doesn't appear (the old local file takes priority via the manifest).
+
+5. **`ignoreBuildErrors: true` (P0-3):** Hidden TypeScript errors. Could ship broken code silently.
+
+### What's been fixed since final-scan-v1 (positive progress):
+- ✅ Failed-orders retry queue (was P0-1, now implemented in `failed-orders.ts`).
+- ✅ Race condition guard (was P0-2, now has `currentCount <= cached.length` check).
+- ✅ Admin uses `AdminImagePreview` (was P0-3, now uses Cloudinary fallback).
+- ✅ `saveCatalog` returns false on failure (was P0-4, now honest).
+- ✅ Cart drawer keys use `${productId}-${variantKey}` (was P1 in v1).
+- ✅ `product-image.tsx` `useFallback` resets on src change (was P1-10).
+- ✅ `adaptiveSet` verifies write length (new since v1).
+- ✅ `saveCatalogAsync` called after `saveCatalog` in `upsertProduct`/`refresh` (new since v1).
+- ✅ Image upload on SELECT (not on Save) — admin UX is instant.
+
+### What still needs fixing BEFORE scaling to 800K visits/month (priority order):
+1. **P0-1 (Apps Script quota):** Re-enable the KV-cached API routes, OR upgrade to Workspace, OR move to Cloudflare Worker. **Without this, the site is unusable at scale.**
+2. **P0-2 (Build limit):** Reduce cron to daily, OR make repo public + ignore `[skip ci]`, OR deploy on tags only.
+3. **P0-3 (ignoreBuildErrors):** Set to `false`, fix all type errors, unify the two `normalizeProduct` functions.
+4. **P0-4 (Cart variants):** Pass `variantKey` through `handleAdd` → `addToCart` → `updateQuantity` → `removeItem`.
+5. **P0-5 (Image re-upload):** Include Cloudinary version segment in manifest key, OR skip local rewrite for recently-uploaded products.
+6. **P1-17 (Failed orders tied to device):** Add server-side retry queue (KV or email notification).
+7. **P1-1 (Admin UX flicker):** Pause polling during admin edit, OR debounce the polling refresh.
+8. **P1-15 + P1-16 (IndexedDB):** Add `onversionchange` handler, REMOVE stale localStorage on quota-exceeded.
+9. **P1-19 + P1-20 (Retry queue):** Limit retries per visit, add max age.
+10. **P1-24 (Admin password):** Move to server-side auth.
+
+### Overall assessment:
+- **Code quality:** Good. Comments are thorough, error handling is mostly defensive, the architecture is sensible.
+- **Self-healing:** Strong for network/localStorage failures. Weak for quota/build-limit failures (no mitigation possible at the app layer — needs infra changes).
+- **Race conditions:** Mostly handled (optimistic update + rollback, count-based guards). Remaining: admin edit vs polling refresh (P1-1).
+- **Memory leaks:** None found. All intervals/listeners cleaned up.
+- **Hydration:** Safe. All client state initializes empty.
+- **Verdict:** The site is **production-ready for low traffic (~1K visits/day)** but **NOT ready for 800K visits/month** without addressing P0-1 (Apps Script quota) and P0-2 (build limit) first. The cart variant bug (P0-4) and image re-upload bug (P0-5) are functional issues that affect correctness regardless of traffic.
+
+---
+
+Work Log:
+- Read all 30 files in scope completely (hooks: 3, lib: 6, components: 11, app: 6, CI/scripts: 3).
+- Cross-verified previous scan (final-scan-v1) fixes: 4 of 5 P0 issues are now fixed; 1 (ignoreBuildErrors) remains.
+- Cross-verified `wrangler.toml` — KV namespace `id == preview_id` (production corruption risk on preview deploys).
+- Cross-verified `next.config.ts` — `ignoreBuildErrors: true` still set.
+- Cross-verified `.github/workflows/auto-sync-images.yml` — cron is `*/15 * * * *` (every 15 min), not daily as the script comment claims.
+- Cross-verified `brand-config.ts` — admin password is hardcoded `"dimou2411@dz"` in client bundle.
+- Cross-verified `public/image-manifest.json` exists (2,584 bytes) and `/public/images/products/` has 109 files (matches v1 count).
+- Cross-verified the divergent `normalizeProduct` functions: `use-catalog.ts:557` (local, no `{fr,ar}` handling) vs `lib/products.ts:950` (handles `{fr,ar}`).
+- Verified `client-sheet.ts:344-351` 400-retry block uses the broken comma-operator pattern (dead `new AbortController()`, leaked `setTimeout` ID).
+- Verified `product-page.tsx:136-145` `handleAdd` does NOT pass `variantKey` to `onAddToCart`.
+- Verified `cart-bar.tsx:137-141, 166` `onUpdateQuantity` / `onRemove` pass only `productId`, not `variantKey`.
+- Verified `checkout-modal.tsx:89-93` does NOT pass `quantityTiers` to `CodOrderForm`.
+- Verified `cod-order-form.tsx:354-376` catch block does NOT call `addFailedOrder` on unhandled exception.
+- Verified `failed-orders.ts` retry queue exists and is triggered from `use-catalog.ts:203-205`.
+- Verified `api/products/route.ts`, `api/stock/route.ts`, `api/order/route.ts` are all dead code (client bypasses them).
+- No code was modified — read & report only.
+
+Stage Summary:
+- **5 NEW P0 issues identified** (Apps Script quota, build limit, ignoreBuildErrors still on, cart variants lost, admin re-upload stale image).
+- **17 P1 issues identified** (broken 400-retry logic, hardcoded admin password, failed-orders single-device, localStorage stale-data bug, admin UX flicker, checkout-modal missing tiers, etc.).
+- **56 P2 issues identified** (dead API routes, missing onversionchange, divergent normalizeProduct, hardcoded Apps Script URL, no file-size guard, etc.).
+- **Total: ~78 issues across 30 files.**
+- **4 of 5 previous P0 issues (final-scan-v1) are now FIXED.** Significant progress.
+- **The site is NOT bulletproof for 800K visits/month.** Top blockers: P0-1 (Apps Script quota), P0-2 (build limit), P0-4 (cart variants), P0-5 (image re-upload).
+- **Top 3 must-fix-before-scaling:** P0-1 (re-enable KV cache OR upgrade Apps Script account), P0-2 (reduce cron frequency OR deploy on tags), P0-4 (fix cart variant flow).

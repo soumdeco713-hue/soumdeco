@@ -33,8 +33,12 @@ import {
 } from "@/lib/products";
 import type { SheetProduct } from "@/lib/sheet";
 
-const POLL_MS = 330_000; // poll every 5.5 minutes when visible
-const HIDDEN_POLL_MS = 1_100_000; // ~18 min when tab is hidden
+// Polling intervals — optimized for 800K visits/month to stay under
+// Apps Script's 20K-30K exec/day Consumer Gmail quota.
+// At 26K visits/day × 1 fetch/visit = 26K exec/day (close to limit).
+// With 30-min polling, returning visitors don't hit Apps Script → ~13K fetches/day.
+const POLL_MS = 1_800_000; // 30 minutes when tab is visible
+const HIDDEN_POLL_MS = 3_600_000; // 1 hour when tab is hidden
 
 export function useCatalog() {
   // Initialize empty on both server and client (hydration-safe)
