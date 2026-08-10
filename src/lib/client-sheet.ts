@@ -335,27 +335,28 @@ export async function clientUploadImage(
             const formData2 = new FormData();
             formData2.append("file", dataUrl);
             formData2.append("upload_preset", UPLOAD_PRESET);
+            // Use a FRESH AbortController + clean timeout (no leaked handles)
+            const controller2 = new AbortController();
+            const timeout2 = setTimeout(
+              () => controller2.abort(),
+              IMAGE_UPLOAD_TIMEOUT_MS,
+            );
             try {
               const res2 = await fetch(
                 `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
                 {
                   method: "POST",
                   body: formData2,
-                  signal: (
-                    new AbortController(),
-                    setTimeout(
-                      () => controller.abort(),
-                      IMAGE_UPLOAD_TIMEOUT_MS,
-                    ),
-                    controller.signal
-                  ),
+                  signal: controller2.signal,
                 },
               );
               if (res2.ok) {
                 const data2 = await res2.json();
                 if (data2.secure_url) return data2.secure_url;
               }
-            } catch {}
+            } catch {} finally {
+              clearTimeout(timeout2);
+            }
           }
           return ""; // skip this image
         }

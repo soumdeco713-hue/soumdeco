@@ -4,6 +4,7 @@ import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { BRAND } from "@/lib/brand-config";
 import { ManifestPreloader } from "@/components/site/manifest-preloader";
+import { HealthMonitorStarter } from "@/components/site/health-monitor-starter";
 
 const jost = Jost({
   variable: "--font-jost",
@@ -87,6 +88,7 @@ export default function RootLayout({
         className={`${jost.variable} ${cormorant.variable} ${inter.variable} ${arabic.variable} font-arabic antialiased bg-background text-foreground`}
       >
         <ManifestPreloader />
+        <HealthMonitorStarter />
         {children}
         <Toaster
           position="top-center"

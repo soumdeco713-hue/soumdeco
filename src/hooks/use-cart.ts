@@ -23,10 +23,54 @@ export function useCart() {
       const raw = window.localStorage.getItem(CART_STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) setItems(parsed);
+        if (Array.isArray(parsed)) {
+          // SELF-HEALING: Validate + sanitize cart items
+          // Removes corrupted items (missing required fields, invalid quantity)
+          const sanitized = parsed
+            .filter(
+              (item) =>
+                item &&
+                typeof item === "object" &&
+                typeof item.productId === "string" &&
+                item.productId.trim() !== "" &&
+                typeof item.name === "string" &&
+                typeof item.quantity === "number" &&
+                item.quantity > 0 &&
+                item.quantity < 1000, // sanity check
+            )
+            .map((item) => ({
+              productId: String(item.productId),
+              name: String(item.name),
+              price:
+                typeof item.price === "number" && !isNaN(item.price)
+                  ? item.price
+                  : null,
+              image: typeof item.image === "string" ? item.image : "",
+              quantity: Math.min(99, Math.max(1, Math.floor(item.quantity))),
+              variantKey:
+                typeof item.variantKey === "string" ? item.variantKey : undefined,
+            }));
+          if (sanitized.length !== parsed.length) {
+            console.warn(
+              `[Cart] Self-healing: removed ${parsed.length - sanitized.length} corrupted item(s)`,
+            );
+          }
+          setItems(sanitized);
+          // Re-save the sanitized version
+          try {
+            window.localStorage.setItem(
+              CART_STORAGE_KEY,
+              JSON.stringify(sanitized),
+            );
+          } catch {}
+        }
       }
     } catch {
-      // ignore
+      // Corrupted JSON — clear it and start fresh
+      console.warn("[Cart] Self-healing: corrupted localStorage, clearing cart");
+      try {
+        window.localStorage.removeItem(CART_STORAGE_KEY);
+      } catch {}
     }
     setHydrated(true);
   }, []);
@@ -67,16 +111,22 @@ export function useCart() {
   );
 
   const updateQuantity = useCallback(
-    (productId: string, quantity: number) => {
+    (productId: string, quantity: number, variantKey?: string) => {
+      const vk = variantKey || "";
       if (quantity <= 0) {
-        persist(items.filter((i) => i.productId !== productId));
+        // Remove the item entirely (matching productId + variantKey)
+        persist(items.filter((i) => !(i.productId === productId && (i.variantKey || "") === vk)));
         return;
       }
-      // Only update the first matching item (variantKey is embedded in productId for UI)
+      // Update the item matching BOTH productId AND variantKey
       let updated = false;
       persist(
         items.map((i) => {
-          if (i.productId === productId && !updated) {
+          if (
+            i.productId === productId &&
+            (i.variantKey || "") === vk &&
+            !updated
+          ) {
             updated = true;
             return { ...i, quantity };
           }
@@ -88,18 +138,10 @@ export function useCart() {
   );
 
   const removeItem = useCallback(
-    (productId: string) => {
-      // Remove only the first matching item
-      let removed = false;
-      persist(
-        items.filter((i) => {
-          if (i.productId === productId && !removed) {
-            removed = true;
-            return false;
-          }
-          return true;
-        }),
-      );
+    (productId: string, variantKey?: string) => {
+      const vk = variantKey || "";
+      // Remove the item matching BOTH productId AND variantKey
+      persist(items.filter((i) => !(i.productId === productId && (i.variantKey || "") === vk)));
     },
     [items, persist],
   );

@@ -37,8 +37,8 @@ type CartDrawerProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   items: CartItem[];
-  onUpdateQuantity: (productId: string, quantity: number) => void;
-  onRemove: (productId: string) => void;
+  onUpdateQuantity: (productId: string, quantity: number, variantKey?: string) => void;
+  onRemove: (productId: string, variantKey?: string) => void;
   onItemClick: (productId: string) => void;
   onCheckout: () => void;
 };
@@ -137,6 +137,7 @@ export function CartDrawer({
                             onUpdateQuantity(
                               item.productId,
                               item.quantity - 1,
+                              item.variantKey,
                             )
                           }
                           aria-label="إنقاص"
@@ -153,6 +154,7 @@ export function CartDrawer({
                             onUpdateQuantity(
                               item.productId,
                               item.quantity + 1,
+                              item.variantKey,
                             )
                           }
                           aria-label="زيادة"
@@ -163,7 +165,7 @@ export function CartDrawer({
                       </div>
                       <button
                         type="button"
-                        onClick={() => onRemove(item.productId)}
+                        onClick={() => onRemove(item.productId, item.variantKey)}
                         aria-label="حذف"
                         className="flex h-7 w-7 items-center justify-center rounded-full text-terracotta transition-colors hover:bg-terracotta/10"
                       >

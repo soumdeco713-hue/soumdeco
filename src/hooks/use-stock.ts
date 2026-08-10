@@ -106,8 +106,12 @@ export function useStock() {
       if (text) {
         setStockMap(parseCsv(text));
       }
+      // SELF-HEALING: If fetch returned empty, keep current state (don't wipe)
+      // This prevents a transient network error from clearing all stock data
     } catch {
-      // keep current state
+      // SELF-HEALING: Network error — keep current state (don't clear)
+      // The existing stockMap stays, so rupture/low-stock indicators still work
+      console.warn("[Stock] Fetch failed — using cached data");
     } finally {
       setLoading(false);
     }
