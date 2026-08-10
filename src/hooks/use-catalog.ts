@@ -78,10 +78,8 @@ export function useCatalog() {
         // Fix common typos in category names
         next = next.map(fixCategoryTypos);
 
-        // Rewrite Cloudinary URLs to local Cloudflare Pages paths.
-        // This serves images from Cloudflare (unlimited bandwidth) instead of
-        // Cloudinary (25 GB/month limit) — bulletproof for traffic spikes.
-        next = next.map(rewriteImageUrls);
+        // Optimize Cloudinary URLs (smaller images = less bandwidth)
+        next = next.map(optimizeCloudinaryUrls);
 
         // Sort by sortOrder (lower first)
         next.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
@@ -508,49 +506,44 @@ function fixCategoryTypos(p: Product): Product {
 }
 
 /**
- * Rewrite Cloudinary image URLs to local Cloudflare Pages paths (HOT TIER).
+ * Optimize Cloudinary image URLs for delivery.
  *
- * ADAPTIVE HOT/COLD TIER STRATEGY:
- *   HOT TIER (Cloudflare Pages, unlimited bandwidth, 20K file limit):
- *     - Images downloaded to /public/images/products/
- *     - Listed in /public/image-manifest.json
- *     - Served from local paths (/images/products/...)
+ * STRATEGY: Images stay on Cloudinary (not copied to Cloudflare Pages).
+ * This avoids consuming Cloudflare's 500 build/month limit (each image
+ * change would require a rebuild).
  *
- *   COLD TIER (Cloudinary, 25 GB bandwidth/mo):
- *     - Images NOT in the manifest stay as Cloudinary URLs
- *     - Served with optimization (c_limit,w_800,q_auto,f_auto)
- *     - Only used for less-viewed products (lower bandwidth)
+ * Cloudinary's free tier: 25 GB bandwidth/month.
+ * With optimized images (~10 KB each), that's ~2.5M requests/month
+ * = ~5,500 visitors/day (15 images each). Plenty for a home decor store.
  *
- * This function uses the manifest to decide:
- *   - If the Cloudinary filename is in the manifest → rewrite to local path
- *   - If NOT in the manifest → keep Cloudinary URL (cold tier)
+ * Optimization applied (c_limit,w_400,q_auto,f_auto):
+ *   c_limit,w_400 — cap width at 400px (never upscale). Product cards are
+ *                   small — 400px is sharp on Retina. Smaller = less bandwidth.
+ *   q_auto        — Cloudinary auto-picks optimal quality (70-80%)
+ *   f_auto        — Cloudinary auto-selects format (WebP/AVIF on modern browsers)
  *
- * The manifest is built at deploy time by scripts/build-image-manifest.py.
- * It's loaded asynchronously on app startup (preloadImageManifest in layout.tsx).
- * Until the manifest loads, ALL Cloudinary URLs stay as-is (cold tier).
+ * Result: ~10 KB per image instead of ~21 KB (50% bandwidth savings).
  */
-function rewriteImageUrls(p: Product): Product {
+function optimizeCloudinaryUrls(p: Product): Product {
   const CLOUDINARY_RE = /^https?:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/(?:[^/]+\/)?(?:v\d+\/)?(.+)$/;
 
-  const rewriteOne = (url: string): string => {
+  const optimizeOne = (url: string): string => {
     if (!url || typeof url !== "string") return url;
-    const match = url.match(CLOUDINARY_RE);
-    if (!match) return url; // not a Cloudinary URL — leave as-is
-
-    // Check if this image is in the local manifest (hot tier).
-    // getLocalPathSync returns null if the manifest hasn't loaded yet OR
-    // if the file isn't local. In both cases, we keep the Cloudinary URL.
-    const localPath = getLocalPathSync(url);
-    if (localPath) {
-      return localPath; // hot tier — serve from Cloudflare Pages
+    if (!url.includes("res.cloudinary.com") || !url.includes("/image/upload/")) {
+      return url; // not a Cloudinary URL — leave as-is
     }
-    return url; // cold tier — serve from Cloudinary
+    // Don't double-transform
+    if (url.includes("c_limit") || url.includes("q_auto") || url.includes("f_auto")) {
+      return url;
+    }
+    // Apply optimization: c_limit,w_400,q_auto,f_auto
+    return url.replace("/image/upload/", "/image/upload/c_limit,w_400,q_auto,f_auto/");
   };
 
-  const newImage = rewriteOne(p.image);
+  const newImage = optimizeOne(p.image);
   let newImages: string[] | undefined = p.images;
   if (Array.isArray(p.images)) {
-    newImages = p.images.map(rewriteOne);
+    newImages = p.images.map(optimizeOne);
   }
 
   if (newImage !== p.image || newImages !== p.images) {
