@@ -213,6 +213,48 @@ def main():
     with open(MANIFEST_PATH, "w") as f:
         json.dump(manifest, f)
 
+    # Step 9b: Fetch stock data + save as stock-seed.json
+    # This is bundled in the repo so the FIRST visit shows stock badges
+    # instantly (no Apps Script fetch needed).
+    log("Fetching stock data for seed...")
+    try:
+        stock_url = APPS_SCRIPT_URL.replace("action=products", "action=stock")
+        stock_req = urllib.request.Request(stock_url, headers={
+            "User-Agent": "GitHub-Actions-AutoSync/1.0"
+        })
+        with urllib.request.urlopen(stock_req, timeout=30) as resp:
+            stock_csv = resp.read().decode("utf-8")
+
+        # Parse CSV → JSON map
+        import csv as csv_module
+        import io
+        stock_map = {}
+        reader = csv_module.reader(io.StringIO(stock_csv))
+        header = next(reader, None)
+        for row in reader:
+            if len(row) >= 2:
+                name = row[0].strip()
+                count_str = row[1].strip()
+                if name:
+                    try:
+                        count = int(count_str) if count_str else 0
+                        stock_map[name] = count
+                    except ValueError:
+                        pass
+
+        stock_seed = {
+            "map": stock_map,
+            "builtAt": datetime.now(timezone.utc).isoformat(),
+            "count": len(stock_map),
+        }
+        stock_seed_path = os.path.join(REPO_ROOT, "public", "stock-seed.json")
+        with open(stock_seed_path, "w", encoding="utf-8") as f:
+            json.dump(stock_seed, f, ensure_ascii=False, indent=2)
+        log(f"Stock seed updated: {len(stock_map)} products")
+    except Exception as e:
+        log(f"WARNING: Failed to fetch stock seed: {e}")
+        log("Stock seed not updated — old version kept (graceful degradation)")
+
     # Step 10: Summary
     log(f"=== Summary ===")
     log(f"Products in sheet: {len(products)}")

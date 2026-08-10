@@ -113,10 +113,37 @@ function saveCachedStock(map: StockMap) {
   }
 }
 
-// Polling intervals — optimized for 800K visits/month to stay under
-// Apps Script's 20K-30K exec/day Consumer Gmail quota.
-const POLL_MS = 1_800_000; // 30 minutes when tab is visible
-const HIDDEN_POLL_MS = 3_600_000; // 1 hour when tab is hidden
+// Load bundled stock seed (instant — no network, served from Cloudflare Pages)
+// This is used on the FIRST visit when localStorage is empty, to show stock
+// badges immediately without waiting for Apps Script fetch.
+let stockSeedCache: StockMap | null = null;
+let stockSeedPromise: Promise<StockMap> | null = null;
+
+async function loadStockSeed(): Promise<StockMap> {
+  if (stockSeedCache) return stockSeedCache;
+  if (stockSeedPromise) return stockSeedPromise;
+
+  stockSeedPromise = (async () => {
+    try {
+      const res = await fetch("/stock-seed.json", { cache: "force-cache" });
+      if (!res.ok) return {};
+      const data = await res.json();
+      if (!data || !data.map || typeof data.map !== "object") return {};
+      stockSeedCache = data.map as StockMap;
+      return stockSeedCache;
+    } catch {
+      return {};
+    }
+  })();
+
+  return stockSeedPromise;
+}
+
+// Polling intervals — optimized for variable traffic (10 to 800K visits/month).
+// Stock data changes less frequently than catalog, so 2-hour polling is fine.
+// Total with 100 active users: 26K + 1,200 = 27,200 exec/day → under 30K quota ✅
+const POLL_MS = 7_200_000; // 2 hours when tab is visible
+const HIDDEN_POLL_MS = 14_400_000; // 4 hours when tab is hidden
 
 export function useStock() {
   // Initialize from localStorage cache (INSTANT — no network wait)
@@ -183,13 +210,19 @@ export function useStock() {
     const hasCache = Object.keys(cached).length > 0;
 
     if (!hasCache) {
-      // No cache — fetch immediately
-      fetchStock();
+      // No cache — try loading from bundled seed first (instant)
+      // Then fetch from Apps Script after 1s delay (lets catalog fetch go first)
+      loadStockSeed().then((seedMap) => {
+        if (seedMap && Object.keys(seedMap).length > 0) {
+          setStockMap(seedMap);
+          setLoading(false);
+        }
+      }).catch(() => {});
+      // Delay stock fetch by 1s so it doesn't compete with catalog fetch
+      setTimeout(() => fetchStock(), 1000);
     } else {
-      // Cache exists — fetch in background (non-blocking) to refresh
-      // This makes the page load INSTANT (cache shows immediately)
-      // while the fresh data loads in the background
-      setTimeout(() => fetchStock(), 500); // small delay to not compete with catalog fetch
+      // Cache exists — fetch in background after 2s (lower priority than catalog)
+      setTimeout(() => fetchStock(), 2000);
     }
     scheduleNext();
 

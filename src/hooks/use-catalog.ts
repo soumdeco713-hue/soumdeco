@@ -33,12 +33,12 @@ import {
 } from "@/lib/products";
 import type { SheetProduct } from "@/lib/sheet";
 
-// Polling intervals — optimized for 800K visits/month to stay under
-// Apps Script's 20K-30K exec/day Consumer Gmail quota.
-// At 26K visits/day × 1 fetch/visit = 26K exec/day (close to limit).
-// With 30-min polling, returning visitors don't hit Apps Script → ~13K fetches/day.
-const POLL_MS = 1_800_000; // 30 minutes when tab is visible
-const HIDDEN_POLL_MS = 3_600_000; // 1 hour when tab is hidden
+// Polling intervals — optimized for variable traffic (10 to 800K visits/month).
+// At 800K visits/month = 26K visits/day × 1 fetch = 26K exec/day.
+// Polling every 2 hours = 12 polls/day per active user.
+// Total: 26K + (100 active users × 12) = 27,200 exec/day → under 30K quota ✅
+const POLL_MS = 7_200_000; // 2 hours when tab is visible
+const HIDDEN_POLL_MS = 14_400_000; // 4 hours when tab is hidden
 
 export function useCatalog() {
   // Initialize empty on both server and client (hydration-safe)
