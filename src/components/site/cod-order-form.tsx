@@ -306,18 +306,16 @@ export function CodOrderForm({
       });
 
       if (!orderOk) {
-        // Order failed to reach the sheet — store in localStorage for retry
-        // so the order is NOT lost. The admin can see failed orders in the
-        // console and the next site visit will attempt to resubmit them.
+        // Order failed to reach the sheet — save to the retry queue.
+        // The retry queue is processed on the next page visit (in useCatalog init).
+        // The customer already saw a thank-you screen — this is a background safety net.
         try {
-          const failedOrders = JSON.parse(
-            localStorage.getItem("soumdeco_failed_orders") || "[]",
-          );
-          failedOrders.push({
+          const { addFailedOrder } = await import("@/lib/failed-orders");
+          addFailedOrder({
             timestamp: new Date().toISOString(),
             product: allProducts,
             quantity: String(totalQty),
-            price: items.length === 1 ? items[0].price : totalUnitPrice,
+            price: items.length === 1 ? items[0].price ?? null : totalUnitPrice,
             shippingPrice: ship,
             grandTotal: finalGrandTotal,
             shippingCompanyLabel: companyLabel,
@@ -328,18 +326,9 @@ export function CodOrderForm({
             deliveryLabel,
             notes: finalNotes,
           });
-          localStorage.setItem(
-            "soumdeco_failed_orders",
-            JSON.stringify(failedOrders),
-          );
-          console.warn(
-            "[Order] Failed to submit to sheet — saved to localStorage for retry. " +
-              "Admin: check localStorage 'soumdeco_failed_orders'.",
-          );
         } catch {
-          // localStorage also failed — nothing more we can do
           console.error(
-            "[Order] CRITICAL: Failed to submit order AND failed to save to localStorage",
+            "[Order] CRITICAL: Failed to submit order AND failed to save to retry queue",
           );
         }
       }

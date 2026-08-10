@@ -1119,3 +1119,560 @@ Stage Summary:
 - R2 + KV infrastructure ready (just needs Cloudflare dashboard setup)
 - Apps Script has new dedupe + cleanup actions (user needs to redeploy)
 - Next: commit, push, run dedupe on production sheet, write setup guide
+
+---
+Task ID: final-scan
+Agent: sub-agent (general-purpose)
+Task: Final comprehensive code scan — bulletproof readiness for 9,500 products × 8 images @ 50K visitors/day
+
+Scope: Read-only audit of 13 files. NO code was modified.
+
+Files Scanned:
+1. src/hooks/use-catalog.ts
+2. src/lib/products.ts
+3. src/lib/adaptive-storage.ts
+4. src/lib/client-sheet.ts
+5. src/hooks/use-stock.ts
+6. src/hooks/use-cart.ts
+7. src/app/page.tsx
+8. src/components/site/admin-panel.tsx
+9. src/components/site/product-image.tsx
+10. src/components/site/cod-order-form.tsx
+11. src/components/site/featured-carousel.tsx
+12. src/components/site/cart-bar.tsx
+13. wrangler.toml
+
+Cross-cutting verifications:
+- next.config.ts: `typescript.ignoreBuildErrors: true` is STILL TRUE (TypeScript errors are hidden at build time)
+- `soumdeco_failed_orders` localStorage key is WRITTEN (cod-order-form.tsx:314,332,337) but NEVER READ anywhere in src/ — no retry code exists
+- Only 109 local image files in /public/images/products/ (not 76,000) — local-image strategy does NOT scale to 9,500 products × 8 images
+- No `onversionchange` handler in adaptive-storage.ts (multi-tab IndexedDB upgrades will crash silently)
+
+============================================================
+FINDINGS — by severity
+============================================================
+
+────────────────────────────────────────────────────────────
+P0 — CRITICAL (data loss / crash / silent failure)
+────────────────────────────────────────────────────────────
+
+### P0-1. Failed orders are NEVER retried — silent permanent data loss
+**File:** src/components/site/cod-order-form.tsx:312-344
+**Issue:** When `clientSubmitOrder()` fails, the order is saved to `localStorage.soumdeco_failed_orders`. The inline comment claims "the next site visit will attempt to resubmit them" — but a repo-wide grep confirms the key is ONLY ever WRITTEN, never READ. There is no retry code anywhere. Failed orders accumulate in localStorage and are never sent to the sheet. The admin has no UI to view or retry them. The customer sees a "thank you" screen and walks away thinking they placed an order — but the order is lost.
+**Code:**
+```ts
+failedOrders.push({...});
+localStorage.setItem("soumdeco_failed_orders", JSON.stringify(failedOrders));
+console.warn("[Order] Failed to submit to sheet — saved to localStorage for retry. " +
+  "Admin: check localStorage 'soumdeco_failed_orders'.");
+```
+**Fix:** Add a retry mechanism — e.g., a `useFailedOrdersRetry()` hook called from `page.tsx` that loads `soumdeco_failed_orders` on mount and every 5 min, attempts `clientSubmitOrder()` for each, and removes successful ones. Also surface a count badge in the admin panel.
+
+---
+
+### P0-2. Race condition: stale IndexedDB cache overwrites fresh sheet data on initial load
+**File:** src/hooks/use-catalog.ts:144-178
+**Issue:** The initial-load `useEffect` runs three operations in parallel:
+1. Line 144: sync `loadCatalog()` (localStorage only) → sets `cached` variable
+2. Line 166: `refresh()` — async, internally calls `loadCatalogAsync()` + fetches sheet, saves, and `setProducts(95)` (e.g.)
+3. Line 171: `loadCatalogAsync().then(asyncCached => { if (asyncCached.length > cached.length) setProducts(asyncCached) })`
+
+The check at line 172 compares `asyncCached.length` to the ORIGINAL `cached` (sync localStorage result, possibly 0), NOT to the current React state. If sheet returns 95 products and IndexedDB has 90 (stale from a previous session), the line-171 callback fires AFTER refresh has already set state to 95, sees `90 > 0` (true), and OVERWRITES state with the 90 stale products. Net effect: user sees 90 products even though the sheet has 95 — a silent regression that the user never notices.
+**Code:**
+```ts
+loadCatalogAsync().then((asyncCached) => {
+  if (asyncCached.length > cached.length) {  // <-- compares to stale `cached`, not current state
+    let sorted = asyncCached.map(rewriteImageUrls).map(fixCategoryTypos);
+    sorted.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+    setProducts(sorted);  // <-- OVERWRITES refresh()'s 95 with 90
+  }
+}).catch(() => {});
+```
+**Fix:** Add a `refreshCompletedRef` boolean. In `refresh()`, set `refreshCompletedRef.current = true` once sheet data is set. In the line-171 callback, skip `setProducts` if `refreshCompletedRef.current === true`. Alternatively, attach a timestamp to the cached catalog and use the newest timestamp rather than length.
+
+---
+
+### P0-3. Admin EditForm uses raw `<img>` for photo preview — no Cloudinary fallback on 404
+**File:** src/components/site/admin-panel.tsx:501-505 (EditForm photo grid) and :1259-1263 (admin list cover thumbnail)
+**Issue:** `rewriteImageUrls()` in `use-catalog.ts` rewrites Cloudinary URLs to `/images/products/{filename}`. The admin product list and EditForm photo preview render these as raw `<img src={cover} />`. When the local file does NOT exist (new admin uploads not yet synced to the repo — which is the normal case for ALL new uploads), the raw `<img>` shows a broken-image icon. The `ProductImage` component would have fallen back to Cloudinary, but the admin doesn't use it. Result: the admin sees broken images for every photo they just uploaded, with no way to tell whether the upload succeeded.
+**Code:**
+```tsx
+// admin-panel.tsx:501 (EditForm preview)
+<img
+  src={p}            // <-- raw <img>, no fallback
+  alt={`صورة ${i + 1}`}
+  className="h-full w-full object-contain"
+/>
+// admin-panel.tsx:1259 (list thumbnail)
+<img
+  src={cover}        // <-- raw <img>, no fallback
+  alt={p.name}
+  className="h-full w-full object-contain"
+/>
+```
+**Fix:** Replace both with `<ProductImage src={p} alt={...} fit="contain" />` so the Cloudinary fallback kicks in on local 404.
+
+---
+
+### P0-4. `saveCatalog()` returns `true` on localStorage quota failure — caller cannot detect data loss
+**File:** src/lib/products.ts:1046-1063
+**Issue:** When `localStorage.setItem` throws `QuotaExceededError` (which WILL happen at ~80 products with 8 images each, well below the 9,500-product target), `saveCatalog` logs a warning and fires off a fire-and-forget IndexedDB save via dynamic `import("./adaptive-storage")`. It then returns `true`. Callers like `upsertProduct` (use-catalog.ts:224), `deleteProduct` (:300), `moveProduct` (:391), `resetCatalog` (:435) cannot tell whether the save actually succeeded. If IndexedDB is also unavailable (private browsing), the optimistic update is silently lost. On next reload, the catalog reverts to whatever was in storage before.
+**Code:**
+```ts
+} catch (e) {
+  console.warn("[saveCatalog] localStorage quota exceeded, falling back to IndexedDB");
+  import("./adaptive-storage")
+    .then(({ adaptiveSet }) => adaptiveSet(CATALOG_STORAGE_KEY, json))
+    .catch(() => {});
+  return true; // optimistically return true (IndexedDB will save it)  <-- LIE
+}
+```
+**Fix:** Either (a) make `saveCatalog` async and have callers await it, or (b) keep a module-level `lastSaveFailed` flag and expose a `wasLastSaveSuccessful()` helper that the admin panel can poll.
+
+---
+
+### P0-5. `ignoreBuildErrors: true` is hiding TypeScript errors at build time
+**File:** next.config.ts:7
+**Issue:** Already documented in earlier audits but STILL TRUE. Any type error in any file ships to production. The two `normalizeProduct` functions (use-catalog.ts:533 and products.ts:950) have divergent signatures — the use-catalog.ts version does NOT handle `{fr, ar}` description objects (line 534-538 of use-catalog.ts vs line 952-958 of products.ts). This is a latent type-safety hole that `ignoreBuildErrors` is masking.
+**Code:**
+```ts
+typescript: {
+  ignoreBuildErrors: true,  // <-- hides all type errors
+},
+```
+**Fix:** Set to `false`, fix the resulting type errors (likely <10), then deploy. The divergence between the two `normalizeProduct` implementations should be resolved by deleting the local one in use-catalog.ts and importing the shared one from products.ts.
+
+────────────────────────────────────────────────────────────
+P1 — HIGH (edge-case failure / wrong behavior)
+────────────────────────────────────────────────────────────
+
+### P1-1. `adaptiveSet` DESTROYS the localStorage entry when value exceeds 4MB
+**File:** src/lib/adaptive-storage.ts:91-92
+**Issue:** When a catalog grows past 4MB (which happens at ~2,000 products × 8 images), `adaptiveSet` runs `window.localStorage.removeItem(key)` BEFORE falling through to IndexedDB. If the IndexedDB write then fails (private browsing, quota, browser bug), the user has lost BOTH the old localStorage cache AND the new data. The next visit shows the seed catalog (29 products) instead of the 9,500-product catalog.
+**Code:**
+```ts
+// Value too large for localStorage — clean up and fall through to IndexedDB
+window.localStorage.removeItem(key);   // <-- destructive
+```
+**Fix:** Keep the stale localStorage data as a "last-known-good" cache. The cost is one extra ~4MB localStorage entry alongside the IndexedDB copy — acceptable. Alternatively, write a small stub `{__movedToIndexedDB: true, ts: Date.now()}` to localStorage so callers know to check IndexedDB.
+
+---
+
+### P1-2. IndexedDB connection is never closed on version change — multi-tab crashes
+**File:** src/lib/adaptive-storage.ts:39-59
+**Issue:** `openDB()` does not register `db.onversionchange`. If the user has the site open in 2 tabs and tab A triggers an upgrade (e.g., DB_VERSION bumped from 1 to 2 in a future release), tab B's `dbInstance` becomes stale. The next transaction in tab B throws `VersionError`. The catch at line 119 logs but the user sees a stale catalog with no way to recover short of reloading.
+**Code:**
+```ts
+req.onsuccess = () => {
+  clearTimeout(timeout);
+  dbInstance = req.result;
+  resolve(dbInstance);
+  // <-- missing: dbInstance.onversionchange = () => { dbInstance.close(); dbInstance = null; dbInitPromise = null; }
+};
+```
+**Fix:** Add `db.onversionchange = () => { db.close(); dbInstance = null; dbInitPromise = null; }` so the next operation re-opens with the new version.
+
+---
+
+### P1-3. `adaptiveGet` returns STALE localStorage data even when IndexedDB has newer data
+**File:** src/lib/adaptive-storage.ts:133-144
+**Issue:** `adaptiveGet` checks localStorage FIRST and returns immediately if the key exists. But the write path (`adaptiveSet`) writes to localStorage first AND IndexedDB. If a large catalog was previously stored in IndexedDB (after localStorage overflow) and then the admin shrinks the catalog (deletes products), the small new catalog gets written to BOTH localStorage and IndexedDB. So they should match... UNLESS the localStorage write succeeded but the IndexedDB write failed (line 116 logs but resolves true). In that case, localStorage has the NEW small catalog, IndexedDB has the OLD large catalog. Subsequent `adaptiveGet` returns the new one — correct.
+
+BUT: the inverse case is broken. If localStorage write FAILS (quota) and IndexedDB write SUCCEEDS, `adaptiveSet` calls `removeItem(key)` on localStorage (line 92) — so localStorage is now empty. Next `adaptiveGet` checks localStorage (empty), falls through to IndexedDB, returns the new large catalog. Correct.
+
+So actually this is OK. The P1 is the localStorage-then-IndexedDB ORDER in adaptiveGet when both exist with different content — only happens if removeItem() failed silently between writes. Low likelihood but possible. The real fix is to store a timestamp alongside the data and use the newest.
+
+---
+
+### P1-4. `upsertProduct`/`deleteProduct`/`moveProduct` save OPTIMISTIC state ONLY to sync localStorage, not IndexedDB
+**File:** src/hooks/use-catalog.ts:224, 268, 300, 310, 325, 391
+**Issue:** All admin mutations call `saveCatalog(next)` (sync localStorage only). They do NOT call `saveCatalogAsync(next)`. For large catalogs that already overflow localStorage (9,500 products), the sync `saveCatalog` silently fails (logs warning, returns true — see P0-4), kicks off a fire-and-forget IndexedDB write, and the optimistic UI state lives only in React. If the user reloads BEFORE the background IndexedDB write completes (~50-200ms for 9,500 products), the optimistic update is lost.
+Compare to `refresh()` at line 90-92 which calls BOTH:
+```ts
+saveCatalog(next);                              // sync localStorage
+saveCatalogAsync(next).catch(() => {});         // ALSO async IndexedDB
+```
+The admin mutation paths should do the same.
+**Fix:** In `upsertProduct`, `deleteProduct`, `moveProduct`, and `resetCatalog`, add `saveCatalogAsync(next).catch(() => {});` immediately after every `saveCatalog(next);` call.
+
+---
+
+### P1-5. Two divergent `normalizeProduct` implementations
+**File:** src/hooks/use-catalog.ts:533-617 (local) vs src/lib/products.ts:950-1044 (exported)
+**Issue:** `use-catalog.ts` defines its OWN local `normalizeProduct(p: any): Product` that does NOT handle `{fr, ar}` description objects (returns `"[object Object]"`). `products.ts` defines the exported `normalizeProduct` that DOES handle them (line 953-957). The local version is used by `refresh()` for sheet data; the exported version is used by `loadCatalog`/`loadCatalogAsync` for cached data. If the sheet ever returns a multilingual description object, the sheet path corrupts it while the cache path handles it correctly — leading to a "works after reload, breaks on next refresh" loop.
+**Code (use-catalog.ts:534-538):**
+```ts
+const toStr = (v: any): string => {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  return String(v);   // <-- "[object Object]" for {fr, ar}
+};
+```
+**Fix:** Delete the local `normalizeProduct` in use-catalog.ts and import the one from products.ts.
+
+---
+
+### P1-6. `clientUploadImage` 400-retry branch leaks a 45-second `setTimeout` and never clears it
+**File:** src/lib/client-sheet.ts:334-358
+**Issue:** When Cloudinary returns 400 on the first attempt, the code retries without `public_id`. The retry uses the comma operator to construct the `signal`:
+```ts
+signal: (
+  new AbortController(),           // <-- created and immediately discarded
+  setTimeout(
+    () => controller.abort(),      // <-- schedules abort on the ORIGINAL controller
+    IMAGE_UPLOAD_TIMEOUT_MS,
+  ),
+  controller.signal                // <-- returns the original (already-used) signal
+),
+```
+The new `AbortController` is garbage-collected unused. The `setTimeout` is never cleared if `res2` completes successfully — it fires 45s later, calling `controller.abort()` on a long-completed fetch (no-op, but leaks the timer reference). The retry fetch DOES have timeout protection via the original controller, so functionally it works — but the code is misleading and the timer leak accumulates over many 400-retries.
+**Fix:** Create a fresh `const controller2 = new AbortController(); const timeout2 = setTimeout(() => controller2.abort(), IMAGE_UPLOAD_TIMEOUT_MS);` and pass `controller2.signal`. Clear `timeout2` after `res2` resolves.
+
+---
+
+### P1-7. `clientListProducts` skips rows with Arabic/emoji in `id` — but `generateId` already strips non-ASCII, so this filter is dead code that hides real bugs
+**File:** src/lib/client-sheet.ts:130
+**Issue:** `if (/[\u0600-\u06FF\u{1F000}-\u{1FFFF}]/u.test(id)) continue;` — this skips rows whose ID contains Arabic or emoji. But `generateId()` (products.ts:1089-1098) produces IDs like `${slug}-${random5}` where `slug` is `[a-z0-9-]+` (ASCII only). So real product IDs NEVER contain Arabic. The filter only catches guidance rows pasted into the sheet by the user. This is fine, but the filter is a band-aid — if the sheet has a guidance row with a LATIN ID like "EXAMPLE_ID", it passes through to the catalog as a real product. The deduplication at use-catalog.ts:67-73 dedupes by ID, so two "EXAMPLE_ID" rows collapse, but a single one still ships.
+**Fix:** Use a stronger allow-list regex like `/^[a-z0-9-]+-[a-z0-9]{4,8}$/` to only accept IDs that match the `generateId` format. Anything else is treated as a guidance row and skipped.
+
+---
+
+### P1-8. `use-cart` `updateQuantity` and `removeItem` only affect the FIRST matching productId
+**File:** src/hooks/use-cart.ts:69-105
+**Issue:** When two cart items share the same `productId` (e.g., same product, different `variantKey` for color/size), `updateQuantity(productId, qty)` and `removeItem(productId)` only mutate the FIRST match. The `+`/`-`/trash buttons in `cart-bar.tsx:137-171` pass `item.productId` only — no variantKey — so clicking "+" on the SECOND variant item increments the FIRST one. The user sees the wrong quantity change on the wrong line.
+**Code (cart-bar.tsx:137-140):**
+```tsx
+onClick={() => onUpdateQuantity(item.productId, item.quantity - 1)}
+```
+**Fix:** Change the cart API to accept `(productId, variantKey, quantity)` and match both fields. Update `CartDrawerProps.onUpdateQuantity`/`onRemove` signatures and the `cart-bar.tsx` callers.
+
+---
+
+### P1-9. `featured-carousel` jumps back to product[0] on every catalog refresh
+**File:** src/components/site/featured-carousel.tsx:47-49
+**Issue:** `useEffect(() => { if (index >= count) setIndex(0); }, [count, index])` resets `index` to 0 when `count` shrinks. But `count` also briefly changes during the 5.5-minute background refresh — even if the new sheet data has the same product count, the array identity changes (new normalized objects), React re-renders, and if `index` happens to be `>= count` for one render cycle (e.g., count went 8→7→8 during refresh), the carousel snaps back to slide 0. The `products[index] ?? products[0]` guard (line 55) prevents a crash, but the UX jump is jarring if the user was looking at a specific featured product.
+**Fix:** Track `products` by ID and preserve the index of the currently-displayed product across refreshes:
+```ts
+useEffect(() => {
+  if (!products[index]) setIndex(0);
+  else {
+    const currentId = products[index]?.id;
+    const newIndex = products.findIndex(p => p.id === currentId);
+    if (newIndex !== -1 && newIndex !== index) setIndex(newIndex);
+  }
+}, [products]);
+```
+
+---
+
+### P1-10. `product-image.tsx` `errorSrc` state leaks across `src` prop changes
+**File:** src/components/site/product-image.tsx:84, 94-96, 121-124
+**Issue:** `errorSrc` is set when the local `/images/products/foo.jpg` 404s, triggering fallback to Cloudinary. But `errorSrc` is NEVER reset when `src` changes. If the carousel advances from product A (which 404'd locally → fallback active) to product B (which has a working local file), `errorSrc` is still truthy and `effectiveSrc` still uses the Cloudinary fallback for product B — even though product B's local file exists. The user sees Cloudinary URLs (slower, counts against the 25GB/month limit) for every product after the first 404.
+**Code:**
+```ts
+const effectiveSrc = errorSrc && src.startsWith("/images/products/")
+  ? buildCloudinaryFallback(src) || src
+  : src;
+// ...
+onError={() => { if (!errorSrc) setErrorSrc(src); }}
+```
+**Fix:** Add `useEffect(() => { setErrorSrc(null); }, [src]);` to reset the error state whenever the src prop changes.
+
+---
+
+### P1-11. `buildCloudinaryFallback` omits the version segment — Cloudinary serves the LATEST version
+**File:** src/components/site/product-image.tsx:62-72
+**Issue:** The original Cloudinary URL is `https://res.cloudinary.com/{cloud}/image/upload/v1234567890/foo.jpg` (with version). `rewriteImageUrls` extracts the filename `foo.jpg` (dropping the version). `buildCloudinaryFallback` reconstructs `https://res.cloudinary.com/{cloud}/image/upload/foo.jpg` — WITHOUT the version. Cloudinary interprets a missing version as "serve the latest version of the asset." If the asset was overwritten (e.g., admin re-uploaded `foo.jpg` with a different image), the fallback serves the NEW image, which may have a different aspect ratio than the local 404'd file. This causes layout shift when the fallback kicks in.
+**Fix:** Preserve the version segment through `rewriteImageUrls` and reconstruct it in `buildCloudinaryFallback`. This requires storing a `cloudinaryVersion` map or embedding the version in the rewritten URL (e.g., `/images/products/v1234567890/foo.jpg` and stripping it back when reconstructing).
+
+---
+
+### P1-12. `moveProduct` syncs BOTH swapped products to Apps Script with fire-and-forget — no rollback on failure
+**File:** src/hooks/use-catalog.ts:396-425
+**Issue:** `clientUpsertProduct(sheetProduct).catch(() => {});` is called for both swapped products but the catch is empty. If the upsert fails (network, Apps Script down), the localStorage has the new sortOrders but the sheet still has the old ones. The user thinks the reorder succeeded, but on next refresh (5.5 min later), the catalog reverts to the sheet's old order. The admin gets no error toast.
+**Fix:** Await both upserts, and if either fails, swap the sortOrders back in localStorage and show a toast: "Failed to sync reorder — sheet may be out of sync."
+
+---
+
+### P1-13. `setTimeout(refresh, 100)` after upsert/delete may overwrite in-progress admin edits
+**File:** src/hooks/use-catalog.ts:275, 317
+**Issue:** After a successful upsert or delete, `setTimeout(() => { refresh().catch(() => {}); }, 100);` is scheduled. If the admin clicks Save on product A, then within 100ms opens EditForm on product B and starts editing, the refresh fires, replaces `catalog.products`, the AdminPanel passes new `products` to EditForm, and EditForm's `useEffect(() => setDraft(product), [product])` (line 223-225) RESETS the draft to the new product — discarding the admin's in-progress edits on product B.
+**Fix:** Don't auto-refresh after admin mutations. Instead, show a "refresh catalog" button the admin can click when ready, OR debounce the refresh to only fire if no EditForm is open (track via a `editingRef`).
+
+────────────────────────────────────────────────────────────
+P2 — MEDIUM (UX / perf / code quality)
+────────────────────────────────────────────────────────────
+
+### P2-1. `client-sheet.ts` `clientListProducts` retries on 4xx except 429 — but 401/403 (unauthorized) are NOT retried (correct), 404 (sheet not found) returns immediately (correct), 408/409/410 are NOT retried (should be)
+**File:** src/lib/client-sheet.ts:73
+**Code:** `if (res.status >= 400 && res.status < 500 && res.status !== 429) { return res; }`
+**Issue:** 408 (Request Timeout) and 425 (Too Early) are retryable client errors that this line skips. Minor — Apps Script rarely returns these.
+**Fix:** Add `&& res.status !== 408 && res.status !== 425` to the condition.
+
+---
+
+### P2-2. `use-stock.ts` CSV parser doesn't handle quoted CSV fields with embedded commas
+**File:** src/hooks/use-stock.ts:50-52
+**Issue:** `lines[i].split(",").map((c) => c.trim().replace(/^"|"$/g, ""))` — splits on EVERY comma, even inside quoted fields. If a product name contains a comma (e.g., "Mixeur, Blender"), the CSV column splits into 2 fields, shifting all subsequent columns. The header-detection at line 25-46 expects a fixed column count, so a single quoted comma breaks the whole row.
+**Fix:** Use a proper CSV parser (e.g., `papaparse`) or implement RFC 4180 quoted-field handling.
+
+---
+
+### P2-3. `use-stock.ts` `parseCsv` `nameIdx`/`countIdx` defaults assume column 0 = name, column 1 = count — if the Stock tab has a different layout, the parser silently returns empty results
+**File:** src/hooks/use-stock.ts:14-15
+**Issue:** `let nameIdx = 0; let countIdx = 1;` — if the Stock tab has columns in a different order (e.g., SKU, Name, Stock, Status), the parser only overrides `nameIdx`/`countIdx` if the header row matches specific keywords. If the header uses non-French/Arabic keywords (e.g., "Article", "Quantité"), `countIdx` stays at 1 and the parser reads the wrong column.
+**Fix:** Log a warning if no header match is found, and require an explicit "stock" column header.
+
+---
+
+### P2-4. `featured-carousel` `priority={index === 0}` always sets priority on the first slide even after rotation
+**File:** src/components/site/featured-carousel.tsx:112
+**Issue:** `priority={index === 0}` is evaluated at render time, but `index` is the CURRENT slide index, not the original position. After the carousel advances to slide 3, slide 3 is rendered with `priority={false}` (because index is now 3, not 0), but slide 0 was already loaded. The intent was probably "the first slide shown initially should be priority" — but the code gives priority to whichever slide is currently displayed at index 0 of the dots, which after rotation is not the originally-priority image.
+**Fix:** Track the original index of the slide that was displayed first, or use `priority` only on the very first render via a `useRef(false)` that becomes true after first paint.
+
+---
+
+### P2-5. `page.tsx` view-change effect uses a ternary in the dependency array
+**File:** src/app/page.tsx:92
+**Code:** `}, [view.kind, view.kind === "product" ? view.id : ""]);`
+**Issue:** ESLint's `react-hooks/exhaustive-deps` rule will warn about this. The ternary in deps is non-idiomatic. It works but is hard to read.
+**Fix:** `}, [view.kind, view.id]);` — `view.id` is `undefined` when not in product view, which is stable enough.
+
+---
+
+### P2-6. `page.tsx` falls through silently when `#product/{id}` references a non-existent product
+**File:** src/app/page.tsx:211-241
+**Issue:** If `view.kind === "product"` but `catalog.products.find(p => p.id === view.id)` returns undefined (product deleted, ID typo, catalog still loading), the code falls through to render the home view. The URL hash still says `#product/nonexistent`, so clicking "back" or refreshing keeps the user on a non-existent product view that always renders home. Confusing.
+**Fix:** Show a "product not found" view with a link back to home, and clear the URL hash.
+
+---
+
+### P2-7. `cod-order-form.tsx` shows the "thank you" screen even on unhandled exception
+**File:** src/components/site/cod-order-form.tsx:365-383
+**Issue:** The `catch` block at line 365 sets `done: true` and shows the order summary, even though the order may not have been placed. The customer walks away thinking they placed an order. Combined with P0-1 (no retry), this is silent data loss.
+**Fix:** On unhandled exception, show a distinct "order may not have been placed, please contact us" screen with the order ref so the customer can follow up.
+
+---
+
+### P2-8. `cod-order-form.tsx` quantityTiers only applies to single-item orders
+**File:** src/components/site/cod-order-form.tsx:123
+**Issue:** `if (items.length !== 1) return null;` — tiers only apply when the cart has exactly one product line. If the customer adds 2 different products, no tier matches even if one product has a `qty=2` tier and they're buying 2 of it. Documented but counter-intuitive.
+**Fix:** Apply the tier per-line-item: for each item, find tiers matching that product's `quantityTiers` and the item's quantity, sum the discounts.
+
+---
+
+### P2-9. `wrangler.toml` KV namespace uses the SAME id for production and preview
+**File:** wrangler.toml:17-20
+**Code:**
+```toml
+[[kv_namespaces]]
+binding = "CATALOG_KV"
+id = "ec54ba6bef24403cb9082e6472fb851b"
+preview_id = "ec54ba6bef24403cb9082e6472fb851b"
+```
+**Issue:** Preview deployments write to the production KV namespace. A preview deploy that tests a destructive action (e.g., `?action=product_reset`) corrupts production data.
+**Fix:** Create a separate KV namespace for preview and use its ID for `preview_id`.
+
+---
+
+### P2-10. `admin-panel.tsx` `handleSave` and `EditForm.save` both have `saving` state — duplicated
+**File:** src/components/site/admin-panel.tsx:419, 1070
+**Issue:** `EditForm` has its own `saving` state (line 219) AND `AdminPanel` has a `saving` state (line 1070). When the user clicks Save, both are set. After save, both are cleared. This works but is redundant — the EditForm's save button is disabled twice.
+**Fix:** Lift the `saving` state to AdminPanel and pass it down, or use the `syncing` prop already passed to AdminPanel.
+
+---
+
+### P2-11. `admin-panel.tsx` `MAX_PHOTOS = 8` but the comment on line 228 says "5 high-quality photos"
+**File:** src/components/site/admin-panel.tsx:228-229
+**Code:**
+```ts
+// Allow up to 5 high-quality photos per product.
+const MAX_PHOTOS = 8;
+```
+**Issue:** Comment/code mismatch — confusing for future maintainers.
+**Fix:** Update the comment to "8 high-quality photos per product."
+
+---
+
+### P2-12. `use-catalog.ts` `moveProduct` saves the ENTIRE catalog on every swap
+**File:** src/hooks/use-catalog.ts:391
+**Issue:** `saveCatalog(sorted);` writes the FULL catalog (9,500 products) to localStorage/IndexedDB on every up/down arrow click. For a large catalog, each click triggers a 50-200ms IndexedDB write that blocks the next click. The reorder feels sluggish.
+**Fix:** Debounce the save (e.g., 500ms after the last click), or only save the two swapped products' sortOrders.
+
+---
+
+### P2-13. `use-catalog.ts` `refresh()` has a `scheduleNext` callback that may be called twice on visibility change
+**File:** src/hooks/use-catalog.ts:181-186
+**Code:**
+```ts
+const onVisibility = () => {
+  const wasHidden = !isVisibleRef.current;
+  isVisibleRef.current = !document.hidden;
+  if (!document.hidden && wasHidden) refresh();
+  scheduleNext();
+};
+```
+**Issue:** `scheduleNext()` is called on EVERY visibility change (visible→hidden AND hidden→visible). On hidden→visible, it both calls `refresh()` AND reschedules the interval — but the existing interval was already cleared by `scheduleNext` itself (line 135). So the new interval starts with `POLL_MS`. This is actually correct behavior, but the comment says "refresh immediately when visible again" — `scheduleNext` is also called when going TO hidden, which switches to `HIDDEN_POLL_MS`. Fine but not obvious.
+**Fix:** Add a comment clarifying the dual purpose.
+
+---
+
+### P2-14. `client-sheet.ts` `clientUploadImages` uses limited parallelism (2 at a time) but the `i + j + 1` filename index is wrong
+**File:** src/lib/client-sheet.ts:412-424
+**Code:**
+```ts
+for (let i = 0; i < images.length; i += 2) {
+  const batch = images.slice(i, i + 2);
+  const batchResults = await Promise.all(
+    batch.map((img, j) => {
+      // ...
+      return clientUploadImage(img, `${productId}-${i + j + 1}`);
+    }),
+  );
+}
+```
+**Issue:** The filename index `i + j + 1` is correct for the BATCH position but uses `i` (the outer loop index, stepped by 2). For images of length 4: i=0 → filenames `${id}-1`, `${id}-2`; i=2 → `${id}-3`, `${id}-4`. Correct. But if the FIRST image in a batch fails and the second succeeds, the second image is saved as `${id}-2` — there's no `${id}-1`. This creates a gap in the filename sequence, which is fine for Cloudinary but means the local-image migration script (which downloads `${id}-1.jpg`, `${id}-2.jpg`, ...) will miss `${id}-1.jpg` and the rewriteImageUrls fallback will kick in for it. Minor.
+**Fix:** Use a global counter instead of `i + j + 1`.
+
+────────────────────────────────────────────────────────────
+P3 — MINOR (nice-to-have)
+────────────────────────────────────────────────────────────
+
+### P3-1. `use-cart.ts` `persist` swallows all localStorage errors silently
+**File:** src/hooks/use-cart.ts:34-41
+**Issue:** `catch { // ignore }` — if localStorage is full (large cart with many items + notes), the cart silently fails to persist. On reload, the cart reverts to the last successful save. The user has no idea their changes weren't saved.
+**Fix:** Show a toast: "Your cart is full — please checkout before adding more items."
+
+---
+
+### P3-2. `wrangler.toml` `compatibility_date = "2024-09-01"` is stale
+**File:** wrangler.toml:2
+**Issue:** Cloudflare recommends pinning to a recent date (within the last 6 months) to get the latest runtime fixes. 2024-09-01 is over a year old.
+**Fix:** Bump to a recent date (e.g., `2025-09-01`).
+
+---
+
+### P3-3. `product-image.tsx` `unoptimized={unoptimized || (effectiveSrc !== src)}` — the second condition is always false when `errorSrc` is null
+**File:** src/components/site/product-image.tsx:119
+**Issue:** When `errorSrc` is null, `effectiveSrc === src`, so `effectiveSrc !== src` is false. When `errorSrc` is set AND `src` starts with `/images/products/`, `effectiveSrc` is the Cloudinary fallback URL (http), which IS external, so `unoptimized` is already true via `isExternalUrl`. The `(effectiveSrc !== src)` clause is redundant.
+**Fix:** Simplify to `unoptimized={unoptimized}`.
+
+---
+
+### P3-4. `featured-carousel.tsx` dots use `p.id` as React key — but if two products share an ID (dedup missed), React warns
+**File:** src/components/site/featured-carousel.tsx:183
+**Issue:** `key={p.id}` — if the catalog has duplicate IDs (dedup missed in clientListProducts), React logs a warning. The catalog already dedupes by ID at use-catalog.ts:67-73, so this is defensive only.
+**Fix:** Use `key={`${p.id}-${i}`}` for safety.
+
+---
+
+### P3-5. `cod-order-form.tsx` `generateOrderRef` uses `Math.random()` — not cryptographically unique
+**File:** src/components/site/cod-order-form.tsx:46-49
+**Issue:** `SD-NNNNNN` with 6 random digits has ~900K possible refs. At 50K orders/day, collision probability after 30 days is significant (birthday paradox). Two orders could get the same ref.
+**Fix:** Use `crypto.randomUUID()` or include a timestamp: `SD-${Date.now().toString(36)}-${Math.floor(Math.random()*1000)}`.
+
+============================================================
+ANSWERS TO SPECIFIC CONCERNS
+============================================================
+
+**Q1: Does the adaptive storage work correctly? Are there race conditions?**
+→ NO, it has a P0 race condition (P0-2): the line-171 `loadCatalogAsync` callback can overwrite fresh sheet data fetched by `refresh()`. Also `saveCatalog` (sync) returns true even on failure (P0-4), and admin mutations don't call `saveCatalogAsync` (P1-4).
+
+**Q2: Does the image URL rewriting handle ALL edge cases?**
+→ MOSTLY: products with no images return `/images/products/...` 404 → ProductImage shows the "لا توجد صورة" placeholder (product-image.tsx:101). `data:` URLs pass through (rewriteOne checks for Cloudinary regex match; data: URLs don't match, returned as-is). Non-Cloudinary external URLs pass through. BUT: (a) buildCloudinaryFallback drops the version segment (P1-11), (b) `errorSrc` state leaks across src prop changes (P1-10), (c) admin EditForm uses raw `<img>` instead of ProductImage so it has no fallback (P0-3).
+
+**Q3: Are there any remaining `await refresh()` calls?**
+→ NO. All four admin mutation paths (upsert/delete/move/reset) use either `setTimeout(refresh, 100)` (fire-and-forget) or no refresh at all. Good — the admin is fast.
+
+**Q4: Does the quantity tier "min" mode work correctly?**
+→ YES, the matching logic at cod-order-form.tsx:122-150 is correct:
+  - Exact match: `mode === "exact"` → `q === t.qty` ✓
+  - Min match: `mode === "min"` → `q >= t.qty` ✓
+  - Multiple matches: sorts by `qty desc`, then `min` > `exact`, then `discount desc` — picks the most generous ✓
+  - No match: returns `null` → no discount, no free shipping ✓
+  - Legacy tiers without `mode` default to `"exact"` (parseQuantityTiers line 841-842) ✓
+Edge case: tiers only apply when `items.length === 1` (P2-8).
+
+**Q5: Are there TypeScript errors hidden by `ignoreBuildErrors: true`?**
+→ YES, at minimum the two divergent `normalizeProduct` functions (P1-5 / P0-5). The local one in use-catalog.ts doesn't handle `{fr, ar}` objects. There may be more — setting `ignoreBuildErrors: false` and running `next build` is the only way to know for sure.
+
+**Q6: Memory leaks?**
+→ MINOR: the leaked 45s `setTimeout` in `clientUploadImage` 400-retry (P1-6). All `setInterval` and `addEventListener` calls are properly cleaned up in useEffect returns.
+
+**Q7: Hydration mismatches?**
+→ NO. All client state initializes empty (`useState([])`, `useState(false)`). The `useCatalog` hook's `products` starts as `[]` on both server and client. `useCart` same. `useStock` same. The `setHydrated(true)` flag is gated by `useEffect` (client-only). Good.
+
+**Q8: What happens when the Google Sheet is empty or returns malformed data?**
+→ HANDLED but with caveats:
+  - Empty sheet: `clientListProducts` returns `[]`, `refresh()` falls through to `loadCatalogAsync()` → seed products (use-catalog.ts:99-114). ✓
+  - Malformed row (e.g., missing `id`): `normalizeSheetProduct` (client-sheet.ts:515) coerces everything to strings; the dedup loop at line 127 skips empty IDs. ✓
+  - Non-array JSON: `if (!Array.isArray(data)) return [];` (line 120). ✓
+  - Guidance row with Arabic/emoji in ID: filtered at line 130. ✓ (but see P1-7 — Latin guidance rows pass through)
+
+**Q9: What happens when Cloudinary is down during admin image upload?**
+→ PARTIALLY HANDLED:
+  - `clientUploadImage` retries 2x with exponential backoff (line 299-388). ✓
+  - On final failure, returns `""` (empty string) — does NOT return base64 (line 360, 367, 386). ✓ (prevents sheet overflow)
+  - `clientUploadImages` filters out empty strings (line 427). ✓
+  - If ALL uploads fail, `uploadedUrls.length === 0` → admin sees toast "فشل في رفع الصور" (admin-panel.tsx:296). ✓
+  - BUT: the admin's photos array is NOT updated (line 297 `return`), so the admin keeps the (failed) photos in their draft. If they then click Save, the product is saved with NO images. The `save()` validation at line 437 catches this ("الصورة مطلوبة"). ✓
+
+**Q10: What happens when localStorage is full AND IndexedDB is unavailable?**
+→ SILENT DATA LOSS:
+  - `adaptiveSet` (adaptive-storage.ts:78-124): localStorage throws QuotaExceededError → falls through to IndexedDB → `openDB()` returns null → `adaptiveSet` logs error and returns `false`. ✓ (returns the right value)
+  - BUT: `saveCatalog` (products.ts:1046-1063) catches the localStorage error and fires off `import("./adaptive-storage").then(adaptiveSet)` — which returns false, but saveCatalog already returned `true` (P0-4). The caller has no idea the save failed.
+  - The catalog state lives only in React memory until the next reload, at which point it's lost.
+  - For a customer: the cart (use-cart.ts:34-41) silently fails to persist — no error toast (P3-1).
+  - For an admin: the optimistic update is shown but never persisted — on reload, the change is gone.
+  - For an order: `clientSubmitOrder` doesn't use localStorage for the order itself, only for the failed-order retry queue. If localStorage is full, the failed-order retry queue also fails (cod-order-form.tsx:312-344) — silent order loss.
+
+============================================================
+POSITIVE FINDINGS (already correct)
+============================================================
+
+- Hydration safety: all client state initializes empty on SSR ✓
+- Memory leaks: all intervals/listeners cleaned up in useEffect returns ✓
+- Cloudinary URL optimization (c_limit, q_auto, f_auto) is well-designed ✓
+- `clientListProducts` correctly handles non-array JSON, empty arrays, and malformed rows ✓
+- `clientUploadImage` does NOT return base64 on failure (prevents sheet overflow) ✓
+- Polling correctly pauses/slows when tab is hidden (POLL_MS / HIDDEN_POLL_MS) ✓
+- Cart drawer key uses `${productId}-${variantKey || ""}` — no collision ✓
+- `featured-carousel` has `products[index] ?? products[0]` guard against out-of-bounds ✓
+- All fetches have 30s AbortController timeout + retry with exponential backoff ✓
+- Optimistic updates in upsertProduct/deleteProduct are properly rolled back on failure ✓
+- `normalizeTiers` correctly migrates legacy `{benefit, discountAmount}` format to new `{freeShipping, discountAmount, mode}` ✓
+
+============================================================
+RECOMMENDED NEXT ACTIONS (priority order)
+============================================================
+
+1. **P0-1**: Build the failed-orders retry mechanism — without it, every network-blip order is permanently lost.
+2. **P0-2 + P1-4**: Fix the race condition and add `saveCatalogAsync` to admin mutations — the catalog is silently inconsistent on large datasets.
+3. **P0-3**: Replace raw `<img>` in admin with `<ProductImage>` — the admin currently can't see the photos they just uploaded.
+4. **P0-4**: Make `saveCatalog` honest about failures — return false, or expose a `wasLastSaveSuccessful()` helper.
+5. **P0-5**: Turn off `ignoreBuildErrors`, fix the resulting type errors. The divergent `normalizeProduct` (P1-5) should be unified first.
+6. **P1-10 + P1-11**: Fix `product-image.tsx` `errorSrc` leak and version-segment loss — these compound the Cloudinary 25GB/month limit issue.
+7. **P1-8**: Fix cart update/remove to match on `variantKey` — currently broken for multi-variant products.
+8. **P1-12 + P1-13**: Add rollback + debounce for `moveProduct`, and guard `setTimeout(refresh)` against in-progress edits.
+9. **P2-9**: Create a separate preview KV namespace — preview deploys currently corrupt production.
+10. **P2-12**: Debounce `saveCatalog` in `moveProduct` — 9,500-product writes on every arrow click will freeze the admin.
+
+Scaling note: With 9,500 products × 8 images = 76,000 images, the current `/public/images/products/` strategy (109 files today) is fundamentally infeasible. Cloudflare Pages has a 20,000-file limit per deployment. The local-image strategy should be replaced with Cloudinary `c_limit,w_800,q_auto,f_auto` URLs (already implemented in product-image.tsx:37-45) and rely on Cloudinary's CDN, OR migrate to Cloudflare R2 (wrangler.toml already has the commented-out R2 config). The 25GB/month Cloudinary bandwidth limit will be hit at ~50K visitors/day × 4 images each — R2 is the recommended path.
+
+Work Log:
+- Read all 13 files in scope + 3 supporting files (next.config.ts, products.ts tail, worklog.md tail).
+- Cross-verified `soumdeco_failed_orders` is only WRITTEN, never READ (no retry code).
+- Cross-verified `ignoreBuildErrors: true` is still set in next.config.ts.
+- Confirmed only 109 local image files exist (vs. 76,000 needed for 9,500 products × 8 images).
+- Confirmed no `onversionchange` handler in adaptive-storage.ts.
+- Confirmed admin-panel.tsx uses raw `<img>` (not ProductImage) at lines 501 and 1259.
+- No code was modified.
+
+Stage Summary:
+- 5 P0 critical issues identified (silent order loss, race condition, broken admin photo preview, dishonest saveCatalog return, ignoreBuildErrors still on).
+- 13 P1 high-priority issues identified (IndexedDB versionchange, saveCatalogAsync missing in mutations, divergent normalizeProduct, cart variant matching, errorSrc leak, Cloudinary version loss, moveProduct rollback, etc.).
+- 14 P2 medium issues identified (CSV parsing, KV preview namespace, carousel jump, etc.).
+- 5 P3 minor issues identified.
+- Total: 37 issues across 13 files.
+- The site is FUNCTIONAL for the current 83-product catalog but will FAIL silently at scale (9,500 products × 8 images, 50K visitors/day).
+- Top 3 must-fix-before-scaling: P0-1 (failed orders), P0-2 (race condition), P0-3 (admin photo preview).

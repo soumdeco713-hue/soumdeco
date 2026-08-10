@@ -921,6 +921,32 @@ export function loadCatalog(): Product[] {
   }
 }
 
+/**
+ * Async catalog loader — checks localStorage first, then IndexedDB.
+ * Use this for initial load (handles large catalogs that overflow localStorage).
+ * The sync loadCatalog() is kept for backward compat (admin operations).
+ */
+export async function loadCatalogAsync(): Promise<Product[]> {
+  if (typeof window === "undefined") return [];
+  // Import dynamically to avoid circular dependency issues
+  const { adaptiveGet } = await import("./adaptive-storage");
+  try {
+    const raw = await adaptiveGet(CATALOG_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const products = parsed.map(normalizeProduct).filter(Boolean) as Product[];
+    const seen = new Set<string>();
+    return products.filter((p) => {
+      if (seen.has(p.id)) return false;
+      seen.add(p.id);
+      return true;
+    });
+  } catch {
+    return [];
+  }
+}
+
 function normalizeProduct(p: any): Product | null {
   if (!p || typeof p !== "object") return null;
   const toStr = (v: any): string => {
@@ -1019,13 +1045,40 @@ function normalizeProduct(p: any): Product | null {
 
 export function saveCatalog(products: Product[]): boolean {
   if (typeof window === "undefined") return false;
+  const json = JSON.stringify(products);
   try {
-    window.localStorage.setItem(CATALOG_STORAGE_KEY, JSON.stringify(products));
-    return true;
+    window.localStorage.setItem(CATALOG_STORAGE_KEY, json);
+    // Verify it was actually saved (some browsers silently truncate)
+    const check = window.localStorage.getItem(CATALOG_STORAGE_KEY);
+    if (check && check.length === json.length) {
+      return true;
+    }
+    // Verification failed — clear and fall through to IndexedDB
+    window.localStorage.removeItem(CATALOG_STORAGE_KEY);
+    console.warn("[saveCatalog] localStorage write verification failed, falling back to IndexedDB");
   } catch (e) {
-    console.error("[saveCatalog] localStorage write failed:", e);
-    return false;
+    // localStorage quota exceeded — likely a large catalog.
+    console.warn("[saveCatalog] localStorage quota exceeded, falling back to IndexedDB");
+    try {
+      window.localStorage.removeItem(CATALOG_STORAGE_KEY);
+    } catch {}
   }
+  // Fall back to IndexedDB (async, but we can't await here).
+  // Fire-and-forget — callers that need guaranteed save should use saveCatalogAsync()
+  import("./adaptive-storage")
+    .then(({ adaptiveSet }) => adaptiveSet(CATALOG_STORAGE_KEY, json))
+    .catch(() => {});
+  return false; // localStorage failed — return false so callers know
+}
+
+/**
+ * Async catalog saver — uses adaptive storage (localStorage + IndexedDB).
+ * Use this for large catalogs that might overflow localStorage.
+ */
+export async function saveCatalogAsync(products: Product[]): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  const { adaptiveSet } = await import("./adaptive-storage");
+  return adaptiveSet(CATALOG_STORAGE_KEY, JSON.stringify(products));
 }
 
 export function resetCatalog(): Product[] {

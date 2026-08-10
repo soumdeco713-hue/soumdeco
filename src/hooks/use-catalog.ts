@@ -7,7 +7,9 @@ import {
   ProductVariant,
   CATALOG_STORAGE_KEY,
   saveCatalog,
+  saveCatalogAsync,
   loadCatalog,
+  loadCatalogAsync,
   generateId,
   parseVariations,
   parseHighlights,
@@ -83,27 +85,25 @@ export function useCatalog() {
         // Sort by sortOrder (lower first)
         next.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
 
-        // Sheet is the source of truth — always save to localStorage
+        // Sheet is the source of truth — always save (uses adaptive storage:
+        // localStorage for small catalogs, IndexedDB for large ones)
         saveCatalog(next);
+        // Also save async (handles IndexedDB if localStorage overflows)
+        saveCatalogAsync(next).catch(() => {});
         setProducts(next);
         setLoading(false);
         return;
       }
 
-      // 2. Sheet returned empty or failed — use localStorage cache, then seed
-      const raw = typeof window !== "undefined"
-        ? window.localStorage.getItem(CATALOG_STORAGE_KEY)
-        : null;
-      if (raw !== null) {
-        const cached = loadCatalog();
-        if (cached.length > 0) {
-          const sorted = [...cached].sort(
-            (a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999),
-          );
-          setProducts(sorted);
-          setLoading(false);
-          return;
-        }
+      // 2. Sheet returned empty or failed — use adaptive storage cache, then seed
+      const cached = await loadCatalogAsync();
+      if (cached.length > 0) {
+        // Apply URL rewriting + typo fixes to cached data
+        let sorted = cached.map(rewriteImageUrls).map(fixCategoryTypos);
+        sorted.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+        setProducts(sorted);
+        setLoading(false);
+        return;
       }
       // First visit ever — seed with the 29 demo products
       const seeded = [...SEED_PRODUCTS].sort(
@@ -114,24 +114,18 @@ export function useCatalog() {
       setLoading(false);
     } catch {
       // Network error — keep current state, but if empty, use cache/seed
-      setProducts((prev) => {
-        if (prev.length === 0) {
-          const raw = typeof window !== "undefined"
-            ? window.localStorage.getItem(CATALOG_STORAGE_KEY)
-            : null;
-          if (raw === null) {
-            saveCatalog(SEED_PRODUCTS);
-            const seeded = [...SEED_PRODUCTS];
-            seeded.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
-            return seeded;
-          }
-          const cached = loadCatalog();
-          const sorted = [...cached];
-          sorted.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
-          return sorted;
-        }
-        return prev;
-      });
+      const cachedSync = loadCatalog();
+      if (cachedSync.length > 0) {
+        const sorted = [...cachedSync].map(rewriteImageUrls).map(fixCategoryTypos);
+        sorted.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+        setProducts(sorted);
+      } else {
+        const seeded = [...SEED_PRODUCTS].sort(
+          (a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999),
+        );
+        saveCatalog(seeded);
+        setProducts(seeded);
+      }
       setLoading(false);
     }
   }, []);
@@ -145,19 +139,18 @@ export function useCatalog() {
 
   // Initial load + polling
   useEffect(() => {
-    // First load from localStorage cache (instant), then refresh from sheet.
-    // Only seed with SEED_PRODUCTS on the VERY FIRST visit (when the
-    // catalog key was never set). After that, respect the user's catalog
-    // even if it's empty — they may have deleted all products intentionally.
-    let cached: Product[];
-    const raw = typeof window !== "undefined"
-      ? window.localStorage.getItem(CATALOG_STORAGE_KEY)
-      : null;
-    if (raw === null) {
-      cached = SEED_PRODUCTS;
-      saveCatalog(SEED_PRODUCTS);
-    } else {
-      cached = loadCatalog();
+    // First load from localStorage cache (instant sync load for fast paint).
+    // Then refresh from sheet (async, uses adaptive storage for large catalogs).
+    let cached: Product[] = loadCatalog();
+    if (cached.length === 0) {
+      // Check if this is the first visit (localStorage key was never set)
+      const raw = typeof window !== "undefined"
+        ? window.localStorage.getItem(CATALOG_STORAGE_KEY)
+        : null;
+      if (raw === null) {
+        cached = SEED_PRODUCTS;
+        saveCatalog(SEED_PRODUCTS);
+      }
     }
     // Apply URL rewriting to cached products too — the cache may have
     // old Cloudinary URLs from before the local-image migration.
@@ -168,9 +161,35 @@ export function useCatalog() {
     sorted.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
     setProducts(sorted);
     setHydrated(true);
-    // Immediately refresh from sheet — don't wait for the cached data to show
+    // Immediately refresh from sheet — don't wait for the cached data to show.
+    // The refresh uses loadCatalogAsync() internally (checks IndexedDB too).
     refresh();
     scheduleNext();
+
+    // Also try loading from IndexedDB (handles large catalogs that overflow
+    // localStorage — the sync loadCatalog() above may have missed them)
+    // ONLY use IndexedDB data if we DON'T have fresher data already loaded.
+    // The refresh() call above fetches from the sheet (source of truth) —
+    // if it completes before this IndexedDB check, we skip the stale data.
+    loadCatalogAsync().then((asyncCached) => {
+      // Only use IndexedDB data if:
+      // 1. It has more products than the sync cache (localStorage overflow case)
+      // 2. The sheet refresh hasn't already loaded fresher data
+      // We check productsRef.current (latest state) instead of the stale `cached`
+      const currentCount = productsRef.current.length;
+      if (asyncCached.length > currentCount && currentCount <= cached.length) {
+        let sorted = asyncCached.map(rewriteImageUrls).map(fixCategoryTypos);
+        sorted.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+        setProducts(sorted);
+      }
+    }).catch(() => {});
+
+    // Retry any failed orders from the retry queue (background, non-blocking).
+    // This runs on every page visit — if the previous order failed to submit,
+    // it gets retried here silently.
+    import("@/lib/failed-orders")
+      .then(({ retryFailedOrders }) => retryFailedOrders())
+      .catch(() => {});
 
     // Pause/slow polling when tab hidden, refresh immediately when visible again
     const onVisibility = () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Image from "next/image";
 
 type ProductImageProps = {
@@ -81,19 +81,25 @@ export function ProductImage({
   // Track image load errors so we can fall back to Cloudinary
   // (handles the case where a local file doesn't exist yet — e.g.,
   // a new admin upload that hasn't been synced to the repo)
-  const [errorSrc, setErrorSrc] = useState<string | null>(null);
+  const [useFallback, setUseFallback] = useState(false);
+
+  // CRITICAL: Reset error state when `src` changes.
+  // Without this, once ONE local image 404s, ALL subsequent images
+  // would use Cloudinary (defeating the bandwidth-saving strategy).
+  useEffect(() => {
+    setUseFallback(false);
+  }, [src]);
 
   const isDataUrl = src.startsWith("data:");
   const isExternalUrl = src.startsWith("http");
   const objectClass = fit === "contain" ? "object-contain" : "object-cover";
 
-  // Skip Next.js Image optimization for data URLs and external URLs
-  const unoptimized = isDataUrl || isExternalUrl;
-
   // If the local path failed, fall back to Cloudinary
-  const effectiveSrc = errorSrc && src.startsWith("/images/products/")
-    ? buildCloudinaryFallback(src) || src
-    : src;
+  const cloudinaryFallback = buildCloudinaryFallback(src);
+  const effectiveSrc = useFallback && cloudinaryFallback ? cloudinaryFallback : src;
+
+  // Skip Next.js Image optimization for data URLs and external URLs
+  const unoptimized = isDataUrl || isExternalUrl || (effectiveSrc !== src);
 
   // Optimize Cloudinary URLs (auto format + quality)
   const optimizedSrc = optimizeImageUrl(effectiveSrc);
@@ -116,11 +122,11 @@ export function ProductImage({
         fill
         sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
         className={objectClass}
-        unoptimized={unoptimized || (effectiveSrc !== src)}
+        unoptimized={unoptimized}
         priority={priority}
         onError={() => {
-          // Only fall back once (avoid infinite loop if Cloudinary also fails)
-          if (!errorSrc) setErrorSrc(src);
+          // Only fall back once per src (avoid infinite loop if Cloudinary also fails)
+          if (!useFallback) setUseFallback(true);
         }}
       />
     </div>

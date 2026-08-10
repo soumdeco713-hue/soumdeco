@@ -24,6 +24,7 @@ import {
   getProductImages,
 } from "@/lib/products";
 import { BRAND } from "@/lib/brand-config";
+import { AdminImagePreview } from "./admin-image-preview";
 
 const ADMIN_PASSWORD = BRAND.adminPassword;
 const SESSION_KEY = BRAND.storage.adminAuth;
@@ -498,11 +499,7 @@ function EditForm({
                   key={i}
                   className="group relative aspect-square overflow-hidden rounded-lg border border-clay/40 bg-night"
                 >
-                  <img
-                    src={p}
-                    alt={`صورة ${i + 1}`}
-                    className="h-full w-full object-contain"
-                  />
+                  <AdminImagePreview src={p} alt={`صورة ${i + 1}`} />
                   {i === 0 && (
                     <span className="absolute right-1 top-1 rounded-full bg-brass/90 px-1.5 py-0.5 text-[9px] font-semibold text-white">
                       الغلاف
@@ -1256,11 +1253,7 @@ export function AdminPanel({
 
                                 <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg bg-night">
                                   {cover ? (
-                                    <img
-                                      src={cover}
-                                      alt={p.name}
-                                      className="h-full w-full object-contain"
-                                    />
+                                    <AdminImagePreview src={cover} alt={p.name} />
                                   ) : (
                                     <div className="flex h-full w-full items-center justify-center">
                                       <ImageIcon className="h-5 w-5 text-gray-light" />
