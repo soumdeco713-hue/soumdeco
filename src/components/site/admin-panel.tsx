@@ -254,34 +254,58 @@ function EditForm({
     }
     setUploading(true);
     try {
-      const newPhotos: string[] = [];
+      // Step 1: Resize all images first (fast, ~1s per image)
+      const resized: { dataUrl: string; filename: string }[] = [];
       const errors: string[] = [];
       for (const f of toProcess) {
         try {
           const dataUrl = await resizeImage(f, 850, 200_000);
-          newPhotos.push(dataUrl);
+          // Generate a temporary filename for the upload
+          const tempId = draft.id || `temp-${Date.now()}`;
+          const idx = resized.length + photos.length + 1;
+          resized.push({ dataUrl, filename: `${tempId}-${idx}` });
         } catch (err) {
-          // Capture the error message — show it to the admin
           const msg = err instanceof Error ? err.message : "فشل في معالجة الصورة";
           errors.push(`${f.name}: ${msg}`);
           console.error("[resizeImage] failed for", f.name, err);
         }
       }
-      // Show error messages for failed images
+
       if (errors.length > 0) {
-        toast.error(errors[0]); // show the first error
+        toast.error(errors[0]);
       }
-      if (newPhotos.length === 0) {
+      if (resized.length === 0) {
         if (errors.length === 0) {
           toast.error("فشل في معالجة الصور.");
         }
         return;
       }
-      syncPhotos([...photos, ...newPhotos]);
+
+      // Step 2: Upload to Cloudinary IMMEDIATELY (not on save).
+      // This makes the save fast — by the time the admin clicks Save,
+      // the images are already on Cloudinary and the save is just a quick
+      // POST to Apps Script with the URLs.
+      const { clientUploadImages } = await import("@/lib/client-sheet");
+      const tempId = draft.id || `temp-${Date.now()}`;
+      const uploadedUrls = await clientUploadImages(
+        resized.map((r) => r.dataUrl),
+        tempId,
+      );
+
+      if (uploadedUrls.length === 0) {
+        toast.error("فشل في رفع الصور إلى Cloudinary. تحقق من الاتصال.");
+        return;
+      }
+
+      // Step 3: Add the uploaded URLs to the photos array
+      syncPhotos([...photos, ...uploadedUrls]);
       if (errors.length === 0) {
         toast.success(
-          `تمت إضافة ${newPhotos.length} صورة${newPhotos.length > 1 ? " بنجاح" : " بنجاح"}.`,
+          `تمت إضافة ${uploadedUrls.length} صورة${uploadedUrls.length > 1 ? " بنجاح" : " بنجاح"}.`,
         );
+      }
+      if (uploadedUrls.length < resized.length) {
+        toast.message(`${resized.length - uploadedUrls.length} صورة فشل في رفعها.`);
       }
     } finally {
       setUploading(false);
@@ -353,7 +377,9 @@ function EditForm({
   const addTier = () => {
     const newTiers: QuantityTier[] = [
       ...tiers,
-      { qty: 2, freeShipping: "both" },
+      // Default new tiers to "min" mode (2+ = free shipping) — this is the
+      // most common use case. The admin can switch to "exact" if needed.
+      { qty: 2, mode: "min", freeShipping: "both" },
     ];
     setDraft({ ...draft, quantityTiers: newTiers });
   };
@@ -366,7 +392,7 @@ function EditForm({
   const updateTier = (
     idx: number,
     field: keyof QuantityTier,
-    value: number | QuantityTier["freeShipping"],
+    value: number | QuantityTier["freeShipping"] | QuantityTier["mode"],
   ) => {
     const newTiers = [...tiers];
     const prev = newTiers[idx];
@@ -382,6 +408,11 @@ function EditForm({
       newTiers[idx] = {
         ...prev,
         discountAmount: n > 0 ? n : undefined,
+      };
+    } else if (field === "mode") {
+      newTiers[idx] = {
+        ...prev,
+        mode: value as QuantityTier["mode"],
       };
     }
     setDraft({ ...draft, quantityTiers: newTiers });
@@ -830,6 +861,20 @@ function EditForm({
                     key={i}
                     className="flex flex-wrap items-center gap-2 rounded-lg border border-neon-magenta/20 bg-neon-magenta/5 p-2"
                   >
+                    {/* Mode selector: "exact" or "min" */}
+                    <select
+                      value={t.mode ?? "exact"}
+                      onChange={(e) =>
+                        updateTier(i, "mode", e.target.value as QuantityTier["mode"])
+                      }
+                      className={`${inputClass} flex-shrink-0`}
+                      style={{ width: "100px" }}
+                      aria-label="نوع العرض"
+                      title="exact = فقط عند هذه الكمية · min = هذه الكمية أو أكثر"
+                    >
+                      <option value="exact">فقط</option>
+                      <option value="min">+</option>
+                    </select>
                     <input
                       type="number"
                       min={1}
@@ -840,7 +885,9 @@ function EditForm({
                       aria-label="الكمية"
                       placeholder="الكمية"
                     />
-                    <span className="font-arabic text-xs text-gray-light">قطعة</span>
+                    <span className="font-arabic text-xs text-gray-light">
+                      {t.mode === "min" ? "قطعة فأكثر" : "قطعة فقط"}
+                    </span>
                     <select
                       value={t.freeShipping}
                       onChange={(e) =>
@@ -879,7 +926,9 @@ function EditForm({
                   </div>
                 ))}
                 <p className="font-arabic text-[11px] text-gray-light">
-                  يمكنك الجمع بين توصيل مجاني وخصم في نفس الكمية. اترك الحقول على "لا" و0 إذا لم ترد الفائدة.
+                  <strong>فقط</strong> = العرض عند هذه الكمية بالضبط ·{" "}
+                  <strong>+</strong> = العرض عند هذه الكمية أو أكثر.{" "}
+                  يمكنك الجمع بين توصيل مجاني وخصم. اترك الحقول على "لا" و0 إذا لم ترد الفائدة.
                 </p>
               </div>
             ) : (

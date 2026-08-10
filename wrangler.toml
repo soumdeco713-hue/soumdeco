@@ -6,39 +6,35 @@ compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = ".vercel/output/static"
 
 # ============================================================
-#  KV NAMESPACE + R2 BUCKET (OPTIONAL — added when ready)
+#  KV NAMESPACE — Product + Stock cache (3-minute TTL)
 # ============================================================
+#  Caches the Google Apps Script response so the edge API routes
+#  (/api/products, /api/stock) load instantly for returning visitors.
+#  Falls back to Apps Script on cache miss.
+#  NOTE: The frontend fetches directly from Apps Script (bypassing the
+#  edge API), so KV is a bonus — it speeds up the /api/* fallback routes.
+# ============================================================
+[[kv_namespaces]]
+binding = "CATALOG_KV"
+id = "ec54ba6bef24403cb9082e6472fb851b"
+preview_id = "ec54ba6bef24403cb9082e6472fb851b"
+
+# ============================================================
+#  R2 BUCKET — Image storage (DISABLED — needs credit card)
+# ============================================================
+#  R2 requires a credit card to enable (even though the free tier
+#  covers 10 GB + zero egress). We're staying on Cloudinary for now
+#  (25 GB storage + 25 GB bandwidth/month free, no credit card).
 #
-#  The site works WITHOUT these bindings — it falls back to
-#  direct Google Apps Script fetches + Cloudinary image uploads.
-#
-#  When you're ready to enable KV caching and R2 image storage,
-#  create the resources and UNCOMMENT the sections below.
-#
-#  --- KV (product + stock cache, 3-min TTL) ---
-#  Create:  npx wrangler kv namespace create CATALOG_KV
-#  Preview: npx wrangler kv namespace create CATALOG_KV --preview
-#  Then paste the real IDs (NOT placeholders!) and uncomment:
-#
-#  [[kv_namespaces]]
-#  binding = "CATALOG_KV"
-#  id = "abc123def456..."        # real id from the create command
-#  preview_id = "zyx987wvu654..." # real preview_id from --preview command
-#
-#  --- R2 (image storage, 10 GB free tier) ---
-#  Create:  npx wrangler r2 bucket create soumdeco-images
-#  Then uncomment:
+#  When you're ready to migrate to R2:
+#    1. Add a credit card to your Cloudflare account
+#    2. Run: npx wrangler r2 bucket create soumdeco-images
+#    3. Uncomment the section below
+#    4. Set R2_PUBLIC_BASE_URL env var in Cloudflare dashboard
 #
 #  [[r2_buckets]]
 #  binding = "PRODUCT_IMAGES"
 #  bucket_name = "soumdeco-images"
-#
-#  IMPORTANT: Cloudflare rejects placeholder IDs like "YOUR_KV_NAMESPACE_ID_HERE"
-#  at deploy time. Only add the [[kv_namespaces]] section AFTER you have real IDs.
-#  The R2 section doesn't need IDs (just the bucket name) so it's safe to add anytime.
-#
-#  All code uses optional chaining (env?.CATALOG_KV) so missing bindings
-#  are handled gracefully — the site works without them.
 # ============================================================
 
 # ============================================================

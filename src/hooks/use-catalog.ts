@@ -232,7 +232,7 @@ export function useCatalog() {
           quantityTiers: Array.isArray(product.quantityTiers)
             ? (product.quantityTiers as any[])
                 .filter((t) => t && typeof t.qty === "number")
-                .map((t) => `${t.qty}:${t.freeShipping || "none"}:${t.discountAmount || 0}`)
+                .map((t) => `${t.qty}:${t.freeShipping || "none"}:${t.discountAmount || 0}:${t.mode || "exact"}`)
                 .join(",")
             : String((product as any).quantityTiers ?? ""),
         };
@@ -389,7 +389,7 @@ export function useCatalog() {
             quantityTiers: Array.isArray(p.quantityTiers)
               ? (p.quantityTiers as any[])
                   .filter((t) => t && typeof t.qty === "number")
-                  .map((t) => `${t.qty}:${t.freeShipping || "none"}:${t.discountAmount || 0}`)
+                  .map((t) => `${t.qty}:${t.freeShipping || "none"}:${t.discountAmount || 0}:${t.mode || "exact"}`)
                   .join(",")
               : "",
           };

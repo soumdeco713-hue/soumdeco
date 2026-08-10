@@ -111,10 +111,42 @@ export function CodOrderForm({
 
   // Active tier — only for single-item orders where the parent passed `quantityTiers`.
   // Used to compute discount and free-shipping benefits.
+  //
+  // Tier matching logic:
+  //  - mode "exact": triggers ONLY when qty === t.qty
+  //  - mode "min":   triggers when qty >= t.qty
+  //
+  // When multiple tiers match (e.g. qty=5 matches both "min:2" and "min:4"),
+  // we pick the one with the HIGHEST qualifying qty (most generous threshold reached).
+  // Among same-qty tiers, "min" wins over "exact" (more generous).
   const activeTier = useMemo(() => {
     if (items.length !== 1) return null;
     const q = items[0].quantity;
-    return (quantityTiers ?? []).find((t) => t.qty === q) ?? null;
+    const allTiers = quantityTiers ?? [];
+    if (allTiers.length === 0) return null;
+
+    // Find all matching tiers
+    const matching = allTiers.filter((t) => {
+      const mode = t.mode ?? "exact";
+      return mode === "min" ? q >= t.qty : q === t.qty;
+    });
+
+    if (matching.length === 0) return null;
+    if (matching.length === 1) return matching[0];
+
+    // Multiple matches — pick the best one.
+    // Priority: highest qty threshold first (most generous threshold reached).
+    // Among same-qty tiers: "min" beats "exact", then highest discount.
+    matching.sort((a, b) => {
+      if (a.qty !== b.qty) return b.qty - a.qty; // higher qty first
+      const aMode = a.mode ?? "exact";
+      const bMode = b.mode ?? "exact";
+      if (aMode !== bMode) return aMode === "min" ? -1 : 1; // min first
+      const aDisc = a.discountAmount ?? 0;
+      const bDisc = b.discountAmount ?? 0;
+      return bDisc - aDisc; // higher discount first
+    });
+    return matching[0];
   }, [items, quantityTiers]);
 
   // Discount from the active tier (if any) — clamped so total can never go negative.
@@ -167,6 +199,8 @@ export function CodOrderForm({
     const hasFree = tier.freeShipping && tier.freeShipping !== "none";
     const discount = tier.discountAmount ?? 0;
     const hasDiscount = discount > 0;
+    const mode = tier.mode ?? "exact";
+    const qtyLabel = mode === "min" ? `${tier.qty} قطعة أو أكثر` : `${tier.qty} قطعة`;
     const shippingLabel =
       tier.freeShipping === "both"
         ? "كلاهما"
@@ -176,13 +210,13 @@ export function CodOrderForm({
         ? "المنزل"
         : "";
     if (hasFree && hasDiscount) {
-      return `🎉 توصيل مجاني (${shippingLabel}) + خصم ${discount} دج عند شراء ${tier.qty} قطعة!`;
+      return `🎉 توصيل مجاني (${shippingLabel}) + خصم ${discount} دج عند شراء ${qtyLabel}!`;
     }
     if (hasFree) {
-      return `🎉 توصيل مجاني (${shippingLabel}) عند شراء ${tier.qty} قطعة!`;
+      return `🎉 توصيل مجاني (${shippingLabel}) عند شراء ${qtyLabel}!`;
     }
     if (hasDiscount) {
-      return `🎉 خصم ${discount} دج عند شراء ${tier.qty} قطعة!`;
+      return `🎉 خصم ${discount} دج عند شراء ${qtyLabel}!`;
     }
     return "";
   };

@@ -19,11 +19,24 @@ export type ProductVariant = {
   priceAdjustment?: number;
 };
 
-/** Quantity tier — a special offer when the customer buys a specific quantity.
- * A tier can combine a free-shipping benefit AND a discount amount (or just one, or both). */
+/** Quantity tier — a special offer triggered by the customer's order quantity.
+ * A tier can combine a free-shipping benefit AND a discount amount (or just one, or both).
+ *
+ * Two modes:
+ *  - `mode: "exact"`   → triggers ONLY at exactly `qty` (e.g. "buy exactly 2 → free desk shipping")
+ *  - `mode: "min"`     → triggers at `qty` OR MORE (e.g. "buy 2+ → free shipping")
+ *
+ * The `mode` field is optional — if absent, the tier is treated as "exact" (backward compat).
+ * Sheet encoding: `qty:freeShipping:discountAmount:mode`
+ *   e.g. `2:both:0:min` = buy 2 or more → free shipping (both) + no discount
+ *        `3:none:500:exact` = buy exactly 3 → 500 DA discount, no free shipping
+ *        `2:desk:0` = buy exactly 2 → free desk shipping (legacy format, no mode = "exact")
+ */
 export type QuantityTier = {
   /** The quantity that triggers this tier (e.g. 2, 3, 4) */
   qty: number;
+  /** Whether the tier triggers at exactly `qty` ("exact") or `qty` and above ("min"). */
+  mode?: "exact" | "min";
   /** Free-shipping benefit. "none" = no free shipping, just discount. */
   freeShipping: "none" | "desk" | "home" | "both";
   /** Optional discount amount in DA (0 / undefined = no discount) */
@@ -807,7 +820,8 @@ export function joinHighlights(items: string[] | undefined | null): string {
 }
 
 /** Parse the quantityTiers string from the sheet into an array of QuantityTier objects.
- * New format: "2:both:200,3:desk:0" (qty:freeShipping:discountAmount)
+ * New format with mode: "2:both:0:min,3:desk:500:exact" (qty:freeShipping:discountAmount:mode)
+ * New format without mode: "2:both:200,3:desk:0" (mode defaults to "exact")
  * Legacy format (still supported for back-compat with existing sheet rows):
  *   "2:free_both:0,3:discount:200" (qty:benefit:discountAmount) */
 export function parseQuantityTiers(s: string | undefined | null): QuantityTier[] {
@@ -818,14 +832,18 @@ export function parseQuantityTiers(s: string | undefined | null): QuantityTier[]
   const out: QuantityTier[] = [];
   const newShippingTokens: QuantityTier["freeShipping"][] = ["none", "desk", "home", "both"];
   const legacyBenefits: LegacyTierBenefit[] = ["free_desk", "free_home", "free_both", "discount"];
+  const modeTokens: QuantityTier["mode"][] = ["exact", "min"];
   for (const part of parts) {
-    const [qtyStr, middle, discountStr] = part.split(":");
+    const [qtyStr, middle, discountStr, modeStr] = part.split(":");
     const qty = Number(qtyStr);
     if (isNaN(qty) || qty < 1) continue;
     const discount = Number(discountStr) || 0;
+    const mode: QuantityTier["mode"] =
+      modeStr === "min" ? "min" : modeStr === "exact" ? "exact" : "exact";
     if (newShippingTokens.includes(middle as QuantityTier["freeShipping"])) {
       out.push({
         qty,
+        mode,
         freeShipping: middle as QuantityTier["freeShipping"],
         discountAmount: discount > 0 ? discount : undefined,
       });
@@ -833,6 +851,7 @@ export function parseQuantityTiers(s: string | undefined | null): QuantityTier[]
       const migrated = migrateLegacyBenefit(middle as LegacyTierBenefit, discount > 0 ? discount : undefined);
       out.push({
         qty,
+        mode,
         freeShipping: migrated.freeShipping,
         discountAmount: migrated.discountAmount,
       });
@@ -840,6 +859,7 @@ export function parseQuantityTiers(s: string | undefined | null): QuantityTier[]
       // Unknown token — default to no benefit so the tier is still preserved.
       out.push({
         qty,
+        mode,
         freeShipping: "none",
         discountAmount: discount > 0 ? discount : undefined,
       });
@@ -850,7 +870,7 @@ export function parseQuantityTiers(s: string | undefined | null): QuantityTier[]
 
 /** Normalize a raw quantityTiers value (from localStorage, sheet JSON, or the API)
  * into the new QuantityTier shape. Handles:
- *  - arrays already in the new format ({qty, freeShipping, discountAmount?})
+ *  - arrays already in the new format ({qty, freeShipping, discountAmount?, mode?})
  *  - arrays in the legacy format ({qty, benefit, discountAmount?}) → migrate
  *  - string in new or legacy sheet format → parseQuantityTiers
  */
@@ -863,15 +883,17 @@ export function normalizeTiers(raw: unknown): QuantityTier[] {
       .map((t) => {
         const qty = Number(t.qty);
         const discount = t.discountAmount == null ? undefined : Number(t.discountAmount);
+        const mode: QuantityTier["mode"] =
+          t.mode === "min" ? "min" : t.mode === "exact" ? "exact" : "exact";
         if (typeof t.freeShipping === "string" && newShippingTokens.includes(t.freeShipping)) {
-          return { qty, freeShipping: t.freeShipping, discountAmount: discount } as QuantityTier;
+          return { qty, mode, freeShipping: t.freeShipping, discountAmount: discount } as QuantityTier;
         }
         if (typeof t.benefit === "string" && legacyBenefits.includes(t.benefit)) {
           const migrated = migrateLegacyBenefit(t.benefit as LegacyTierBenefit, discount);
-          return { qty, ...migrated } as QuantityTier;
+          return { qty, mode, ...migrated } as QuantityTier;
         }
         // Unknown shape — preserve qty + discount, no shipping benefit.
-        return { qty, freeShipping: "none" as const, discountAmount: discount } as QuantityTier;
+        return { qty, mode, freeShipping: "none" as const, discountAmount: discount } as QuantityTier;
       });
   }
   if (typeof raw === "string" && raw.trim()) {
