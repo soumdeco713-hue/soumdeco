@@ -27,12 +27,14 @@
 
 import { getClientSheetBaseUrl, type SheetProduct } from "./sheet";
 
-// Default fetch timeout — 30 seconds (Apps Script cold start can be 10-20s)
-const DEFAULT_TIMEOUT_MS = 30_000;
+// Fetch timeout — 10 seconds (was 30s which caused "stuck at loading")
+// If Apps Script doesn't respond in 10s, we fall back to cached/seed data
+const DEFAULT_TIMEOUT_MS = 10_000;
 
 // Retry configuration for read operations (products, stock)
-const READ_RETRIES = 3;
-const READ_RETRY_DELAY_MS = 1500;
+// Reduced from 3 to 2 retries — faster fallback to cached data
+const READ_RETRIES = 2;
+const READ_RETRY_DELAY_MS = 1000;
 
 // Retry configuration for write operations (product create/update/delete)
 const WRITE_RETRIES = 2;

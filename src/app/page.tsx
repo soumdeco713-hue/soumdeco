@@ -177,7 +177,10 @@ export default function Home() {
     () => validProducts.filter((p) => !p.isSpecialOffer),
     [validProducts],
   );
-  const showSkeletons = catalog.loading && validProducts.length === 0;
+  // Show skeletons ONLY if we have NO data at all (no cached, no seed).
+  // If we have ANY products (cached or fresh), show them immediately —
+  // never show "stuck at loading" skeletons when we have data to display.
+  const showSkeletons = catalog.loading && validProducts.length === 0 && !catalog.hydrated;
 
   // Rupture + low stock checks — from the Stock tab (polled every 5.5 min)
   const isRupture = useCallback(

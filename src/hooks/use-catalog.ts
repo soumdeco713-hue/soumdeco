@@ -60,8 +60,21 @@ export function useCatalog() {
   // Next.js 16 + @cloudflare/next-on-pages v1 incompatibility. To make the
   // site work reliably, we fetch products directly from the Apps Script
   // web app in the browser. This is faster AND more reliable.
+  //
+  // CRITICAL: We show cached/seed data INSTANTLY (0ms) so users NEVER see
+  // "stuck at loading" even if Apps Script is slow or down.
   const refresh = useCallback(async () => {
     try {
+      // 0. INSTANTLY show cached data (so the page is never "stuck at loading")
+      // This runs BEFORE the network fetch — users see products immediately.
+      const instantCached = loadCatalog();
+      if (instantCached.length > 0) {
+        let quick = instantCached.map(optimizeCloudinaryUrls).map(fixCategoryTypos);
+        quick.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+        setProducts(quick);
+        setLoading(false); // ← KEY: stop loading IMMEDIATELY
+      }
+
       // 1. Try fetching directly from Google Apps Script
       const fetched = await clientListProducts();
 
@@ -164,6 +177,12 @@ export function useCatalog() {
     sorted.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
     setProducts(sorted);
     setHydrated(true);
+    // CRITICAL: Set loading=false IMMEDIATELY if we have any data.
+    // This prevents the "stuck at loading" issue — users see products
+    // right away, even if the background fetch is still in progress.
+    if (sorted.length > 0) {
+      setLoading(false);
+    }
     // If we have cached data, delay the refresh slightly (300ms) so the
     // page can paint first. This makes navigation feel instant.
     // If no cached data, fetch immediately (we need it to show anything).
