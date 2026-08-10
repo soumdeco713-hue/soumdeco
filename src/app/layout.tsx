@@ -74,7 +74,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ar" dir="rtl" suppressHydrationWarning>
+    <html lang="ar" dir="ltr" suppressHydrationWarning>
       <head suppressHydrationWarning>
         {/* DNS prefetch for Cloudinary + Apps Script — faster image + data loading */}
         <link rel="dns-prefetch" href="https://res.cloudinary.com" />
