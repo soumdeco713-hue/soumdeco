@@ -34,7 +34,14 @@ export async function loadImageManifest(): Promise<ImageManifest | null> {
 
   manifestLoadPromise = (async () => {
     try {
-      const res = await fetch(MANIFEST_URL, { cache: "force-cache" });
+      // G4 FIX: Add a 5-second timeout so a hanging fetch doesn't block forever
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch(MANIFEST_URL, {
+        cache: "force-cache",
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
       if (!res.ok) return null;
       const data = await res.json();
       if (!data || !Array.isArray(data.localFiles)) return null;
@@ -42,6 +49,8 @@ export async function loadImageManifest(): Promise<ImageManifest | null> {
       localFilesSet = new Set(manifestCache.localFiles);
       return manifestCache;
     } catch {
+      // G4 FIX: Reset the promise so retries are possible (don't cache failure)
+      manifestLoadPromise = null;
       return null;
     }
   })();

@@ -125,13 +125,22 @@ async function loadStockSeed(): Promise<StockMap> {
 
   stockSeedPromise = (async () => {
     try {
-      const res = await fetch("/stock-seed.json", { cache: "force-cache" });
+      // G4 FIX: Add a 5-second timeout so a hanging fetch doesn't block forever
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch("/stock-seed.json", {
+        cache: "force-cache",
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
       if (!res.ok) return {};
       const data = await res.json();
       if (!data || !data.map || typeof data.map !== "object") return {};
       stockSeedCache = data.map as StockMap;
       return stockSeedCache;
     } catch {
+      // G4 FIX: Reset the promise so retries are possible
+      stockSeedPromise = null;
       return {};
     }
   })();

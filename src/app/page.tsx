@@ -28,11 +28,22 @@ type View =
 
 function parseHash(): View {
   if (typeof window === "undefined") return { kind: "home" };
-  const h = window.location.hash.toLowerCase();
-  if (h === "#admin" || h.startsWith("#admin/")) return { kind: "admin" };
+  // G7 FIX: Only lowercase the prefix (#admin, #product), NOT the product ID itself
+  // (product IDs are case-sensitive — lowercasing them would break navigation)
+  const h = window.location.hash;
+  const hLower = h.toLowerCase();
+  if (hLower === "#admin" || hLower.startsWith("#admin/")) return { kind: "admin" };
   // Format: #product/{id}
-  const m = h.match(/^#product\/(.+)$/);
-  if (m) return { kind: "product", id: decodeURIComponent(m[1]) };
+  const m = hLower.match(/^#product\/(.+)$/);
+  if (m) {
+    // G8 FIX: decodeURIComponent can throw URIError on malformed input — wrap in try/catch
+    try {
+      const id = decodeURIComponent(m[1]);
+      return { kind: "product", id };
+    } catch {
+      return { kind: "home" }; // malformed URL — go home
+    }
+  }
   return { kind: "home" };
 }
 

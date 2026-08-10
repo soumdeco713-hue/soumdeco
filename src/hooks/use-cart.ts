@@ -86,11 +86,16 @@ export function useCart() {
 
   const addToCart = useCallback(
     (item: Omit<CartItem, "quantity">, quantity: number = 1) => {
-      const current: CartItem[] = JSON.parse(
-        window.localStorage.getItem(CART_STORAGE_KEY) || "[]",
-      );
+      // G5 FIX: Wrap in try/catch — corrupted localStorage shouldn't crash the click handler
+      let current: CartItem[] = [];
+      try {
+        const raw = window.localStorage.getItem(CART_STORAGE_KEY) || "[]";
+        current = JSON.parse(raw);
+        if (!Array.isArray(current)) current = [];
+      } catch {
+        current = []; // corrupted — start fresh
+      }
       // Match by productId AND variantKey (if provided)
-      // This ensures different colors/sizes of the same product are separate line items
       const variantKey = item.variantKey || "";
       const idx = current.findIndex(
         (i) => i.productId === item.productId && (i.variantKey || "") === variantKey,

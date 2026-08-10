@@ -3,52 +3,73 @@
 import { useEffect, useState } from "react";
 
 /**
- * LoadingFallback — shows a refresh button if the site takes too long to load.
+ * LoadingFallback — bulletproof safety net for stuck loading.
  *
- * If the page shows skeleton loaders for more than 8 seconds, this component
- * shows a friendly "refresh" button. This ensures users NEVER see a stuck page
- * — they always have a way to recover.
+ * Detects TWO failure modes:
+ * 1. Skeleton loaders showing for too long
+ * 2. Blank screen (no interactive content at all)
  *
- * This is a safety net for:
- * - Slow network connections
- * - Apps Script cold starts
- * - JavaScript bundle download failures
- * - Any other transient loading issue
+ * In both cases, shows a friendly "refresh" button so users NEVER see a
+ * permanently stuck page. Runs for the ENTIRE session (no 30s cutoff).
  */
 export function LoadingFallback() {
   const [showRefresh, setShowRefresh] = useState(false);
+  const [checkCount, setCheckCount] = useState(0);
 
   useEffect(() => {
-    // Check every 2 seconds if the page is still loading
-    const checkInterval = setInterval(() => {
-      // If there are skeleton loaders still showing after 8 seconds,
-      // show the refresh button
-      const skeletons = document.querySelectorAll(".animate-pulse, .shimmer-line");
-      const products = document.querySelectorAll("[class*='product-card']");
+    let stuckCounter = 0;
+    const CHECK_INTERVAL = 3000; // check every 3 seconds
+    const STUCK_THRESHOLD = 2; // show refresh after 2 consecutive stuck checks (6s)
 
-      // If we have products rendered, the page loaded successfully
-      if (products.length > 0) {
+    const checkInterval = setInterval(() => {
+      setCheckCount((c) => c + 1);
+
+      // Check for skeleton loaders
+      const skeletons = document.querySelectorAll(".animate-pulse, .shimmer-line");
+
+      // Check for interactive content (product cards, images, text)
+      const products = document.querySelectorAll(
+        "[class*='product-card'], [class*='product-card-h'], article, .product-image",
+      );
+
+      // Check if the page has ANY real content (not just empty divs)
+      const bodyText = document.body?.innerText?.trim() || "";
+      const hasContent = bodyText.length > 100; // at least 100 chars of text
+
+      // If we have products OR meaningful content, page loaded successfully
+      if (products.length > 0 || hasContent) {
+        stuckCounter = 0;
         setShowRefresh(false);
-        clearInterval(checkInterval);
         return;
       }
 
-      // If skeletons are showing for too long, offer a refresh
-      if (skeletons.length > 0) {
-        setShowRefresh(true);
+      // If skeletons are showing OR screen is blank, increment stuck counter
+      if (skeletons.length > 0 || !hasContent) {
+        stuckCounter++;
+        if (stuckCounter >= STUCK_THRESHOLD) {
+          setShowRefresh(true);
+        }
       }
-    }, 2000);
+    }, CHECK_INTERVAL);
 
-    // Stop checking after 30 seconds (don't run forever)
-    const timeout = setTimeout(() => {
-      clearInterval(checkInterval);
-    }, 30000);
-
-    return () => {
-      clearInterval(checkInterval);
-      clearTimeout(timeout);
-    };
+    // Run for the entire session (no cutoff — user safety net)
+    return () => clearInterval(checkInterval);
   }, []);
+
+  // Auto-reload once if stuck for too long (15 seconds)
+  useEffect(() => {
+    if (!showRefresh) return;
+    const reloadTimer = setTimeout(() => {
+      // Only auto-reload once (check sessionStorage to prevent loop)
+      const key = "soumdeco_auto_reloaded";
+      if (!sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, "1");
+        window.location.reload();
+      }
+    }, 15000);
+
+    return () => clearTimeout(reloadTimer);
+  }, [showRefresh]);
 
   // Don't render anything unless we need to show the refresh button
   if (!showRefresh) return null;
@@ -63,19 +84,20 @@ export function LoadingFallback() {
         zIndex: 9999,
         background: "#1C1815",
         color: "#FAF8F4",
-        padding: "12px 24px",
+        padding: "14px 28px",
         borderRadius: "9999px",
         fontSize: "14px",
-        fontFamily: "inherit",
+        fontFamily: "system-ui, -apple-system, sans-serif",
         boxShadow: "0 8px 24px rgba(28, 24, 21, 0.25)",
         display: "flex",
         alignItems: "center",
         gap: "12px",
         cursor: "pointer",
         fontWeight: 600,
+        maxWidth: "90vw",
       }}
       onClick={() => {
-        // Hard reload (bypass cache)
+        sessionStorage.removeItem("soumdeco_auto_reloaded");
         window.location.reload();
       }}
     >

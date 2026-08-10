@@ -90,6 +90,62 @@ export default function RootLayout({
       <body
         className={`${jost.variable} ${cormorant.variable} ${inter.variable} ${arabic.variable} font-arabic antialiased bg-background text-foreground`}
       >
+        {/* G3 FIX: <noscript> fallback for JS-disabled users + failed bundle download */}
+        <noscript>
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "#FAF8F4",
+              fontFamily: "system-ui, -apple-system, sans-serif",
+              zIndex: 9999,
+            }}
+          >
+            <div style={{ textAlign: "center", maxWidth: 400, padding: 24 }}>
+              <div
+                style={{
+                  width: 56,
+                  height: 56,
+                  margin: "0 auto 16px",
+                  borderRadius: "50%",
+                  background: "linear-gradient(135deg, #9A7E3A, #D4AF37)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 24,
+                }}
+              >
+                ✦
+              </div>
+              <h1 style={{ fontSize: 20, fontWeight: 700, color: "#1C1815", marginBottom: 8 }}>
+                SOUM DECO
+              </h1>
+              <p style={{ fontSize: 14, color: "#6B5D4F", lineHeight: 1.6, marginBottom: 16 }}>
+                يلزم تفعيل JavaScript لعرض الموقع بشكل صحيح.
+                <br />
+                Veuillez activer JavaScript pour voir le site.
+              </p>
+              <a
+                href="/"
+                style={{
+                  display: "inline-block",
+                  background: "#1C1815",
+                  color: "#FAF8F4",
+                  textDecoration: "none",
+                  borderRadius: 9999,
+                  padding: "10px 24px",
+                  fontSize: 14,
+                  fontWeight: 600,
+                }}
+              >
+                إعادة المحاولة
+              </a>
+            </div>
+          </div>
+        </noscript>
         <ManifestPreloader />
         <HealthMonitorStarter />
         <LoadingFallback />

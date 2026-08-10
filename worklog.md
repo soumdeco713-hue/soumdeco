@@ -2427,3 +2427,35 @@ Stage Summary:
 - **Top 4 must-fix-before-handover:** C1 (rotate admin password + server-side auth), C2 (rewrite Cloudinary 400-retry), C3 (disable ignoreBuildErrors + fix tsc errors), C4 (cart variantKey plumbing).
 - Full per-file checklist and remediation steps saved to /home/z/my-project/download/PRE-HANDOVER-SCAN.md.
 - No code was modified — read & report only.
+
+---
+
+## 2025 — Deep "Stuck at Loading" Scan (task: `stuck-loading-deep-scan`)
+
+**Scope:** Read-only audit of 15 files (`page.tsx`, `layout.tsx`, `use-catalog.ts`, `use-stock.ts`, `use-cart.ts`, `client-sheet.ts`, `products.ts`, `image-manifest.ts`, `adaptive-storage.ts`, `product-image.tsx`, `featured-carousel.tsx`, `loading-fallback.tsx`, `manifest-preloader.tsx`, `health-monitor-starter.tsx`, `error-boundary.tsx`) plus 7 supporting modules. **No code was modified.**
+
+**Method:** 60 failure scenarios analyzed in depth (the 50 from the brief + 10 discovered during audit). For each: Can it cause "stuck at loading"? / Handled? / Fix if not.
+
+**Headline finding:** The codebase is **largely well-defended** — most of the obvious failure paths (Apps Script down, malformed JSON, quota exceeded, hydration mismatch, guidance-row leak, duplicate IDs, empty catalog, indexedDB blocked, old browsers without AbortController, bfcache restore, slow CPUs) are correctly handled through the layered fallback chain `sheet (10s timeout, 2 retries) → IndexedDB cache → localStorage cache → SEED_PRODUCTS`. The skeleton gate `showSkeletons = catalog.loading && validProducts.length === 0 && !catalog.hydrated` ensures any data at all immediately paints. **41 of 60 scenarios are fully handled.**
+
+**However, 9 real gaps remain** that can leave specific users stuck:
+
+| # | Severity | Issue |
+|---|----------|-------|
+| G1 | 🔴 P0 | `LoadingFallback` stops checking after 30s — if skeletons persist past 30s the refresh button may never appear |
+| G2 | 🔴 P0 | `LoadingFallback` only detects `.animate-pulse` / `.shimmer-line`; a blank screen (no skeletons, no products) is never detected → infinite blank state |
+| G3 | 🟠 P1 | No `<noscript>` fallback — JS-disabled users (or users whose bundle download fails) see skeletons forever |
+| G4 | 🟠 P1 | `loadImageManifest()` and `loadStockSeed()` have no fetch timeout — a hanging fetch promise is cached forever, blocking all subsequent retries for the session |
+| G5 | 🟠 P1 | `useCart.addToCart` reads `localStorage.getItem(...)` + `JSON.parse(...)` without try/catch — a re-corrupted cart (race with old tab) crashes the click handler |
+| G6 | 🟡 P2 | `useCatalog`'s `loadImageManifest().then(...)` block can overwrite a fresher `products` state with a stale snapshot taken before a concurrent `refresh()` completed |
+| G7 | 🟡 P2 | `parseHash` lowercases the URL hash before regex matching — a product ID containing uppercase letters would never match on reload (dormant bug; all current IDs are lowercase) |
+| G8 | 🟡 P2 | `decodeURIComponent(m[1])` in `parseHash` can throw `URIError` on malformed percent-encoding — escapes `useEffect`, caught by `ErrorBoundary` (user sees error fallback instead of home) |
+| G9 | 🟡 P2 | Multiple `setTimeout` calls in `useCatalog` initial load are not cleared on unmount — React 18 silently ignores the resulting setState, but stale closures can cause brief flash of old state |
+
+**Plus 4 minor/cosmetic issues** (P3): `ProductImage` has no second-level fallback when Cloudinary is also down; `sortOrder: NaN` (from non-numeric sheet value) can cause unstable sort; `ErrorBoundary` fallback assumes `error` is an `Error` instance; `loadCatalogAsync.then` can overwrite sheet-side deletions with older IndexedDB cache.
+
+**Top urgent fixes (P0):** Remove the 30s cutoff in `LoadingFallback` AND add a "page has interactive content" check so blank screens also trigger the refresh button.
+
+**Full 60-scenario analysis with code fixes, priority ranking, and post-fix verification checklist saved to:** `/home/z/my-project/download/STUCK-LOADING-ANALYSIS.md`
+
+**Verdict:** The site is **mostly resilient** but has two real P0 gaps in `LoadingFallback` that can still leave slow-network or blank-screen users stuck. Implementing the 5 P0+P1 fixes (~45 minutes total work) should eliminate all remaining "stuck at loading" reports. Read & report only — no code modified.
