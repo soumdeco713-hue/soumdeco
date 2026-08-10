@@ -2,7 +2,9 @@ name: Auto-Sync Product Images
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    # Every day at 2:00 AM UTC (low-traffic period for Algeria)
+    - cron: "0 2 * * *"
+  # Allow manual trigger for testing
   workflow_dispatch:
 
 permissions:
