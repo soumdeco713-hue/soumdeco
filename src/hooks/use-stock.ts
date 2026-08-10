@@ -85,10 +85,12 @@ export function useStock() {
 
   const fetchStock = useCallback(async () => {
     try {
-      const res = await fetch("/api/stock");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      setStockMap(parseCsv(text));
+      // Fetch directly from Google Apps Script (bypasses broken edge API)
+      const { clientGetStockCsv } = await import("@/lib/client-sheet");
+      const text = await clientGetStockCsv();
+      if (text) {
+        setStockMap(parseCsv(text));
+      }
     } catch {
       // keep current state
     } finally {

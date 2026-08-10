@@ -3,16 +3,38 @@
 // ALL operations use GET with URL params for products/orders.
 // Image uploads use POST (the only thing doPost handles).
 
+// Hardcoded live URL — guarantees the sheet is ALWAYS reachable even if
+// environment variables fail to inline at build time on Cloudflare Pages.
+export const SHEET_BASE_URL =
+  "https://script.google.com/macros/s/AKfycbxWVBZDsyfrqSBsRC_RPSwTyaXXkSaL4amjwRvcFIk3o_CASzw0TG5s_EF3B_BS44rV/exec";
+
 export function getSheetBaseUrl(): string | null {
   // On Cloudflare Pages, NEXT_PUBLIC_ vars are inlined at build time.
   // But as a bulletproof fallback, we also hardcode the live URL.
   // This ensures the sheet is ALWAYS connected, even if env vars fail to inline.
-  const FALLBACK_SHEET_URL = "https://script.google.com/macros/s/AKfycbxWVBZDsyfrqSBsRC_RPSwTyaXXkSaL4amjwRvcFIk3o_CASzw0TG5s_EF3B_BS44rV/exec";
   return (
     process.env.NEXT_PUBLIC_SHEET_URL ||
     process.env.GOOGLE_SHEET_WEBHOOK_URL ||
-    FALLBACK_SHEET_URL
+    SHEET_BASE_URL
   );
+}
+
+/**
+ * Client-safe version of getSheetBaseUrl.
+ * Works in the browser (where process.env may not exist) by falling back
+ * to the hardcoded URL. NEXT_PUBLIC_SHEET_URL is inlined at build time
+ * if defined, otherwise we use the hardcoded fallback.
+ */
+export function getClientSheetBaseUrl(): string {
+  // process.env.NEXT_PUBLIC_SHEET_URL is replaced at build time by Next.js
+  // when the env var is set. If not set, this evaluates to undefined.
+  try {
+    const envUrl = (typeof process !== "undefined" &&
+      process.env &&
+      process.env.NEXT_PUBLIC_SHEET_URL) as string | undefined;
+    if (envUrl) return envUrl;
+  } catch {}
+  return SHEET_BASE_URL;
 }
 
 export type SheetProduct = {

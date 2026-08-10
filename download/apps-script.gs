@@ -135,6 +135,9 @@ function serveProducts() {
   if (values.length < 2) return jsonOut([]);
   var header = values[0];
   var out = [];
+  // Track seen IDs to skip duplicate rows (the sheet sometimes has dupes
+  // when a product is saved twice or moved between categories).
+  var seenIds = {};
   // Start from row 2 (index 1). Skip guidance row (row 2) if it contains
   // Arabic/emoji hints instead of real product data.
   for (var i = 1; i < values.length; i++) {
@@ -144,6 +147,9 @@ function serveProducts() {
     // non-ASCII characters (emojis/Arabic) which real product IDs never have.
     var idStr = String(r[0]);
     if (/[\u0600-\u06FF\u{1F000}-\u{1FFFF}]/u.test(idStr)) continue;
+    // Skip duplicate IDs (keep first occurrence)
+    if (seenIds[idStr]) continue;
+    seenIds[idStr] = true;
     var obj = {};
     for (var j = 0; j < header.length; j++) obj[header[j]] = r[j];
     obj.price = (obj.price===''||obj.price===null||obj.price===undefined)?null:Number(obj.price);
@@ -155,6 +161,12 @@ function serveProducts() {
     // variants — pass through as a string for the client to parse.
     obj.variants = obj.variants==null?'':String(obj.variants);
     if ((!obj.images||String(obj.images).trim()==='')&&obj.image) obj.images = String(obj.image);
+    // Auto-fix common category typos
+    if (obj.category) {
+      var cat = String(obj.category).trim();
+      if (cat === 'Meubes') cat = 'Meubles';
+      obj.category = cat;
+    }
     out.push(obj);
   }
   return jsonOut(out);

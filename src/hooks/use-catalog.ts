@@ -15,8 +15,22 @@ import {
   normalizeVariants,
   SEED_PRODUCTS,
 } from "@/lib/products";
+import {
+  clientListProducts,
+  clientUpsertProduct,
+  clientDeleteProduct,
+  clientResetProducts,
+  clientUploadImages,
+} from "@/lib/client-sheet";
+import {
+  joinImageStrings,
+  joinVariations,
+  joinVariants,
+  joinHighlights,
+} from "@/lib/products";
+import type { SheetProduct } from "@/lib/sheet";
 
-const POLL_MS = 330_000; // poll every 5.5 minutes when visible (dev — will bump to 30min on push)
+const POLL_MS = 330_000; // poll every 5.5 minutes when visible
 const HIDDEN_POLL_MS = 1_100_000; // ~18 min when tab is hidden
 
 export function useCatalog() {
@@ -34,53 +48,67 @@ export function useCatalog() {
     productsRef.current = products;
   }, [products]);
 
-  // ---- Fetch from DB (source of truth) ----
+  // ---- Fetch DIRECTLY from Google Apps Script (bypasses broken edge API) ----
+  // The Cloudflare Pages edge API routes return 500 errors due to a
+  // Next.js 16 + @cloudflare/next-on-pages v1 incompatibility. To make the
+  // site work reliably, we fetch products directly from the Apps Script
+  // web app in the browser. This is faster AND more reliable.
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch("/api/products");
-      if (!res.ok) return;
-      const data = await res.json();
-      if (!data || !Array.isArray(data.products)) return;
-      let next: Product[] = data.products.map(normalizeProduct);
+      // 1. Try fetching directly from Google Apps Script
+      const fetched = await clientListProducts();
 
-      if (data.seed === true) {
-        // ── SEED / OFFLINE MODE ──
-        // API returned seed products (no Google Sheet configured).
-        // CRITICAL: Do NOT overwrite localStorage with seed data —
-        // that would destroy admin edits (add/delete/modify).
-        // Only use seed data on the VERY FIRST visit (when localStorage
-        // key is null). After that, localStorage is the source of truth.
-        const raw = typeof window !== "undefined"
-          ? window.localStorage.getItem(CATALOG_STORAGE_KEY)
-          : null;
-        if (raw === null) {
-          // First visit ever — seed localStorage with the 29 demo products
-          saveCatalog(next);
-        } else {
-          // Admin has made edits (or intentionally cleared) — respect localStorage
-          next = loadCatalog();
-        }
-      } else if (next.length > 0) {
+      if (fetched.length > 0) {
         // ── SHEET MODE (real Google Sheet data) ──
+        // Deduplicate by ID (the sheet sometimes has duplicate rows).
+        const seen = new Set<string>();
+        const unique: SheetProduct[] = [];
+        for (const p of fetched) {
+          const id = String(p.id || "").trim();
+          if (!id || seen.has(id)) continue;
+          seen.add(id);
+          unique.push(p);
+        }
+
+        let next: Product[] = unique.map(normalizeProduct);
+
+        // Fix common typos in category names
+        next = next.map(fixCategoryTypos);
+
+        // Sort by sortOrder (lower first)
+        next.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+
         // Sheet is the source of truth — always save to localStorage
         saveCatalog(next);
-      } else {
-        // Sheet is empty — use localStorage if exists, otherwise seed
-        const raw = typeof window !== "undefined"
-          ? window.localStorage.getItem(CATALOG_STORAGE_KEY)
-          : null;
-        if (raw === null) {
-          next = SEED_PRODUCTS;
-          saveCatalog(next);
-        } else {
-          next = loadCatalog();
+        setProducts(next);
+        setLoading(false);
+        return;
+      }
+
+      // 2. Sheet returned empty or failed — use localStorage cache, then seed
+      const raw = typeof window !== "undefined"
+        ? window.localStorage.getItem(CATALOG_STORAGE_KEY)
+        : null;
+      if (raw !== null) {
+        const cached = loadCatalog();
+        if (cached.length > 0) {
+          const sorted = [...cached].sort(
+            (a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999),
+          );
+          setProducts(sorted);
+          setLoading(false);
+          return;
         }
       }
-      // Sort by sortOrder (lower first)
-      next.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
-      setProducts(next);
+      // First visit ever — seed with the 29 demo products
+      const seeded = [...SEED_PRODUCTS].sort(
+        (a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999),
+      );
+      saveCatalog(seeded);
+      setProducts(seeded);
+      setLoading(false);
     } catch {
-      // network error — keep current state, but if empty, use cache/seed
+      // Network error — keep current state, but if empty, use cache/seed
       setProducts((prev) => {
         if (prev.length === 0) {
           const raw = typeof window !== "undefined"
@@ -99,7 +127,6 @@ export function useCatalog() {
         }
         return prev;
       });
-    } finally {
       setLoading(false);
     }
   }, []);
@@ -113,7 +140,7 @@ export function useCatalog() {
 
   // Initial load + polling
   useEffect(() => {
-    // First load from localStorage cache (instant), then refresh from DB.
+    // First load from localStorage cache (instant), then refresh from sheet.
     // Only seed with SEED_PRODUCTS on the VERY FIRST visit (when the
     // catalog key was never set). After that, respect the user's catalog
     // even if it's empty — they may have deleted all products intentionally.
@@ -132,6 +159,7 @@ export function useCatalog() {
     sorted.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
     setProducts(sorted);
     setHydrated(true);
+    // Immediately refresh from sheet — don't wait for the cached data to show
     refresh();
     scheduleNext();
 
@@ -151,6 +179,8 @@ export function useCatalog() {
   }, [refresh, scheduleNext]);
 
   // ---- UPSERT (admin) ----
+  // Uploads images to Cloudinary (client-side unsigned upload), then
+  // POSTs the product directly to Google Apps Script.
   const upsertProduct = useCallback(
     async (product: Product) => {
       // Optimistic local update
@@ -169,22 +199,49 @@ export function useCatalog() {
         return next;
       });
 
-      // Sync to DB (sheet via API)
+      // Sync directly to Apps Script (with Cloudinary image upload)
       setSyncing(true);
       try {
-        const res = await fetch("/api/products", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(product),
-        });
-        if (!res.ok) {
-          // API failed — don't refresh (would overwrite optimistic update)
-          console.error("[upsertProduct] API returned", res.status);
+        // 1. Upload any base64 images to Cloudinary
+        const imagesToUpload = product.images || (product.image ? [product.image] : []);
+        const uploadedUrls = await clientUploadImages(imagesToUpload, product.id);
+        const coverImage = uploadedUrls[0] || product.image || "";
+
+        // 2. Build the SheetProduct payload
+        const sheetProduct: SheetProduct = {
+          id: product.id,
+          name: product.name,
+          description: product.description,
+          category: product.category,
+          price: product.price,
+          image: coverImage,
+          images: joinImageStrings(uploadedUrls),
+          featured: product.featured,
+          isSpecialOffer: product.isSpecialOffer ?? false,
+          variations: joinVariations(product.variations),
+          variants: joinVariants(product.variants),
+          stock: product.stock ?? null,
+          highlights: joinHighlights(product.highlights),
+          sortOrder: product.sortOrder ?? 999,
+          badge: product.badge || "",
+          oldPrice: product.oldPrice ?? null,
+          quantityTiers: Array.isArray(product.quantityTiers)
+            ? (product.quantityTiers as any[])
+                .filter((t) => t && typeof t.qty === "number")
+                .map((t) => `${t.qty}:${t.freeShipping || "none"}:${t.discountAmount || 0}`)
+                .join(",")
+            : String((product as any).quantityTiers ?? ""),
+        };
+
+        // 3. POST to Apps Script
+        const ok = await clientUpsertProduct(sheetProduct);
+        if (!ok) {
+          console.error("[upsertProduct] Apps Script POST failed");
         }
-        // Only refresh if API succeeded — avoids overwriting with stale sheet data
-        if (res.ok) await refresh();
+        // Refresh to get the canonical state from the sheet
+        if (ok) await refresh();
       } catch (e) {
-        console.error("[upsertProduct] network error:", e);
+        console.error("[upsertProduct] error:", e);
       } finally {
         setSyncing(false);
       }
@@ -202,9 +259,7 @@ export function useCatalog() {
       });
       setSyncing(true);
       try {
-        await fetch(`/api/products?id=${encodeURIComponent(id)}`, {
-          method: "DELETE",
-        });
+        await clientDeleteProduct(id);
         await refresh();
       } finally {
         setSyncing(false);
@@ -274,14 +329,34 @@ export function useCatalog() {
         toSync = [newA, newB];
         return sorted;
       });
-      // Sync both swapped products to the sheet (fire and forget — don't block UI)
+      // Sync both swapped products directly to Apps Script (fire and forget)
       if (toSync.length === 2) {
         for (const p of toSync) {
-          fetch("/api/products", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(p),
-          }).catch(() => {});
+          const sheetProduct: SheetProduct = {
+            id: p.id,
+            name: p.name,
+            description: p.description,
+            category: p.category,
+            price: p.price,
+            image: p.image,
+            images: joinImageStrings(p.images || []),
+            featured: p.featured,
+            isSpecialOffer: p.isSpecialOffer ?? false,
+            variations: joinVariations(p.variations),
+            variants: joinVariants(p.variants),
+            stock: p.stock ?? null,
+            highlights: joinHighlights(p.highlights),
+            sortOrder: p.sortOrder ?? 999,
+            badge: p.badge || "",
+            oldPrice: p.oldPrice ?? null,
+            quantityTiers: Array.isArray(p.quantityTiers)
+              ? (p.quantityTiers as any[])
+                  .filter((t) => t && typeof t.qty === "number")
+                  .map((t) => `${t.qty}:${t.freeShipping || "none"}:${t.discountAmount || 0}`)
+                  .join(",")
+              : "",
+          };
+          clientUpsertProduct(sheetProduct).catch(() => {});
         }
       }
     },
@@ -298,8 +373,8 @@ export function useCatalog() {
         (a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999),
       );
       setProducts(sorted);
-      // Then reset the sheet
-      await fetch("/api/products?action=reset", { method: "POST" });
+      // Then reset the sheet directly via Apps Script
+      await clientResetProducts();
     } finally {
       setSyncing(false);
     }
@@ -320,6 +395,22 @@ export function useCatalog() {
 }
 
 // ---------- internal ----------
+
+/**
+ * Fix common category name typos that exist in the Google Sheet data.
+ * - "Meubes" → "Meubles" (missing 'l')
+ * - Trim whitespace
+ * - Normalize case for known categories
+ */
+function fixCategoryTypos(p: Product): Product {
+  let cat = (p.category || "").trim();
+  if (cat === "Meubes") cat = "Meubles";
+  if (cat !== p.category) {
+    return { ...p, category: cat };
+  }
+  return p;
+}
+
 function normalizeProduct(p: any): Product {
   const toStr = (v: any): string => {
     if (v == null) return "";

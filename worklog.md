@@ -972,3 +972,32 @@ Added 7 new icon shapes to category-icon.tsx:
 7. Coffee/Tea Service (cafe/café/coffee/tea/قهوه/شاي) — cup shape
 Total icon types now: 18 (was 11) + default tag icon = 19 shapes
 All 8 current categories now have specific matching icons.
+
+---
+Task ID: products-fix-29-to-96
+Agent: main
+Task: Fix website showing only 29 products instead of 96 from Google Sheet
+
+Work Log:
+- Diagnosed root cause: ALL Cloudflare Pages edge API routes (/api, /api/products, /api/stock, /api/order) return HTTP 500 "Internal Server Error". This is due to Next.js 16 edge runtime deprecation + @cloudflare/next-on-pages v1.13.16 incompatibility.
+- Verified Google Sheet has 96 product rows (83 unique IDs due to 13 duplicates) by hitting Apps Script endpoint directly — sheet is healthy and complete.
+- Frontend was falling back to SEED_PRODUCTS (29 products) because API returned 500 → caught as error → fallback to localStorage (seeded with 29 on first visit).
+- Fix #1: Created /src/lib/client-sheet.ts with client-side functions that fetch directly from Google Apps Script (bypassing broken edge API entirely):
+  • clientListProducts() — GET ?action=products
+  • clientGetStockCsv() — GET ?action=stock
+  • clientUpsertProduct() — POST ?action=product_create
+  • clientDeleteProduct() — GET ?action=product_delete
+  • clientResetProducts() — GET ?action=product_reset
+  • clientUploadImage/clientUploadImages — Cloudinary unsigned upload from browser
+- Fix #2: Rewrote /src/hooks/use-catalog.ts to use clientListProducts() directly. All admin operations (upsert/delete/reset/move) now go directly to Apps Script + Cloudinary. Added client-side product deduplication by ID (sheet has 13 duplicate rows → collapses to 83 unique).
+- Fix #3: Updated /src/hooks/use-stock.ts to use clientGetStockCsv() directly.
+- Fix #4: Added fixCategoryTypos() in useCatalog — converts "Meubes" → "Meubles" automatically.
+- Fix #5: Added bulletproof try/catch in /api/products/route.ts GET handler — never returns bare 500, always returns JSON with seed fallback.
+- Fix #6: Added dedupeProducts() in API route as defense-in-depth.
+- Exported SHEET_BASE_URL + getClientSheetBaseUrl() from /src/lib/sheet.ts for client-side use.
+
+Stage Summary:
+- The website will now load ALL 83 unique products (96 rows - 13 duplicates) directly from the Google Sheet via the browser, completely bypassing the broken Cloudflare edge API.
+- Seed fallback (29 products) is now ONLY used on the very first visit when the sheet is unreachable.
+- Admin operations work fully client-side: Cloudinary unsigned upload + Apps Script direct POST.
+- This mirrors the architecture already used for order submission (which was already direct-to-Apps-Script per commit 103b886).
