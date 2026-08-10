@@ -164,9 +164,14 @@ export function useCatalog() {
     sorted.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
     setProducts(sorted);
     setHydrated(true);
-    // Immediately refresh from sheet — don't wait for the cached data to show.
-    // The refresh uses loadCatalogAsync() internally (checks IndexedDB too).
-    refresh();
+    // If we have cached data, delay the refresh slightly (300ms) so the
+    // page can paint first. This makes navigation feel instant.
+    // If no cached data, fetch immediately (we need it to show anything).
+    if (cached.length > 0) {
+      setTimeout(() => refresh(), 300);
+    } else {
+      refresh();
+    }
     scheduleNext();
 
     // Also try loading from IndexedDB (handles large catalogs that overflow

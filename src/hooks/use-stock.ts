@@ -1,10 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CART_STORAGE_KEY } from "@/lib/products";
 
 // Stock counts from Google Sheet CSV (Stock tab)
 // CSV format: product_name, stock_count (number)
 export type StockMap = Record<string, number>;
+
+// localStorage key for caching stock data (survives page reloads)
+const STOCK_CACHE_KEY = "soumdeco_stock_cache_v1";
+// Cache TTL: 25 minutes (slightly less than poll interval to avoid stale data)
+const STOCK_CACHE_TTL_MS = 25 * 60 * 1000;
 
 function parseCsv(text: string): StockMap {
   const map: StockMap = {};
@@ -74,22 +80,66 @@ function normalizeName(name: string): string {
     .replace(/\s+/g, " ");
 }
 
+// Load cached stock from localStorage (instant — no network)
+function loadCachedStock(): StockMap {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(STOCK_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    if (!parsed.map || typeof parsed.timestamp !== "number") return {};
+    // Check if cache is still fresh (under TTL)
+    if (Date.now() - parsed.timestamp > STOCK_CACHE_TTL_MS) {
+      // Cache is stale — return it anyway (better than empty) but trigger a refresh
+      return parsed.map as StockMap;
+    }
+    return parsed.map as StockMap;
+  } catch {
+    return {};
+  }
+}
+
+// Save stock to localStorage
+function saveCachedStock(map: StockMap) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      STOCK_CACHE_KEY,
+      JSON.stringify({ map, timestamp: Date.now() }),
+    );
+  } catch {
+    // localStorage might be full — ignore (not critical)
+  }
+}
+
 // Polling intervals — optimized for 800K visits/month to stay under
 // Apps Script's 20K-30K exec/day Consumer Gmail quota.
 const POLL_MS = 1_800_000; // 30 minutes when tab is visible
 const HIDDEN_POLL_MS = 3_600_000; // 1 hour when tab is hidden
 
 export function useStock() {
+  // Initialize from localStorage cache (INSTANT — no network wait)
+  // This prevents the "slow loading" when navigating between pages
   const [stockMap, setStockMap] = useState<StockMap>({});
   const [loading, setLoading] = useState(true);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isVisibleRef = useRef(true);
+  const hasFetchedRef = useRef(false); // track if we've fetched at least once
 
-  // Pre-normalized lookup map — O(1) lookups instead of O(n×m) linear scans.
-  // Built once whenever stockMap changes, then reused by isRupture/isLowStock.
-  // Key = normalized product name, Value = stock count
+  // Pre-normalized lookup map — O(1) lookups
   const [normalizedMap, setNormalizedMap] = useState<Record<string, number>>({});
 
+  // Load cached stock IMMEDIATELY on mount (before any network fetch)
+  useEffect(() => {
+    const cached = loadCachedStock();
+    if (Object.keys(cached).length > 0) {
+      setStockMap(cached);
+      setLoading(false); // Cache exists — not loading anymore
+    }
+  }, []);
+
+  // Rebuild normalized map whenever stockMap changes
   useEffect(() => {
     const next: Record<string, number> = {};
     for (const key of Object.keys(stockMap)) {
@@ -100,17 +150,19 @@ export function useStock() {
 
   const fetchStock = useCallback(async () => {
     try {
-      // Fetch directly from Google Apps Script (bypasses broken edge API)
+      // Fetch directly from Google Apps Script
       const { clientGetStockCsv } = await import("@/lib/client-sheet");
       const text = await clientGetStockCsv();
       if (text) {
-        setStockMap(parseCsv(text));
+        const newMap = parseCsv(text);
+        setStockMap(newMap);
+        // Cache for next page load (instant load)
+        saveCachedStock(newMap);
+        hasFetchedRef.current = true;
       }
       // SELF-HEALING: If fetch returned empty, keep current state (don't wipe)
-      // This prevents a transient network error from clearing all stock data
     } catch {
       // SELF-HEALING: Network error — keep current state (don't clear)
-      // The existing stockMap stays, so rupture/low-stock indicators still work
       console.warn("[Stock] Fetch failed — using cached data");
     } finally {
       setLoading(false);
@@ -126,7 +178,19 @@ export function useStock() {
   }, [fetchStock]);
 
   useEffect(() => {
-    fetchStock();
+    // Only fetch if we don't have cached data OR cache is stale
+    const cached = loadCachedStock();
+    const hasCache = Object.keys(cached).length > 0;
+
+    if (!hasCache) {
+      // No cache — fetch immediately
+      fetchStock();
+    } else {
+      // Cache exists — fetch in background (non-blocking) to refresh
+      // This makes the page load INSTANT (cache shows immediately)
+      // while the fresh data loads in the background
+      setTimeout(() => fetchStock(), 500); // small delay to not compete with catalog fetch
+    }
     scheduleNext();
 
     const onVisibility = () => {
@@ -152,18 +216,16 @@ export function useStock() {
     (productName: string): boolean => {
       if (!productName) return false;
       const normalized = normalizeName(productName);
-      // O(1) lookup in the pre-normalized map
       return normalized in normalizedMap && normalizedMap[normalized] === 0;
     },
     [normalizedMap],
   );
 
-  /** Returns the stock count for a product, or null if not in the Stock tab (unlimited) */
+  /** Returns the stock count for a product, or null if not in the Stock tab */
   const getStockCount = useCallback(
     (productName: string): number | null => {
       if (!productName) return null;
       const normalized = normalizeName(productName);
-      // O(1) lookup in the pre-normalized map
       return normalized in normalizedMap ? normalizedMap[normalized] : null;
     },
     [normalizedMap],
