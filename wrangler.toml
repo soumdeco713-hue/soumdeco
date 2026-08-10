@@ -6,44 +6,52 @@ compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = ".vercel/output/static"
 
 # ============================================================
-#  KV NAMESPACE — Product + Stock cache (3-minute TTL)
+#  KV NAMESPACE + R2 BUCKET (OPTIONAL — added when ready)
 # ============================================================
-#  Caches the Google Apps Script response so the site loads instantly
-#  for returning visitors. Falls back to Apps Script on cache miss.
 #
-#  To create: npx wrangler kv namespace create CATALOG_KV
-#  Then paste the returned ID below.
+#  The site works WITHOUT these bindings — it falls back to
+#  direct Google Apps Script fetches + Cloudinary image uploads.
+#
+#  When you're ready to enable KV caching and R2 image storage,
+#  create the resources and UNCOMMENT the sections below.
+#
+#  --- KV (product + stock cache, 3-min TTL) ---
+#  Create:  npx wrangler kv namespace create CATALOG_KV
+#  Preview: npx wrangler kv namespace create CATALOG_KV --preview
+#  Then paste the real IDs (NOT placeholders!) and uncomment:
+#
+#  [[kv_namespaces]]
+#  binding = "CATALOG_KV"
+#  id = "abc123def456..."        # real id from the create command
+#  preview_id = "zyx987wvu654..." # real preview_id from --preview command
+#
+#  --- R2 (image storage, 10 GB free tier) ---
+#  Create:  npx wrangler r2 bucket create soumdeco-images
+#  Then uncomment:
+#
+#  [[r2_buckets]]
+#  binding = "PRODUCT_IMAGES"
+#  bucket_name = "soumdeco-images"
+#
+#  IMPORTANT: Cloudflare rejects placeholder IDs like "YOUR_KV_NAMESPACE_ID_HERE"
+#  at deploy time. Only add the [[kv_namespaces]] section AFTER you have real IDs.
+#  The R2 section doesn't need IDs (just the bucket name) so it's safe to add anytime.
+#
+#  All code uses optional chaining (env?.CATALOG_KV) so missing bindings
+#  are handled gracefully — the site works without them.
 # ============================================================
-[[kv_namespaces]]
-binding = "CATALOG_KV"
-id = "YOUR_KV_NAMESPACE_ID_HERE"
-preview_id = "YOUR_KV_PREVIEW_NAMESPACE_ID_HERE"
 
 # ============================================================
-#  R2 BUCKET — Image storage (replaces Cloudinary long-term)
-# ============================================================
-#  Stores product images uploaded by the admin.
-#  10 GB free tier = ~9,500 products × 5 images × 200 KB.
-#  The site falls back to Cloudinary if R2 is not configured.
-#
-#  To create: npx wrangler r2 bucket create soumdeco-images
-# ============================================================
-[[r2_buckets]]
-binding = "PRODUCT_IMAGES"
-bucket_name = "soumdeco-images"
-
-# ============================================================
-#  ENVIRONMENT VARIABLES (set via Cloudflare dashboard or CLI)
+#  ENVIRONMENT VARIABLES (set via Cloudflare dashboard)
 # ============================================================
 #  These are set in the Cloudflare Pages dashboard under
 #  Settings → Environment variables, NOT in this file.
 #
-#  Required:
+#  Required (already set):
 #    NEXT_PUBLIC_SHEET_URL              — Google Apps Script URL
-#    NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME  — "anhvhy4j" (fallback if R2 not set up)
+#    NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME  — "anhvhy4j"
 #    NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET — "soumdeco"
 #
-#  Optional (for R2 image uploads):
+#  Optional (for R2 image uploads, added later):
 #    R2_PUBLIC_BASE_URL — e.g. "https://images.soumdeco.pages.dev"
-#                         (public URL prefix for R2 images)
 # ============================================================
