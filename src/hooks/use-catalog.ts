@@ -24,6 +24,7 @@ import {
   clientResetProducts,
   clientUploadImages,
 } from "@/lib/client-sheet";
+import { getLocalPathSync } from "@/lib/image-manifest";
 import {
   joinImageStrings,
   joinVariations,
@@ -183,6 +184,23 @@ export function useCatalog() {
         setProducts(sorted);
       }
     }).catch(() => {});
+
+    // Load the image manifest, then RE-APPLY rewriteImageUrls to all products.
+    // On initial render, the manifest isn't loaded yet, so rewriteImageUrls
+    // returns Cloudinary URLs for everything (cold tier). Once the manifest
+    // loads (a few hundred ms later), we re-apply the rewrite to promote
+    // hot-tier images to local paths.
+    import("@/lib/image-manifest")
+      .then(({ loadImageManifest }) => loadImageManifest())
+      .then(() => {
+        // Manifest is now cached. Re-apply the URL rewriting to all products.
+        const current = productsRef.current;
+        if (current.length > 0) {
+          const rewritten = current.map(rewriteImageUrls);
+          setProducts(rewritten);
+        }
+      })
+      .catch(() => {});
 
     // Retry any failed orders from the retry queue (background, non-blocking).
     // This runs on every page visit — if the previous order failed to submit,
@@ -490,46 +508,43 @@ function fixCategoryTypos(p: Product): Product {
 }
 
 /**
- * Rewrite Cloudinary image URLs to local Cloudflare Pages paths.
+ * Rewrite Cloudinary image URLs to local Cloudflare Pages paths (HOT TIER).
  *
- * WHY: Cloudinary's free tier has a 25 GB/month bandwidth limit. For a
- * spike of 50K visitors/day, that limit would be hit in ~4 hours.
- * Cloudflare Pages has UNLIMITED bandwidth on the free tier.
+ * ADAPTIVE HOT/COLD TIER STRATEGY:
+ *   HOT TIER (Cloudflare Pages, unlimited bandwidth, 20K file limit):
+ *     - Images downloaded to /public/images/products/
+ *     - Listed in /public/image-manifest.json
+ *     - Served from local paths (/images/products/...)
  *
- * This function rewrites URLs like:
- *   https://res.cloudinary.com/anhvhy4j/image/upload/v1234567890/nouveau-abc-1.jpg
- * to:
- *   /images/products/nouveau-abc-1.jpg
+ *   COLD TIER (Cloudinary, 25 GB bandwidth/mo):
+ *     - Images NOT in the manifest stay as Cloudinary URLs
+ *     - Served with optimization (c_limit,w_800,q_auto,f_auto)
+ *     - Only used for less-viewed products (lower bandwidth)
  *
- * The local files are pre-downloaded and stored in /public/images/products/.
+ * This function uses the manifest to decide:
+ *   - If the Cloudinary filename is in the manifest → rewrite to local path
+ *   - If NOT in the manifest → keep Cloudinary URL (cold tier)
  *
- * NEW admin-uploaded images (uploaded after this migration) won't have
- * local files yet — they stay on Cloudinary until the next sync.
- * The function checks if a local file exists (via a manifest) and only
- * rewrites URLs that have a local copy.
- *
- * For URLs that DON'T have a local file (new uploads), they stay as
- * Cloudinary URLs. This is fine — new uploads are infrequent, so their
- * bandwidth contribution is minimal even during a spike.
+ * The manifest is built at deploy time by scripts/build-image-manifest.py.
+ * It's loaded asynchronously on app startup (preloadImageManifest in layout.tsx).
+ * Until the manifest loads, ALL Cloudinary URLs stay as-is (cold tier).
  */
 function rewriteImageUrls(p: Product): Product {
-  // Only rewrite if the image is on Cloudinary AND matches the known pattern.
-  // Cloudinary URL format: https://res.cloudinary.com/{cloud}/image/upload/{transform}/{version}/{filename}
-  // We extract the {filename} part and map it to /images/products/{filename}
-
   const CLOUDINARY_RE = /^https?:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/(?:[^/]+\/)?(?:v\d+\/)?(.+)$/;
 
   const rewriteOne = (url: string): string => {
     if (!url || typeof url !== "string") return url;
     const match = url.match(CLOUDINARY_RE);
     if (!match) return url; // not a Cloudinary URL — leave as-is
-    const filename = match[1];
-    // Only rewrite to local path. If the file doesn't exist locally,
-    // the browser will get a 404 and the ProductImage component should
-    // fall back to the Cloudinary URL (handled in product-image.tsx).
-    // For now, we rewrite all Cloudinary URLs to local — the pre-downloaded
-    // images cover all existing products.
-    return `/images/products/${filename}`;
+
+    // Check if this image is in the local manifest (hot tier).
+    // getLocalPathSync returns null if the manifest hasn't loaded yet OR
+    // if the file isn't local. In both cases, we keep the Cloudinary URL.
+    const localPath = getLocalPathSync(url);
+    if (localPath) {
+      return localPath; // hot tier — serve from Cloudflare Pages
+    }
+    return url; // cold tier — serve from Cloudinary
   };
 
   const newImage = rewriteOne(p.image);
