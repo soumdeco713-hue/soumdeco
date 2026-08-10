@@ -24,6 +24,7 @@ import {
   clientResetProducts,
   clientUploadImages,
 } from "@/lib/client-sheet";
+import { getLocalPathSync, loadImageManifest } from "@/lib/image-manifest";
 import {
   joinImageStrings,
   joinVariations,
@@ -182,9 +183,19 @@ export function useCatalog() {
       }
     }).catch(() => {});
 
-    // Note: Image optimization now happens at render time in ProductImage
-    // (c_limit,w_400 for cards, c_limit,w_800 for full-size). No manifest
-    // or URL rewriting needed in the catalog — stores raw Cloudinary URLs.
+    // Load the image manifest, then RE-APPLY optimizeCloudinaryUrls.
+    // On initial render, the manifest isn't loaded yet, so URLs stay as
+    // Cloudinary (which works but throttles under load). Once the manifest
+    // loads (~200ms later), we rewrite to local Paths paths (unlimited bandwidth).
+    loadImageManifest()
+      .then(() => {
+        const current = productsRef.current;
+        if (current.length > 0) {
+          const rewritten = current.map(optimizeCloudinaryUrls);
+          setProducts(rewritten);
+        }
+      })
+      .catch(() => {});
 
     // Retry any failed orders from the retry queue (background, non-blocking).
     // This runs on every page visit — if the previous order failed to submit,
@@ -492,19 +503,54 @@ function fixCategoryTypos(p: Product): Product {
 }
 
 /**
- * No URL rewriting needed — images stay on Cloudinary.
- * The ProductImage component handles Cloudinary optimization at render time
- * (c_limit,w_400 for cards, c_limit,w_800 for full-size) based on the
- * `size` prop. This avoids double-transformation and keeps the catalog
- * data clean (stores raw Cloudinary URLs, not pre-transformed ones).
+ * Rewrite Cloudinary URLs to LOCAL Cloudflare Pages paths.
  *
- * Benefits:
- * - Admin sees raw URLs in the sheet (easy to debug)
- * - Frontend picks the right size per context (card vs full)
- * - No data migration needed if we change optimization params later
+ * WHY: Cloudinary throttles when 80+ images load simultaneously (causing
+ * the "images don't show" bug). Cloudflare Pages has unlimited bandwidth
+ * AND unlimited requests — zero throttling.
+ *
+ * HOW: The image manifest (/public/image-manifest.json) lists all local
+ * files. We check if a Cloudinary URL's filename is in the manifest.
+ * If yes → rewrite to /images/products/{filename} (served from Pages).
+ * If no  → keep Cloudinary URL (image not yet synced, Cloudinary fallback).
+ *
+ * NEW uploads: Go to Cloudinary first (instant display). After the daily
+ * sync runs (GitHub Actions), they're downloaded to /public/images/products/
+ * and the manifest is rebuilt. On next deploy, they're served from Pages.
+ *
+ * This is the BULLETPROOF strategy:
+ *  - All existing images: served from Pages (unlimited, no throttling)
+ *  - New uploads: served from Cloudinary (instant, until next sync)
+ *  - Cloudinary bandwidth: near zero (only new uploads use it)
+ *  - Pages bandwidth: unlimited (handles 800K visits/month)
  */
 function optimizeCloudinaryUrls(p: Product): Product {
-  // No-op — optimization happens at render time in ProductImage
+  const CLOUDINARY_RE = /^https?:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/(?:[^/]+\/)?(?:v\d+\/)?(.+)$/;
+
+  const rewriteOne = (url: string): string => {
+    if (!url || typeof url !== "string") return url;
+    if (!url.includes("res.cloudinary.com")) return url;
+    const match = url.match(CLOUDINARY_RE);
+    if (!match) return url;
+
+    // Check if this image is in the local manifest (hot tier)
+    const filename = match[1];
+    const localPath = getLocalPathSync(url);
+    if (localPath) {
+      return localPath; // serve from Cloudflare Pages (unlimited bandwidth)
+    }
+    return url; // serve from Cloudinary (not yet synced)
+  };
+
+  const newImage = rewriteOne(p.image);
+  let newImages: string[] | undefined = p.images;
+  if (Array.isArray(p.images)) {
+    newImages = p.images.map(rewriteOne);
+  }
+
+  if (newImage !== p.image || newImages !== p.images) {
+    return { ...p, image: newImage, images: newImages };
+  }
   return p;
 }
 

@@ -23,27 +23,23 @@ type ProductImageProps = {
 /**
  * Smart Cloudinary URL optimization.
  *
- * TWO size variants to minimize bandwidth:
+ * For LOCAL paths (/images/products/...): returned as-is (already optimized
+ * on the repo — served from Cloudflare Pages with unlimited bandwidth).
  *
- *   "card" (default) → c_limit,w_400,q_auto,f_auto
- *     - 400px wide, ~10 KB each
- *     - Used for product cards, carousels, thumbnails
- *     - 50% smaller than w_800 → 50% less bandwidth
+ * For CLOUDINARY URLs: apply transformation params:
+ *   "card" (default) → c_limit,w_400,q_auto,f_auto (~10 KB)
+ *   "full" → c_limit,w_800,q_auto,f_auto (~21 KB)
  *
- *   "full" → c_limit,w_800,q_auto,f_auto
- *     - 800px wide, ~21 KB each
- *     - Used for product detail page (full-size gallery)
- *     - Sharp on Retina screens
- *
- * Why c_limit (not w_400 alone)? Plain w_400 FORCES the image to 400px
- * even if the original is smaller — Cloudinary upscales it (bigger file).
- * c_limit,w_400 means "max 400px, never upscale" — pure savings.
- *
- * Non-Cloudinary URLs (data:, local paths, other hosts) are returned as-is.
+ * Why c_limit? Plain w_400 FORCES upscaling. c_limit,w_400 = "max 400px,
+ * never upscale" — pure savings.
  */
 function optimizeImageUrl(src: string, size: "card" | "full" = "card"): string {
+  // Local paths (Cloudflare Pages) — serve as-is, no transformation needed
+  if (src.startsWith("/images/products/") || src.startsWith("/")) {
+    return src;
+  }
+  // Cloudinary URLs — apply optimization
   if (src.includes("res.cloudinary.com") && src.includes("/image/upload/")) {
-    // Don't double-transform (if URL already has transformations, leave it)
     if (!src.includes("c_limit") && !src.includes("q_auto") && !src.includes("f_auto")) {
       const width = size === "full" ? "w_800" : "w_400";
       return src.replace("/image/upload/", `/image/upload/c_limit,${width},q_auto,f_auto/`);
