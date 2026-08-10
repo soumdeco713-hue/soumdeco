@@ -3,7 +3,6 @@ import { Inter, Cormorant_Garamond, Noto_Naskh_Arabic, Jost } from "next/font/go
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { BRAND } from "@/lib/brand-config";
-import { ManifestPreloader } from "@/components/site/manifest-preloader";
 
 const jost = Jost({
   variable: "--font-jost",
@@ -86,7 +85,6 @@ export default function RootLayout({
       <body
         className={`${jost.variable} ${cormorant.variable} ${inter.variable} ${arabic.variable} font-arabic antialiased bg-background text-foreground`}
       >
-        <ManifestPreloader />
         {children}
         <Toaster
           position="top-center"

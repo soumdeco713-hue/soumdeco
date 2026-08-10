@@ -198,6 +198,7 @@ export function ProductPage({
                   alt={product.name}
                   fit="contain"
                   priority
+                  size="full"
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center font-arabic text-sm text-gray-light">

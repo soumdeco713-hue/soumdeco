@@ -24,7 +24,6 @@ import {
   clientResetProducts,
   clientUploadImages,
 } from "@/lib/client-sheet";
-import { getLocalPathSync } from "@/lib/image-manifest";
 import {
   joinImageStrings,
   joinVariations,
@@ -98,7 +97,7 @@ export function useCatalog() {
       const cached = await loadCatalogAsync();
       if (cached.length > 0) {
         // Apply URL rewriting + typo fixes to cached data
-        let sorted = cached.map(rewriteImageUrls).map(fixCategoryTypos);
+        let sorted = cached.map(optimizeCloudinaryUrls).map(fixCategoryTypos);
         sorted.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
         setProducts(sorted);
         setLoading(false);
@@ -115,7 +114,7 @@ export function useCatalog() {
       // Network error — keep current state, but if empty, use cache/seed
       const cachedSync = loadCatalog();
       if (cachedSync.length > 0) {
-        const sorted = [...cachedSync].map(rewriteImageUrls).map(fixCategoryTypos);
+        const sorted = [...cachedSync].map(optimizeCloudinaryUrls).map(fixCategoryTypos);
         sorted.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
         setProducts(sorted);
       } else {
@@ -153,7 +152,7 @@ export function useCatalog() {
     }
     // Apply URL rewriting to cached products too — the cache may have
     // old Cloudinary URLs from before the local-image migration.
-    cached = cached.map(rewriteImageUrls);
+    cached = cached.map(optimizeCloudinaryUrls);
     cached = cached.map(fixCategoryTypos);
     // Sort by sortOrder (lower first)
     const sorted = [...cached];
@@ -177,28 +176,15 @@ export function useCatalog() {
       // We check productsRef.current (latest state) instead of the stale `cached`
       const currentCount = productsRef.current.length;
       if (asyncCached.length > currentCount && currentCount <= cached.length) {
-        let sorted = asyncCached.map(rewriteImageUrls).map(fixCategoryTypos);
+        let sorted = asyncCached.map(optimizeCloudinaryUrls).map(fixCategoryTypos);
         sorted.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
         setProducts(sorted);
       }
     }).catch(() => {});
 
-    // Load the image manifest, then RE-APPLY rewriteImageUrls to all products.
-    // On initial render, the manifest isn't loaded yet, so rewriteImageUrls
-    // returns Cloudinary URLs for everything (cold tier). Once the manifest
-    // loads (a few hundred ms later), we re-apply the rewrite to promote
-    // hot-tier images to local paths.
-    import("@/lib/image-manifest")
-      .then(({ loadImageManifest }) => loadImageManifest())
-      .then(() => {
-        // Manifest is now cached. Re-apply the URL rewriting to all products.
-        const current = productsRef.current;
-        if (current.length > 0) {
-          const rewritten = current.map(rewriteImageUrls);
-          setProducts(rewritten);
-        }
-      })
-      .catch(() => {});
+    // Note: Image optimization now happens at render time in ProductImage
+    // (c_limit,w_400 for cards, c_limit,w_800 for full-size). No manifest
+    // or URL rewriting needed in the catalog — stores raw Cloudinary URLs.
 
     // Retry any failed orders from the retry queue (background, non-blocking).
     // This runs on every page visit — if the previous order failed to submit,
@@ -506,49 +492,19 @@ function fixCategoryTypos(p: Product): Product {
 }
 
 /**
- * Optimize Cloudinary image URLs for delivery.
+ * No URL rewriting needed — images stay on Cloudinary.
+ * The ProductImage component handles Cloudinary optimization at render time
+ * (c_limit,w_400 for cards, c_limit,w_800 for full-size) based on the
+ * `size` prop. This avoids double-transformation and keeps the catalog
+ * data clean (stores raw Cloudinary URLs, not pre-transformed ones).
  *
- * STRATEGY: Images stay on Cloudinary (not copied to Cloudflare Pages).
- * This avoids consuming Cloudflare's 500 build/month limit (each image
- * change would require a rebuild).
- *
- * Cloudinary's free tier: 25 GB bandwidth/month.
- * With optimized images (~10 KB each), that's ~2.5M requests/month
- * = ~5,500 visitors/day (15 images each). Plenty for a home decor store.
- *
- * Optimization applied (c_limit,w_400,q_auto,f_auto):
- *   c_limit,w_400 — cap width at 400px (never upscale). Product cards are
- *                   small — 400px is sharp on Retina. Smaller = less bandwidth.
- *   q_auto        — Cloudinary auto-picks optimal quality (70-80%)
- *   f_auto        — Cloudinary auto-selects format (WebP/AVIF on modern browsers)
- *
- * Result: ~10 KB per image instead of ~21 KB (50% bandwidth savings).
+ * Benefits:
+ * - Admin sees raw URLs in the sheet (easy to debug)
+ * - Frontend picks the right size per context (card vs full)
+ * - No data migration needed if we change optimization params later
  */
 function optimizeCloudinaryUrls(p: Product): Product {
-  const CLOUDINARY_RE = /^https?:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/(?:[^/]+\/)?(?:v\d+\/)?(.+)$/;
-
-  const optimizeOne = (url: string): string => {
-    if (!url || typeof url !== "string") return url;
-    if (!url.includes("res.cloudinary.com") || !url.includes("/image/upload/")) {
-      return url; // not a Cloudinary URL — leave as-is
-    }
-    // Don't double-transform
-    if (url.includes("c_limit") || url.includes("q_auto") || url.includes("f_auto")) {
-      return url;
-    }
-    // Apply optimization: c_limit,w_400,q_auto,f_auto
-    return url.replace("/image/upload/", "/image/upload/c_limit,w_400,q_auto,f_auto/");
-  };
-
-  const newImage = optimizeOne(p.image);
-  let newImages: string[] | undefined = p.images;
-  if (Array.isArray(p.images)) {
-    newImages = p.images.map(optimizeOne);
-  }
-
-  if (newImage !== p.image || newImages !== p.images) {
-    return { ...p, image: newImage, images: newImages };
-  }
+  // No-op — optimization happens at render time in ProductImage
   return p;
 }
 

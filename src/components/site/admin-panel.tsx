@@ -49,7 +49,7 @@ const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
 //   - maxSize: 850px (sharp on all screens, ~70KB per image)
 //   - quality: 0.85 (visually identical to 0.93, half the size)
 //   - Format: WebP (30% smaller than JPEG)
-//   - Max 8 photos per product
+//   - Max 5 photos per product
 //   - PNG transparency preserved when source is PNG
 async function resizeImage(
   file: File,
@@ -226,8 +226,9 @@ function EditForm({
   }, [product]);
 
   const photos = getProductImages(draft);
-  // Allow up to 5 high-quality photos per product.
-  const MAX_PHOTOS = 8;
+  // Maximum 5 images per product (enforced — keeps Cloudflare Pages file
+  // count manageable: 9,500 products × 5 images = 47,500 files max)
+  const MAX_PHOTOS = 5;
 
   const syncPhotos = (next: string[]) => {
     const cleaned = next.filter((s) => s && s.trim() !== "");

@@ -37,8 +37,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Limit to 8 images max (matches admin panel MAX_PHOTOS)
-    const toUpload = images.slice(0, 8);
+    // Limit to 5 images max (matches admin panel MAX_PHOTOS)
+    const toUpload = images.slice(0, 5);
 
     const urls = await uploadImagesToR2(env, toUpload, productId);
 
