@@ -1,0 +1,28 @@
+# Cloudflare Pages headers — aggressive cache busting for HTML
+# This forces the browser to always fetch the latest HTML (never serve stale)
+# while still caching static assets (JS, CSS, images) for performance.
+
+# HTML files — NEVER cache (always fetch latest)
+/*
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+# Static assets — cache for 1 year (immutable, hashed filenames)
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Images — cache for 1 day (re-validate)
+/images/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+# Manifest + seed — cache for 1 hour (re-validate)
+/image-manifest.json
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
+
+/stock-seed.json
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
+
+# Logo — cache for 1 day
+/logo.jpg
+  Cache-Control: public, max-age=86400

@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { BRAND } from "@/lib/brand-config";
 import { ManifestPreloader } from "@/components/site/manifest-preloader";
 import { HealthMonitorStarter } from "@/components/site/health-monitor-starter";
+import { ServiceWorkerRegistration } from "@/components/site/service-worker-registration";
 
 const jost = Jost({
   variable: "--font-jost",
@@ -89,6 +90,7 @@ export default function RootLayout({
       >
         <ManifestPreloader />
         <HealthMonitorStarter />
+        <ServiceWorkerRegistration />
         {children}
         <Toaster
           position="top-center"
