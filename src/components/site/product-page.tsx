@@ -211,8 +211,8 @@ export function ProductPage({
               )}
 
               {rupture && (
-                <div className="absolute inset-0 flex items-center justify-center bg-night/65 backdrop-blur-sm">
-                  <span className="rounded-full bg-terracotta px-5 py-2 font-arabic text-sm font-semibold text-white neon-text-magenta">
+                <div className="absolute inset-0 flex items-center justify-center bg-white/25 backdrop-blur-[3px]">
+                  <span className="rounded-full bg-terracotta px-5 py-2 font-arabic text-sm font-semibold text-white shadow-md">
                     نفدت الكمية
                   </span>
                 </div>

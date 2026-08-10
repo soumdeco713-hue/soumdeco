@@ -133,8 +133,8 @@ export function FeaturedCarousel({
 
                 {/* Rupture overlay */}
                 {rupture && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-ink/50">
-                    <span className="rounded-full bg-charcoal px-3 py-1 text-xs font-semibold text-cream">
+                  <div className="absolute inset-0 flex items-center justify-center bg-white/25 backdrop-blur-[3px]">
+                    <span className="rounded-full bg-terracotta px-3 py-1 text-xs font-semibold text-white shadow-md">
                       نفدت الكمية
                     </span>
                   </div>

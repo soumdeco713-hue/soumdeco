@@ -51,7 +51,7 @@ export function ProductCard({ product, onClick, rupture, lowStock, index = 0 }: 
           </span>
         )}
         {rupture && (
-          <div className="absolute inset-0 flex items-center justify-center bg-white/70 backdrop-blur-sm">
+          <div className="absolute inset-0 flex items-center justify-center bg-white/25 backdrop-blur-[3px]">
             <span className="rounded-full bg-terracotta px-3 py-1 font-arabic text-xs font-semibold text-white shadow-md">
               نفدت الكمية
             </span>
