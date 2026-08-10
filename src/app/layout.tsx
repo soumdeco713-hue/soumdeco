@@ -5,7 +5,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { BRAND } from "@/lib/brand-config";
 import { ManifestPreloader } from "@/components/site/manifest-preloader";
 import { HealthMonitorStarter } from "@/components/site/health-monitor-starter";
-import { ServiceWorkerRegistration } from "@/components/site/service-worker-registration";
+import { LoadingFallback } from "@/components/site/loading-fallback";
 
 const jost = Jost({
   variable: "--font-jost",
@@ -84,13 +84,15 @@ export default function RootLayout({
         <link rel="preconnect" href="https://res.cloudinary.com" />
         <link rel="dns-prefetch" href="https://script.google.com" />
         <link rel="preconnect" href="https://script.google.com" />
+        {/* Unregister old service worker (was causing "stuck at loading") */}
+        <script src="/unregister-sw.js" async></script>
       </head>
       <body
         className={`${jost.variable} ${cormorant.variable} ${inter.variable} ${arabic.variable} font-arabic antialiased bg-background text-foreground`}
       >
         <ManifestPreloader />
         <HealthMonitorStarter />
-        <ServiceWorkerRegistration />
+        <LoadingFallback />
         {children}
         <Toaster
           position="top-center"

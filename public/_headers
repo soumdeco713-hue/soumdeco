@@ -1,8 +1,8 @@
-# Cloudflare Pages headers — aggressive cache busting for HTML
-# This forces the browser to always fetch the latest HTML (never serve stale)
-# while still caching static assets (JS, CSS, images) for performance.
+# Cloudflare Pages headers — prevents stale cache on all browsers
+# This works WITHOUT a service worker (compatible with all browsers)
 
 # HTML files — NEVER cache (always fetch latest)
+# This is the KEY fix: ensures users always get the latest HTML
 /*
   Cache-Control: no-cache, no-store, must-revalidate
   Pragma: no-cache
@@ -26,3 +26,7 @@
 # Logo — cache for 1 day
 /logo.jpg
   Cache-Control: public, max-age=86400
+
+# Service worker un-registration script — NEVER cache
+/unregister-sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
