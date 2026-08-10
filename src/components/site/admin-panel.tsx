@@ -775,28 +775,17 @@ function EditForm({
                     key={i}
                     className="flex flex-wrap items-center gap-2 rounded-lg border border-neon-magenta/20 bg-neon-magenta/5 p-2"
                   >
-                    <select
+                    <input
+                      type="number"
+                      min={1}
                       value={t.qty}
-                      onChange={(e) => updateTier(i, "qty", Number(e.target.value))}
+                      onChange={(e) => updateTier(i, "qty", Math.max(1, Number(e.target.value) || 1))}
                       className={`${inputClass} flex-shrink-0`}
-                      style={{ width: "90px" }}
+                      style={{ width: "70px" }}
                       aria-label="الكمية"
-                    >
-                      <option value={1}>1 قطعة</option>
-                      <option value={2}>2 قطعة</option>
-                      <option value={3}>3 قطع</option>
-                      <option value={4}>4 قطع</option>
-                      <option value={5}>5 قطع</option>
-                      <option value={6}>6 قطع</option>
-                      <option value={7}>7 قطع</option>
-                      <option value={8}>8 قطع</option>
-                      <option value={9}>9 قطع</option>
-                      <option value={10}>10 قطع</option>
-                      <option value={15}>15 قطعة</option>
-                      <option value={20}>20 قطعة</option>
-                      <option value={50}>50 قطعة</option>
-                      <option value={100}>100 قطعة</option>
-                    </select>
+                      placeholder="الكمية"
+                    />
+                    <span className="font-arabic text-xs text-gray-light">قطعة</span>
                     <select
                       value={t.freeShipping}
                       onChange={(e) =>

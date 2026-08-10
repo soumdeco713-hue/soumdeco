@@ -47,8 +47,8 @@ export const BRAND = {
 
   /** localStorage keys — fresh namespace for the new brand. */
   storage: {
-    catalog: "soumdeco_catalog_v1",
-    cart: "soumdeco_cart_v1",
+    catalog: "soumdeco_catalog_v2",
+    cart: "soumdeco_cart_v2",
     adminAuth: "soumdeco_admin_authed",
     freeShipping: "soumdeco_free_shipping_v1",
   },

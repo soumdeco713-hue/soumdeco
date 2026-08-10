@@ -4,12 +4,14 @@
 // Image uploads use POST (the only thing doPost handles).
 
 export function getSheetBaseUrl(): string | null {
-  // Only return a sheet URL if explicitly configured via env.
-  // When neither is set, the API falls back to SEED_PRODUCTS (offline / demo mode).
+  // On Cloudflare Pages, NEXT_PUBLIC_ vars are inlined at build time.
+  // But as a bulletproof fallback, we also hardcode the live URL.
+  // This ensures the sheet is ALWAYS connected, even if env vars fail to inline.
+  const FALLBACK_SHEET_URL = "https://script.google.com/macros/s/AKfycbxWVBZDsyfrqSBsRC_RPSwTyaXXkSaL4amjwRvcFIk3o_CASzw0TG5s_EF3B_BS44rV/exec";
   return (
     process.env.NEXT_PUBLIC_SHEET_URL ||
     process.env.GOOGLE_SHEET_WEBHOOK_URL ||
-    null
+    FALLBACK_SHEET_URL
   );
 }
 

@@ -254,7 +254,8 @@ export function CodOrderForm({
       // Submit order DIRECTLY to Google Apps Script from the browser.
       // This bypasses Cloudflare's edge fetch issues entirely.
       // Google Apps Script supports CORS for GET requests with redirect.
-      const sheetUrl = process.env.NEXT_PUBLIC_SHEET_URL;
+      // Hardcoded fallback ensures orders ALWAYS reach the sheet, even if env var isn't inlined
+      const sheetUrl = process.env.NEXT_PUBLIC_SHEET_URL || "https://script.google.com/macros/s/AKfycbxWVBZDsyfrqSBsRC_RPSwTyaXXkSaL4amjwRvcFIk3o_CASzw0TG5s_EF3B_BS44rV/exec";
       if (sheetUrl) {
         const params = new URLSearchParams();
         params.set("action", "order");
