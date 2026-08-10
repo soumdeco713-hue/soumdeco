@@ -30,26 +30,47 @@ const SESSION_KEY = BRAND.storage.adminAuth;
 
 type AdminPanelProps = {
   products: Product[];
-  onUpsert: (product: Product) => void;
-  onDelete: (id: string) => void;
+  onUpsert: (product: Product) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
   onAddBlank: () => Product;
   onMove: (id: string, direction: "up" | "down") => void;
-  onReset: () => void;
+  onReset: () => Promise<void>;
   onClose: () => void;
+  syncing?: boolean;
 };
+
+// Maximum file size for admin uploads (15MB — anything larger freezes the browser
+// during canvas resize). 15MB is generous enough for high-res phone photos.
+const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
 
 // Resize image for optimal quality + storage.
 // Settings (optimized for Cloudflare R2 — 9500 products in 10GB):
 //   - maxSize: 850px (sharp on all screens, ~70KB per image)
 //   - quality: 0.85 (visually identical to 0.93, half the size)
 //   - Format: WebP (30% smaller than JPEG)
-//   - Max 5 photos per product
+//   - Max 8 photos per product
 //   - PNG transparency preserved when source is PNG
 async function resizeImage(
   file: File,
   maxSize = 850,
   budget = 200_000,
 ): Promise<string> {
+  // Pre-flight: reject files that are too large (prevents browser freeze)
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    throw new Error(
+      `الصورة كبيرة جداً (${Math.round(file.size / 1024 / 1024)} ميجابايت). الحد الأقصى 15 ميجابايت.`,
+    );
+  }
+
+  // Validate file type — only allow real image types
+  if (!file.type.startsWith("image/")) {
+    throw new Error("الملف ليس صورة صالحة");
+  }
+  // Reject SVG (no intrinsic size, can't be reliably rendered to canvas)
+  if (file.type === "image/svg+xml") {
+    throw new Error("صيغة SVG غير مدعومة. يرجى استخدام JPG أو PNG أو WebP");
+  }
+
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -105,7 +126,7 @@ async function resizeImage(
         }
         resolve(dataUrl);
       };
-      img.onerror = () => reject(new Error("image load failed"));
+      img.onerror = () => reject(new Error("image load failed — file may be corrupted"));
       img.src = reader.result as string;
     };
     reader.onerror = () => reject(new Error("file read failed"));
@@ -190,11 +211,12 @@ function EditForm({
 }: {
   product: Product;
   categories: string[];
-  onSave: (p: Product) => void;
+  onSave: (p: Product) => Promise<void>;
   onCancel: () => void;
 }) {
   const [draft, setDraft] = useState<Product>(product);
   const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -233,22 +255,34 @@ function EditForm({
     setUploading(true);
     try {
       const newPhotos: string[] = [];
+      const errors: string[] = [];
       for (const f of toProcess) {
         try {
           const dataUrl = await resizeImage(f, 850, 200_000);
           newPhotos.push(dataUrl);
-        } catch {
-          // skip failed image
+        } catch (err) {
+          // Capture the error message — show it to the admin
+          const msg = err instanceof Error ? err.message : "فشل في معالجة الصورة";
+          errors.push(`${f.name}: ${msg}`);
+          console.error("[resizeImage] failed for", f.name, err);
         }
       }
+      // Show error messages for failed images
+      if (errors.length > 0) {
+        toast.error(errors[0]); // show the first error
+      }
       if (newPhotos.length === 0) {
-        toast.error("فشل في معالجة الصور.");
+        if (errors.length === 0) {
+          toast.error("فشل في معالجة الصور.");
+        }
         return;
       }
       syncPhotos([...photos, ...newPhotos]);
-      toast.success(
-        `تمت إضافة ${newPhotos.length} صورة${newPhotos.length > 1 ? " بنجاح" : " بنجاح"}.`,
-      );
+      if (errors.length === 0) {
+        toast.success(
+          `تمت إضافة ${newPhotos.length} صورة${newPhotos.length > 1 ? " بنجاح" : " بنجاح"}.`,
+        );
+      }
     } finally {
       setUploading(false);
     }
@@ -353,13 +387,34 @@ function EditForm({
     setDraft({ ...draft, quantityTiers: newTiers });
   };
 
-  const save = () => {
+  const save = async () => {
+    if (saving) return; // prevent double-click
     const nameStr = String(draft.name ?? "").trim();
     if (!nameStr) {
       toast.error("الاسم مطلوب.");
       return;
     }
-    onSave(draft);
+    // Validate price if provided — must be a valid non-negative number
+    if (draft.price !== null && draft.price !== undefined) {
+      if (typeof draft.price !== "number" || isNaN(draft.price) || draft.price < 0) {
+        toast.error("السعر غير صالح.");
+        return;
+      }
+    }
+    // Check that at least one image is present (products without images are
+    // hidden by the storefront's validProducts filter)
+    if (!draft.image && (!draft.images || draft.images.length === 0)) {
+      toast.error("الصورة مطلوبة — المنتج بدون صورة لن يظهر في الموقع.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(draft);
+    } catch {
+      // error toast is shown by the parent handleSave
+    } finally {
+      setSaving(false);
+    }
   };
 
   const inputClass =
@@ -903,15 +958,28 @@ function EditForm({
           <button
             type="button"
             onClick={save}
-            className="flex flex-1 items-center justify-center gap-2 rounded-full bg-emerald px-4 py-2.5 text-sm font-semibold text-night hover:bg-emerald-bright"
+            disabled={saving || uploading}
+            className="flex flex-1 items-center justify-center gap-2 rounded-full bg-emerald px-4 py-2.5 text-sm font-semibold text-night hover:bg-emerald-bright disabled:cursor-not-allowed disabled:opacity-60"
             style={{ boxShadow: "0 0 18px rgba(42, 125, 91, 0.45)" }}
           >
-            <Save className="h-4 w-4" />
-            حفظ
+            {saving ? (
+              <>
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-night/30 border-t-night" />
+                جاري الحفظ...
+              </>
+            ) : uploading ? (
+              "جاري رفع الصور..."
+            ) : (
+              <>
+                <Save className="h-4 w-4" />
+                حفظ
+              </>
+            )}
           </button>
           <button
             type="button"
             onClick={onCancel}
+            disabled={saving}
             className="rounded-full border border-clay/40 px-5 py-2.5 text-sm font-semibold text-charcoal hover:bg-emerald/10"
           >
             إلغاء
@@ -929,6 +997,7 @@ export function AdminPanel({
   onAddBlank,
   onMove,
   onClose,
+  syncing = false,
 }: AdminPanelProps) {
   const [authed, setAuthed] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
@@ -949,10 +1018,21 @@ export function AdminPanel({
     ),
   );
 
-  const handleSave = (p: Product) => {
-    onUpsert(p);
-    setEditing(null);
-    toast.success("تم حفظ المنتج");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async (p: Product) => {
+    if (saving) return; // prevent double-click
+    setSaving(true);
+    try {
+      await onUpsert(p);
+      setEditing(null);
+      toast.success("تم حفظ المنتج");
+    } catch (err) {
+      console.error("[admin handleSave] failed:", err);
+      toast.error("فشل الحفظ — تحقق من الاتصال وحاول مرة أخرى");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleAddBlank = () => {
@@ -960,12 +1040,17 @@ export function AdminPanel({
     setEditing(np);
   };
 
-  const handleDelete = (p: Product) => {
+  const handleDelete = async (p: Product) => {
     if (
       window.confirm(`حذف "${p.name || "هذا المنتج"}" ؟`)
     ) {
-      onDelete(p.id);
-      toast.success("تم حذف المنتج");
+      try {
+        await onDelete(p.id);
+        toast.success("تم حذف المنتج");
+      } catch (err) {
+        console.error("[admin handleDelete] failed:", err);
+        toast.error("فشل الحذف — تحقق من الاتصال");
+      }
     }
   };
 
@@ -982,7 +1067,25 @@ export function AdminPanel({
             <h1 className="font-arabic text-xl font-bold text-charcoal">
               لوحة التحكم · {BRAND.name}
             </h1>
-            <p className="text-xs text-gray-light">إدارة المنتجات</p>
+            <p className="flex items-center gap-1.5 text-xs text-gray-light">
+              {syncing ? (
+                <>
+                  <span
+                    className="inline-block h-2 w-2 animate-pulse rounded-full bg-amber"
+                    style={{ boxShadow: "0 0 6px rgba(245, 158, 11, 0.6)" }}
+                  />
+                  جاري المزامنة...
+                </>
+              ) : (
+                <>
+                  <span
+                    className="inline-block h-2 w-2 rounded-full bg-emerald"
+                    style={{ boxShadow: "0 0 6px rgba(42, 125, 91, 0.5)" }}
+                  />
+                  إدارة المنتجات
+                </>
+              )}
+            </p>
           </div>
           <button
             type="button"

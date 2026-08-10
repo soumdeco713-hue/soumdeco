@@ -1,0 +1,1172 @@
+     1→"use client";
+     2→
+     3→import { useEffect, useRef, useState } from "react";
+     4→import { toast } from "sonner";
+     5→import {
+     6→  Pencil,
+     7→  Trash2,
+     8→  Plus,
+     9→  Lock,
+    10→  Upload,
+    11→  X,
+    12→  Save,
+    13→  Image as ImageIcon,
+    14→  Eye,
+    15→  Star,
+    16→  ArrowUp,
+    17→  ArrowDown,
+    18→} from "lucide-react";
+    19→import {
+    20→  Product,
+    21→  ProductVariant,
+    22→  QuantityTier,
+    23→  formatPrice,
+    24→  getProductImages,
+    25→} from "@/lib/products";
+    26→import { BRAND } from "@/lib/brand-config";
+    27→
+    28→const ADMIN_PASSWORD = BRAND.adminPassword;
+    29→const SESSION_KEY = BRAND.storage.adminAuth;
+    30→
+    31→type AdminPanelProps = {
+    32→  products: Product[];
+    33→  onUpsert: (product: Product) => void;
+    34→  onDelete: (id: string) => void;
+    35→  onAddBlank: () => Product;
+    36→  onMove: (id: string, direction: "up" | "down") => void;
+    37→  onReset: () => void;
+    38→  onClose: () => void;
+    39→};
+    40→
+    41→// Resize image for optimal quality + storage.
+    42→// Settings (optimized for Cloudflare R2 — 9500 products in 10GB):
+    43→//   - maxSize: 850px (sharp on all screens, ~70KB per image)
+    44→//   - quality: 0.85 (visually identical to 0.93, half the size)
+    45→//   - Format: WebP (30% smaller than JPEG)
+    46→//   - Max 5 photos per product
+    47→//   - PNG transparency preserved when source is PNG
+    48→async function resizeImage(
+    49→  file: File,
+    50→  maxSize = 850,
+    51→  budget = 200_000,
+    52→): Promise<string> {
+    53→  return new Promise((resolve, reject) => {
+    54→    const reader = new FileReader();
+    55→    reader.onload = () => {
+    56→      const img = new Image();
+    57→      img.onload = () => {
+    58→        let { width, height } = img;
+    59→        // Only downscale if the image exceeds maxSize; never upscale.
+    60→        if (width > height && width > maxSize) {
+    61→          height = Math.round((height * maxSize) / width);
+    62→          width = maxSize;
+    63→        } else if (height > maxSize) {
+    64→          width = Math.round((width * maxSize) / height);
+    65→          height = maxSize;
+    66→        }
+    67→        const canvas = document.createElement("canvas");
+    68→        canvas.width = width;
+    69→        canvas.height = height;
+    70→        const ctx = canvas.getContext("2d");
+    71→        if (!ctx) {
+    72→          reject(new Error("canvas not supported"));
+    73→          return;
+    74→        }
+    75→        // Maximum-quality smoothing
+    76→        ctx.imageSmoothingEnabled = true;
+    77→        ctx.imageSmoothingQuality = "high";
+    78→        ctx.drawImage(img, 0, 0, width, height);
+    79→
+    80→        // Use WebP for all images (30% smaller than JPEG, supported everywhere).
+    81→        // Preserve PNG transparency by keeping PNG format for PNG sources.
+    82→        const isPng = file.type === "image/png";
+    83→        let quality = 0.85;
+    84→        let mimeType = isPng ? "image/png" : "image/webp";
+    85→        let dataUrl = canvas.toDataURL(mimeType, quality);
+    86→
+    87→        // Fallback: progressively reduce quality until it fits within the budget.
+    88→        if (dataUrl.length > budget) {
+    89→          mimeType = "image/webp";
+    90→          quality = 0.80;
+    91→          dataUrl = canvas.toDataURL(mimeType, quality);
+    92→          while (dataUrl.length > budget && quality > 0.50) {
+    93→            quality -= 0.05;
+    94→            dataUrl = canvas.toDataURL(mimeType, quality);
+    95→          }
+    96→          // If still too large, reduce resolution
+    97→          while (dataUrl.length > budget && width > 400) {
+    98→            width = Math.round(width * 0.85);
+    99→            height = Math.round(height * 0.85);
+   100→            canvas.width = width;
+   101→            canvas.height = height;
+   102→            ctx.drawImage(img, 0, 0, width, height);
+   103→            dataUrl = canvas.toDataURL(mimeType, quality);
+   104→          }
+   105→        }
+   106→        resolve(dataUrl);
+   107→      };
+   108→      img.onerror = () => reject(new Error("image load failed"));
+   109→      img.src = reader.result as string;
+   110→    };
+   111→    reader.onerror = () => reject(new Error("file read failed"));
+   112→    reader.readAsDataURL(file);
+   113→  });
+   114→}
+   115→
+   116→function PasswordGate({ onAuthed }: { onAuthed: () => void }) {
+   117→  const [value, setValue] = useState("");
+   118→  const [error, setError] = useState(false);
+   119→
+   120→  const submit = () => {
+   121→    if (value === ADMIN_PASSWORD) {
+   122→      try {
+   123→        sessionStorage.setItem(SESSION_KEY, "1");
+   124→      } catch {
+   125→        // ignore
+   126→      }
+   127→      onAuthed();
+   128→    } else {
+   129→      setError(true);
+   130→    }
+   131→  };
+   132→
+   133→  return (
+   134→    <div
+   135→      className="flex min-h-[60vh] items-center justify-center p-6"
+   136→     
+   137→     
+   138→    >
+   139→      <div className="w-full max-w-sm rounded-2xl border border-emerald/30 bg-night-soft/80 p-6 shadow-2xl backdrop-blur-md">
+   140→        <div className="mb-4 flex flex-col items-center text-center">
+   141→          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-emerald/10">
+   142→            <Lock className="h-6 w-6 text-emerald" />
+   143→          </div>
+   144→          <h2 className="font-arabic text-2xl font-bold text-charcoal">
+   145→            لوحة التحكم
+   146→          </h2>
+   147→          <p className="mt-1 font-arabic text-sm text-gray">
+   148→            أدخل كلمة المرور للوصول إلى لوحة إدارة المنتجات.
+   149→          </p>
+   150→        </div>
+   151→        <input
+   152→          type="password"
+   153→          value={value}
+   154→          onChange={(e) => {
+   155→            setValue(e.target.value);
+   156→            setError(false);
+   157→          }}
+   158→          onKeyDown={(e) => {
+   159→            if (e.key === "Enter") submit();
+   160→          }}
+   161→          className={`w-full rounded-lg border bg-night/60 px-3 py-2.5 text-left font-arabic text-sm text-charcoal outline-none focus:border-emerald ${
+   162→            error ? "border-terracotta" : "border-clay/40"
+   163→          }`}
+   164→          placeholder="كلمة المرور"
+   165→          autoFocus
+   166→        />
+   167→        {error && (
+   168→          <p className="mt-2 font-arabic text-xs text-terracotta">
+   169→            كلمة المرور غير صحيحة.
+   170→          </p>
+   171→        )}
+   172→        <button
+   173→          type="button"
+   174→          onClick={submit}
+   175→          className="mt-4 w-full rounded-full bg-emerald px-4 py-2.5 text-sm font-semibold text-night hover:bg-emerald-bright"
+   176→          style={{ boxShadow: "0 0 18px rgba(42, 125, 91, 0.45)" }}
+   177→        >
+   178→          دخول
+   179→        </button>
+   180→      </div>
+   181→    </div>
+   182→  );
+   183→}
+   184→
+   185→function EditForm({
+   186→  product,
+   187→  categories,
+   188→  onSave,
+   189→  onCancel,
+   190→}: {
+   191→  product: Product;
+   192→  categories: string[];
+   193→  onSave: (p: Product) => void;
+   194→  onCancel: () => void;
+   195→}) {
+   196→  const [draft, setDraft] = useState<Product>(product);
+   197→  const [uploading, setUploading] = useState(false);
+   198→  const [dragOver, setDragOver] = useState(false);
+   199→  const fileRef = useRef<HTMLInputElement>(null);
+   200→
+   201→  useEffect(() => {
+   202→    setDraft(product);
+   203→  }, [product]);
+   204→
+   205→  const photos = getProductImages(draft);
+   206→  // Allow up to 5 high-quality photos per product.
+   207→  const MAX_PHOTOS = 8;
+   208→
+   209→  const syncPhotos = (next: string[]) => {
+   210→    const cleaned = next.filter((s) => s && s.trim() !== "");
+   211→    setDraft((d) => ({
+   212→      ...d,
+   213→      images: cleaned,
+   214→      image: cleaned[0] ?? "",
+   215→    }));
+   216→  };
+   217→
+   218→  const handleFiles = async (files: FileList | File[]) => {
+   219→    const arr = Array.from(files).filter((f) => f.type.startsWith("image/"));
+   220→    if (arr.length === 0) {
+   221→      toast.error("الرجاء اختيار ملف صورة.");
+   222→      return;
+   223→    }
+   224→    const remaining = MAX_PHOTOS - photos.length;
+   225→    if (remaining <= 0) {
+   226→      toast.error(`الحد الأقصى ${MAX_PHOTOS} صور لكل منتج.`);
+   227→      return;
+   228→    }
+   229→    const toProcess = arr.slice(0, remaining);
+   230→    if (arr.length > remaining) {
+   231→      toast.message(`سيتم إضافة أول ${remaining} صور فقط.`);
+   232→    }
+   233→    setUploading(true);
+   234→    try {
+   235→      const newPhotos: string[] = [];
+   236→      for (const f of toProcess) {
+   237→        try {
+   238→          const dataUrl = await resizeImage(f, 850, 200_000);
+   239→          newPhotos.push(dataUrl);
+   240→        } catch {
+   241→          // skip failed image
+   242→        }
+   243→      }
+   244→      if (newPhotos.length === 0) {
+   245→        toast.error("فشل في معالجة الصور.");
+   246→        return;
+   247→      }
+   248→      syncPhotos([...photos, ...newPhotos]);
+   249→      toast.success(
+   250→        `تمت إضافة ${newPhotos.length} صورة${newPhotos.length > 1 ? " بنجاح" : " بنجاح"}.`,
+   251→      );
+   252→    } finally {
+   253→      setUploading(false);
+   254→    }
+   255→  };
+   256→
+   257→  const onDrop = (e: React.DragEvent) => {
+   258→    e.preventDefault();
+   259→    setDragOver(false);
+   260→    const files = e.dataTransfer.files;
+   261→    if (files && files.length > 0) handleFiles(files);
+   262→  };
+   263→
+   264→  const removePhoto = (idx: number) => {
+   265→    const next = [...photos];
+   266→    next.splice(idx, 1);
+   267→    syncPhotos(next);
+   268→  };
+   269→
+   270→  const setCoverPhoto = (idx: number) => {
+   271→    if (idx === 0 || idx >= photos.length) return;
+   272→    const next = [...photos];
+   273→    const [picked] = next.splice(idx, 1);
+   274→    next.unshift(picked);
+   275→    syncPhotos(next);
+   276→  };
+   277→
+   278→  // Variants management — simple Colors + Sizes sections (replaces the old
+   279→  // generic "variations" editor). Each entry has a name + optional price
+   280→  // adjustment. Both lists live on the same `draft.variants` array, tagged
+   281→  // with `type: "color" | "size"`. The two sections are rendered by filtering
+   282→  // the same array; the GLOBAL array index is passed to each handler so the
+   283→  // state update maps over the right entry.
+   284→  const variants: ProductVariant[] = draft.variants ?? [];
+   285→
+   286→  const addVariant = (type: "color" | "size") => {
+   287→    setDraft((d) => ({
+   288→      ...d,
+   289→      variants: [...(d.variants ?? []), { type, name: "", priceAdjustment: 0 }],
+   290→    }));
+   291→  };
+   292→  const removeVariant = (idx: number) => {
+   293→    setDraft((d) => ({
+   294→      ...d,
+   295→      variants: (d.variants ?? []).filter((_, i) => i !== idx),
+   296→    }));
+   297→  };
+   298→  const updateVariantName = (idx: number, name: string) => {
+   299→    setDraft((d) => ({
+   300→      ...d,
+   301→      variants: (d.variants ?? []).map((v, i) =>
+   302→        i === idx ? { ...v, name } : v,
+   303→      ),
+   304→    }));
+   305→  };
+   306→  const updateVariantAdjustment = (idx: number, adj: number) => {
+   307→    setDraft((d) => ({
+   308→      ...d,
+   309→      variants: (d.variants ?? []).map((v, i) =>
+   310→        i === idx ? { ...v, priceAdjustment: isNaN(adj) ? 0 : adj } : v,
+   311→      ),
+   312→    }));
+   313→  };
+   314→
+   315→  // Quantity tiers management — special offers at specific quantities.
+   316→  // Each tier can combine a free-shipping benefit AND a discount amount.
+   317→  const tiers = draft.quantityTiers ?? [];
+   318→
+   319→  const addTier = () => {
+   320→    const newTiers: QuantityTier[] = [
+   321→      ...tiers,
+   322→      { qty: 2, freeShipping: "both" },
+   323→    ];
+   324→    setDraft({ ...draft, quantityTiers: newTiers });
+   325→  };
+   326→
+   327→  const removeTier = (idx: number) => {
+   328→    const newTiers = tiers.filter((_, i) => i !== idx);
+   329→    setDraft({ ...draft, quantityTiers: newTiers });
+   330→  };
+   331→
+   332→  const updateTier = (
+   333→    idx: number,
+   334→    field: keyof QuantityTier,
+   335→    value: number | QuantityTier["freeShipping"],
+   336→  ) => {
+   337→    const newTiers = [...tiers];
+   338→    const prev = newTiers[idx];
+   339→    if (field === "qty") {
+   340→      newTiers[idx] = { ...prev, qty: Number(value) };
+   341→    } else if (field === "freeShipping") {
+   342→      newTiers[idx] = {
+   343→        ...prev,
+   344→        freeShipping: value as QuantityTier["freeShipping"],
+   345→      };
+   346→    } else if (field === "discountAmount") {
+   347→      const n = Number(value);
+   348→      newTiers[idx] = {
+   349→        ...prev,
+   350→        discountAmount: n > 0 ? n : undefined,
+   351→      };
+   352→    }
+   353→    setDraft({ ...draft, quantityTiers: newTiers });
+   354→  };
+   355→
+   356→  const save = () => {
+   357→    const nameStr = String(draft.name ?? "").trim();
+   358→    if (!nameStr) {
+   359→      toast.error("الاسم مطلوب.");
+   360→      return;
+   361→    }
+   362→    onSave(draft);
+   363→  };
+   364→
+   365→  const inputClass =
+   366→    "w-full rounded-lg border border-clay/40 bg-night/60 px-3 py-2.5 text-left font-arabic text-sm text-charcoal outline-none focus:border-brass focus:ring-1 focus:ring-brass/30";
+   367→
+   368→  return (
+   369→    <div
+   370→      className="rounded-2xl border border-emerald/25 bg-night-soft/70 p-5 backdrop-blur-md sm:p-6"
+   371→     
+   372→     
+   373→    >
+   374→      <div className="mb-4 flex items-center justify-between">
+   375→        <h3 className="font-arabic text-xl font-bold text-charcoal">
+   376→          {product.name ? "تعديل المنتج" : "منتج جديد"}
+   377→        </h3>
+   378→        <button
+   379→          type="button"
+   380→          onClick={onCancel}
+   381→          aria-label="إلغاء"
+   382→          className="flex h-8 w-8 items-center justify-center rounded-full text-charcoal hover:bg-emerald/10"
+   383→        >
+   384→          <X className="h-5 w-5" />
+   385→        </button>
+   386→      </div>
+   387→
+   388→      <div className="space-y-5 font-arabic">
+   389→        {/* 1. Multi-photo upload */}
+   390→        <div>
+   391→          <div className="mb-1 flex items-center justify-between">
+   392→            <label className="block text-sm font-medium text-charcoal">
+   393→              الصور{" "}
+   394→              <span className="text-xs font-normal text-gray-light">
+   395→                (الأولى = الغلاف · الحد الأقصى {MAX_PHOTOS})
+   396→              </span>
+   397→            </label>
+   398→            <span
+   399→              className={`text-[11px] font-medium ${
+   400→                photos.length >= MAX_PHOTOS ? "text-terracotta" : "text-gray-light"
+   401→              }`}
+   402→            >
+   403→              {photos.length} / {MAX_PHOTOS}
+   404→            </span>
+   405→          </div>
+   406→
+   407→          {/* Existing photos grid */}
+   408→          {photos.length > 0 && (
+   409→            <div className="mb-2 grid grid-cols-3 gap-2 sm:grid-cols-4">
+   410→              {photos.map((p, i) => (
+   411→                <div
+   412→                  key={i}
+   413→                  className="group relative aspect-square overflow-hidden rounded-lg border border-clay/40 bg-night"
+   414→                >
+   415→                  <img
+   416→                    src={p}
+   417→                    alt={`صورة ${i + 1}`}
+   418→                    className="h-full w-full object-contain"
+   419→                  />
+   420→                  {i === 0 && (
+   421→                    <span className="absolute right-1 top-1 rounded-full bg-brass/90 px-1.5 py-0.5 text-[9px] font-semibold text-white">
+   422→                      الغلاف
+   423→                    </span>
+   424→                  )}
+   425→                  <div className="absolute inset-0 flex items-center justify-center gap-1 bg-ink/60 opacity-0 transition-opacity group-hover:opacity-100">
+   426→                    {i !== 0 && (
+   427→                      <button
+   428→                        type="button"
+   429→                        onClick={() => setCoverPhoto(i)}
+   430→                        aria-label="تعيين كغلاف"
+   431→                        title="تعيين كغلاف"
+   432→                        className="flex h-7 w-7 items-center justify-center rounded-full bg-night/90 text-emerald hover:bg-night-soft border border-emerald/30"
+   433→                      >
+   434→                        <Star className="h-3.5 w-3.5" fill="currentColor" />
+   435→                      </button>
+   436→                    )}
+   437→                    <button
+   438→                      type="button"
+   439→                      onClick={() => removePhoto(i)}
+   440→                      aria-label="حذف هذه الصورة"
+   441→                      title="حذف"
+   442→                      className="flex h-7 w-7 items-center justify-center rounded-full bg-night/90 text-terracotta hover:bg-night-soft border border-terracotta/30"
+   443→                    >
+   444→                      <Trash2 className="h-3.5 w-3.5" />
+   445→                    </button>
+   446→                  </div>
+   447→                </div>
+   448→              ))}
+   449→            </div>
+   450→          )}
+   451→
+   452→          {/* Drop zone */}
+   453→          <div
+   454→            onClick={() => !uploading && fileRef.current?.click()}
+   455→            onDragOver={(e) => {
+   456→              if (uploading) return;
+   457→              e.preventDefault();
+   458→              setDragOver(true);
+   459→            }}
+   460→            onDragLeave={() => setDragOver(false)}
+   461→            onDrop={(e) => { if (!uploading) onDrop(e); }}
+   462→            className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed p-4 text-center transition-colors ${
+   463→              uploading
+   464→                ? "border-clay/40 bg-night/20 cursor-wait pointer-events-none"
+   465→                : "cursor-pointer " + (dragOver
+   466→                  ? "border-emerald bg-emerald/5"
+   467→                  : "border-clay/40 bg-night/30 hover:border-emerald/50")
+   468→            }`}
+   469→          >
+   470→            <div className="flex h-12 w-12 flex-col items-center justify-center text-gray-light">
+   471→              {uploading ? (
+   472→                <span className="text-xs text-emerald">جاري المعالجة...</span>
+   473→              ) : (
+   474→                <ImageIcon className="h-6 w-6" />
+   475→              )}
+   476→            </div>
+   477→            <span className="flex items-center gap-1 text-xs font-medium text-emerald">
+   478→              <Upload className="h-3.5 w-3.5" />
+   479→              {uploading
+   480→                ? "جاري المعالجة..."
+   481→                : photos.length === 0
+   482→                  ? "إضافة صور"
+   483→                  : "إضافة المزيد من الصور"}
+   484→            </span>
+   485→            <span className="text-[10px] text-gray-light">
+   486→              انقر أو اسحب وأفلت الصور هنا
+   487→            </span>
+   488→          </div>
+   489→          <input
+   490→            ref={fileRef}
+   491→            type="file"
+   492→            accept="image/*"
+   493→            multiple
+   494→            className="hidden"
+   495→            onChange={(e) => {
+   496→              if (e.target.files && e.target.files.length > 0) {
+   497→                handleFiles(e.target.files);
+   498→              }
+   499→              e.target.value = "";
+   500→            }}
+   501→          />
+   502→        </div>
+   503→
+   504→        {/* ===== Section: المعلومات الأساسية ===== */}
+   505→        <h4 className="admin-section-title">المعلومات الأساسية</h4>
+   506→
+   507→        {/* 2. Name */}
+   508→        <div>
+   509→          <label htmlFor={`fld-name-${draft.id ?? "new"}`} className="mb-1 block text-sm font-medium text-charcoal">
+   510→            الاسم <span className="text-terracotta">*</span>
+   511→          </label>
+   512→          <input
+   513→            id={`fld-name-${draft.id ?? "new"}`}
+   514→            name="productName"
+   515→            type="text"
+   516→            value={draft.name}
+   517→            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+   518→            className={inputClass}
+   519→            placeholder="اسم المنتج"
+   520→            autoComplete="off"
+   521→            autoCorrect="off"
+   522→            spellCheck={false}
+   523→          />
+   524→        </div>
+   525→
+   526→        {/* 3. Description */}
+   527→        <div>
+   528→          <label htmlFor={`fld-desc-${draft.id ?? "new"}`} className="mb-1 block text-sm font-medium text-charcoal">
+   529→            الوصف
+   530→          </label>
+   531→          <textarea
+   532→            id={`fld-desc-${draft.id ?? "new"}`}
+   533→            name="productDescription"
+   534→            value={draft.description}
+   535→            onChange={(e) =>
+   536→              setDraft({ ...draft, description: e.target.value })
+   537→            }
+   538→            rows={5}
+   539→            className={`${inputClass} resize-none`}
+   540→            placeholder="وصف المنتج بالعربية..."
+   541→            autoComplete="off"
+   542→            autoCorrect="off"
+   543→            spellCheck={false}
+   544→          />
+   545→        </div>
+   546→
+   547→        {/* 4. Category */}
+   548→        <div>
+   549→          <label htmlFor={`fld-category-${draft.id ?? "new"}`} className="mb-1 block text-sm font-medium text-charcoal">
+   550→            الفئة{" "}
+   551→            <span className="text-xs font-normal text-gray-light">
+   552→              (اختياري)
+   553→            </span>
+   554→          </label>
+   555→          <input
+   556→            id={`fld-category-${draft.id ?? "new"}`}
+   557→            name="productCategory"
+   558→            type="text"
+   559→            value={draft.category}
+   560→            onChange={(e) =>
+   561→              setDraft({ ...draft, category: e.target.value })
+   562→            }
+   563→            className={inputClass}
+   564→            placeholder="مثال: إكسسوارات السيارة"
+   565→            list="rokn-category-list"
+   566→            autoComplete="off"
+   567→            autoCorrect="off"
+   568→            spellCheck={false}
+   569→          />
+   570→          <datalist id="rokn-category-list">
+   571→            {categories.map((c) => (
+   572→              <option key={c} value={c} />
+   573→            ))}
+   574→          </datalist>
+   575→        </div>
+   576→
+   577→        {/* 5. Price */}
+   578→        <div>
+   579→          <label htmlFor={`fld-price-${draft.id ?? "new"}`} className="mb-1 block text-sm font-medium text-charcoal">
+   580→            السعر{" "}
+   581→            <span className="text-xs font-normal text-gray-light">
+   582→              (فارغ = السعر عند الطلب)
+   583→            </span>
+   584→          </label>
+   585→          <input
+   586→            id={`fld-price-${draft.id ?? "new"}`}
+   587→            name="productPrice"
+   588→            type="number"
+   589→            value={draft.price ?? ""}
+   590→            onChange={(e) =>
+   591→              setDraft({
+   592→                ...draft,
+   593→                price:
+   594→                  e.target.value === ""
+   595→                    ? null
+   596→                    : Number(e.target.value),
+   597→              })
+   598→            }
+   599→            className={inputClass}
+   600→            placeholder="2500"
+   601→            min={0}
+   602→            autoComplete="off"
+   603→          />
+   604→        </div>
+   605→
+   606→        {/* 6b. Old Price (optional — shown struck through) */}
+   607→        <div>
+   608→          <label htmlFor={`fld-oldprice-${draft.id ?? "new"}`} className="mb-1 block text-sm font-medium text-charcoal">
+   609→            السعر القديم{" "}
+   610→            <span className="text-xs font-normal text-gray-light">
+   611→              (اختياري — يظهر مشطوب)
+   612→            </span>
+   613→          </label>
+   614→          <input
+   615→            id={`fld-oldprice-${draft.id ?? "new"}`}
+   616→            name="productOldPrice"
+   617→            type="number"
+   618→            value={draft.oldPrice ?? ""}
+   619→            onChange={(e) =>
+   620→              setDraft({
+   621→                ...draft,
+   622→                oldPrice:
+   623→                  e.target.value === "" ? null : Number(e.target.value),
+   624→              })
+   625→            }
+   626→            className={inputClass}
+   627→            placeholder="اختياري — يُظهر بسطر مشطوب"
+   628→            min={0}
+   629→            autoComplete="off"
+   630→          />
+   631→        </div>
+   632→
+   633→        {/* 7. Colors — simple list of name + optional price adjustment */}
+   634→        <div>
+   635→          <div className="mb-2 flex items-center justify-between">
+   636→            <label className="block text-sm font-medium text-charcoal">
+   637→              الألوان{" "}
+   638→              <span className="text-xs font-normal text-gray-light">
+   639→                (اختياري — أضف الألوان المتاحة)
+   640→              </span>
+   641→            </label>
+   642→            <button
+   643→              type="button"
+   644→              onClick={() => addVariant("color")}
+   645→              className="flex items-center gap-1 rounded-full bg-brass/10 px-3 py-1 text-xs font-medium text-brass-deep hover:bg-brass/20"
+   646→            >
+   647→              <Plus className="h-3 w-3" />
+   648→              إضافة لون
+   649→            </button>
+   650→          </div>
+   651→          {variants.some((v) => v.type === "color") ? (
+   652→            <div className="space-y-2">
+   653→              {variants.map((v, i) => v.type === "color" && (
+   654→                <div key={`color-${i}`} className="flex gap-2">
+   655→                  <input
+   656→                    type="text"
+   657→                    value={v.name}
+   658→                    onChange={(e) => updateVariantName(i, e.target.value)}
+   659→                    placeholder="مثال: أحمر"
+   660→                    className={`${inputClass} flex-1`}
+   661→                  />
+   662→                  <input
+   663→                    type="number"
+   664→                    value={v.priceAdjustment ?? 0}
+   665→                    onChange={(e) => updateVariantAdjustment(i, Number(e.target.value))}
+   666→                    placeholder="0"
+   667→                    aria-label="تعديل السعر (دج)"
+   668→                    className={`${inputClass} flex-shrink-0`}
+   669→                    style={{ width: "120px" }}
+   670→                  />
+   671→                  <span className="self-center font-arabic text-xs text-gray-light">دج</span>
+   672→                  <button
+   673→                    type="button"
+   674→                    onClick={() => removeVariant(i)}
+   675→                    aria-label="حذف"
+   676→                    className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-terracotta hover:bg-terracotta/10"
+   677→                  >
+   678→                    <X className="h-4 w-4" />
+   679→                  </button>
+   680→                </div>
+   681→              ))}
+   682→              <p className="font-arabic text-[11px] text-gray-light">
+   683→                التعديل الإضافي يُضاف إلى السعر الأساسي (مثال: +100 دج للّون المميّز).
+   684→              </p>
+   685→            </div>
+   686→          ) : (
+   687→            <p className="text-xs text-gray-light">
+   688→              لا توجد ألوان. أضف الألوان إذا كان المنتج متاحاً بأكثر من لون.
+   689→            </p>
+   690→          )}
+   691→        </div>
+   692→
+   693→        {/* 7b. Sizes — same structure as Colors */}
+   694→        <div>
+   695→          <div className="mb-2 flex items-center justify-between">
+   696→            <label className="block text-sm font-medium text-charcoal">
+   697→              المقاسات{" "}
+   698→              <span className="text-xs font-normal text-gray-light">
+   699→                (اختياري — أضف المقاسات المتاحة)
+   700→              </span>
+   701→            </label>
+   702→            <button
+   703→              type="button"
+   704→              onClick={() => addVariant("size")}
+   705→              className="flex items-center gap-1 rounded-full bg-brass/10 px-3 py-1 text-xs font-medium text-brass-deep hover:bg-brass/20"
+   706→            >
+   707→              <Plus className="h-3 w-3" />
+   708→              إضافة مقاس
+   709→            </button>
+   710→          </div>
+   711→          {variants.some((v) => v.type === "size") ? (
+   712→            <div className="space-y-2">
+   713→              {variants.map((v, i) => v.type === "size" && (
+   714→                <div key={`size-${i}`} className="flex gap-2">
+   715→                  <input
+   716→                    type="text"
+   717→                    value={v.name}
+   718→                    onChange={(e) => updateVariantName(i, e.target.value)}
+   719→                    placeholder="مثال: كبير"
+   720→                    className={`${inputClass} flex-1`}
+   721→                  />
+   722→                  <input
+   723→                    type="number"
+   724→                    value={v.priceAdjustment ?? 0}
+   725→                    onChange={(e) => updateVariantAdjustment(i, Number(e.target.value))}
+   726→                    placeholder="0"
+   727→                    aria-label="تعديل السعر (دج)"
+   728→                    className={`${inputClass} flex-shrink-0`}
+   729→                    style={{ width: "120px" }}
+   730→                  />
+   731→                  <span className="self-center font-arabic text-xs text-gray-light">دج</span>
+   732→                  <button
+   733→                    type="button"
+   734→                    onClick={() => removeVariant(i)}
+   735→                    aria-label="حذف"
+   736→                    className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-terracotta hover:bg-terracotta/10"
+   737→                  >
+   738→                    <X className="h-4 w-4" />
+   739→                  </button>
+   740→                </div>
+   741→              ))}
+   742→              <p className="font-arabic text-[11px] text-gray-light">
+   743→                التعديل الإضافي يُضاف إلى السعر الأساسي (مثال: +50 دج للمقاس الكبير).
+   744→              </p>
+   745→            </div>
+   746→          ) : (
+   747→            <p className="text-xs text-gray-light">
+   748→              لا توجد مقاسات. أضف المقاسات إذا كان المنتج متاحاً بأكثر من مقاس.
+   749→            </p>
+   750→          )}
+   751→        </div>
+   752→
+   753→        {/* 7d. Quantity tiers (عروض الكمية) — available for ALL products */}
+   754→        <div>
+   755→            <div className="mb-2 flex items-center justify-between">
+   756→              <label className="block text-sm font-medium text-charcoal">
+   757→                عروض الكمية{" "}
+   758→                <span className="text-xs font-normal text-gray-light">
+   759→                  (اختياري — عرض خاص عند شراء كمية معيّنة)
+   760→                </span>
+   761→              </label>
+   762→              <button
+   763→                type="button"
+   764→                onClick={addTier}
+   765→                className="flex items-center gap-1 rounded-full bg-neon-magenta/15 px-3 py-1 text-xs font-medium text-neon-magenta hover:bg-neon-magenta/25"
+   766→              >
+   767→                <Plus className="h-3 w-3" />
+   768→                إضافة عرض
+   769→              </button>
+   770→            </div>
+   771→            {tiers.length > 0 ? (
+   772→              <div className="space-y-2">
+   773→                {tiers.map((t, i) => (
+   774→                  <div
+   775→                    key={i}
+   776→                    className="flex flex-wrap items-center gap-2 rounded-lg border border-neon-magenta/20 bg-neon-magenta/5 p-2"
+   777→                  >
+   778→                    <input
+   779→                      type="number"
+   780→                      min={1}
+   781→                      value={t.qty}
+   782→                      onChange={(e) => updateTier(i, "qty", Math.max(1, Number(e.target.value) || 1))}
+   783→                      className={`${inputClass} flex-shrink-0`}
+   784→                      style={{ width: "70px" }}
+   785→                      aria-label="الكمية"
+   786→                      placeholder="الكمية"
+   787→                    />
+   788→                    <span className="font-arabic text-xs text-gray-light">قطعة</span>
+   789→                    <select
+   790→                      value={t.freeShipping}
+   791→                      onChange={(e) =>
+   792→                        updateTier(i, "freeShipping", e.target.value as QuantityTier["freeShipping"])
+   793→                      }
+   794→                      className={`${inputClass} flex-shrink-0`}
+   795→                      style={{ width: "140px" }}
+   796→                      aria-label="توصيل مجاني"
+   797→                    >
+   798→                      <option value="none">لا</option>
+   799→                      <option value="desk">مكتب</option>
+   800→                      <option value="home">منزل</option>
+   801→                      <option value="both">كلاهما</option>
+   802→                    </select>
+   803→                    <input
+   804→                      type="number"
+   805→                      value={t.discountAmount ?? 0}
+   806→                      onChange={(e) =>
+   807→                        updateTier(i, "discountAmount", Number(e.target.value))
+   808→                      }
+   809→                      className={`${inputClass} flex-shrink-0`}
+   810→                      style={{ width: "110px" }}
+   811→                      min={0}
+   812→                      placeholder="خصم (دج)"
+   813→                      aria-label="مبلغ الخصم (دج)"
+   814→                    />
+   815→                    <span className="font-arabic text-xs text-gray-light">دج خصم</span>
+   816→                    <button
+   817→                      type="button"
+   818→                      onClick={() => removeTier(i)}
+   819→                      aria-label="حذف"
+   820→                      className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-terracotta hover:bg-terracotta/10"
+   821→                    >
+   822→                      <X className="h-4 w-4" />
+   823→                    </button>
+   824→                  </div>
+   825→                ))}
+   826→                <p className="font-arabic text-[11px] text-gray-light">
+   827→                  يمكنك الجمع بين توصيل مجاني وخصم في نفس الكمية. اترك الحقول على "لا" و0 إذا لم ترد الفائدة.
+   828→                </p>
+   829→              </div>
+   830→            ) : (
+   831→              <p className="text-xs text-gray-light">
+   832→                لا توجد عروض كمية. أضف عرضاً لمنح العميل توصيل مجاني أو خصم عند شراء كمية معيّنة.
+   833→              </p>
+   834→            )}
+   835→          </div>
+   836→
+   837→        {/* ===== Section: العرض ===== */}
+   838→        <h4 className="admin-section-title">العرض</h4>
+   839→
+   840→        {/* 7b. Badge */}
+   841→        <div>
+   842→          <label htmlFor={`fld-badge-${draft.id ?? "new"}`} className="mb-1 block text-sm font-medium text-charcoal">
+   843→            شارة العرض{" "}
+   844→            <span className="text-xs font-normal text-gray-light">
+   845→              (مثال: عرض خاص، جديد، تخفيض — اختياري)
+   846→            </span>
+   847→          </label>
+   848→          <input
+   849→            id={`fld-badge-${draft.id ?? "new"}`}
+   850→            name="productBadge"
+   851→            type="text"
+   852→            value={draft.badge ?? ""}
+   853→            onChange={(e) =>
+   854→              setDraft({ ...draft, badge: e.target.value })
+   855→            }
+   856→            className={inputClass}
+   857→            placeholder="عرض خاص"
+   858→            autoComplete="off"
+   859→            autoCorrect="off"
+   860→            spellCheck={false}
+   861→          />
+   862→        </div>
+   863→
+   864→        {/* 8. Featured */}
+   865→        <label className="flex cursor-pointer items-center gap-2">
+   866→          <input
+   867→            type="checkbox"
+   868→            checked={draft.featured}
+   869→            onChange={(e) =>
+   870→              setDraft({ ...draft, featured: e.target.checked })
+   871→            }
+   872→            className="h-4 w-4 rounded border-clay/40 accent-brass"
+   873→          />
+   874→          <span className="text-sm text-charcoal">
+   875→            عرض في المنتجات المميزة
+   876→          </span>
+   877→        </label>
+   878→
+   879→        {/* 8b. Special offer — adds the product to the "عروض خاصة" section on the home page.
+   880→            When checked, reveals the quantity tiers editor above so the admin can set
+   881→            free shipping / discount tiers for this special-offer product. */}
+   882→        <label className="flex cursor-pointer items-center gap-2">
+   883→          <input
+   884→            type="checkbox"
+   885→            checked={draft.isSpecialOffer === true}
+   886→            onChange={(e) =>
+   887→              setDraft({ ...draft, isSpecialOffer: e.target.checked })
+   888→            }
+   889→            className="h-4 w-4 rounded border-clay/40 accent-rose-deep"
+   890→          />
+   891→          <span className="text-sm text-charcoal">
+   892→            عرض في قسم العروض الخاصة
+   893→          </span>
+   894→        </label>
+   895→        {draft.isSpecialOffer && (
+   896→          <p className="font-arabic text-[11px] text-neon-magenta">
+   897→            🎁 سيظهر هذا المنتج في قسم "عروض خاصة" — أضف عروض الكمية أعلاه لمنح العملاء توصيل مجاني أو خصم.
+   898→          </p>
+   899→        )}
+   900→
+   901→        {/* 9. Actions */}
+   902→        <div className="flex gap-2 pt-2">
+   903→          <button
+   904→            type="button"
+   905→            onClick={save}
+   906→            className="flex flex-1 items-center justify-center gap-2 rounded-full bg-emerald px-4 py-2.5 text-sm font-semibold text-night hover:bg-emerald-bright"
+   907→            style={{ boxShadow: "0 0 18px rgba(42, 125, 91, 0.45)" }}
+   908→          >
+   909→            <Save className="h-4 w-4" />
+   910→            حفظ
+   911→          </button>
+   912→          <button
+   913→            type="button"
+   914→            onClick={onCancel}
+   915→            className="rounded-full border border-clay/40 px-5 py-2.5 text-sm font-semibold text-charcoal hover:bg-emerald/10"
+   916→          >
+   917→            إلغاء
+   918→          </button>
+   919→        </div>
+   920→      </div>
+   921→    </div>
+   922→  );
+   923→}
+   924→
+   925→export function AdminPanel({
+   926→  products,
+   927→  onUpsert,
+   928→  onDelete,
+   929→  onAddBlank,
+   930→  onMove,
+   931→  onClose,
+   932→}: AdminPanelProps) {
+   933→  const [authed, setAuthed] = useState(false);
+   934→  const [editing, setEditing] = useState<Product | null>(null);
+   935→
+   936→  useEffect(() => {
+   937→    try {
+   938→      if (sessionStorage.getItem(SESSION_KEY) === "1") setAuthed(true);
+   939→    } catch {
+   940→      // ignore
+   941→    }
+   942→  }, []);
+   943→
+   944→  const categories = Array.from(
+   945→    new Set(
+   946→      products
+   947→        .map((p) => (p.category || "").trim())
+   948→        .filter(Boolean),
+   949→    ),
+   950→  );
+   951→
+   952→  const handleSave = (p: Product) => {
+   953→    onUpsert(p);
+   954→    setEditing(null);
+   955→    toast.success("تم حفظ المنتج");
+   956→  };
+   957→
+   958→  const handleAddBlank = () => {
+   959→    const np = onAddBlank();
+   960→    setEditing(np);
+   961→  };
+   962→
+   963→  const handleDelete = (p: Product) => {
+   964→    if (
+   965→      window.confirm(`حذف "${p.name || "هذا المنتج"}" ؟`)
+   966→    ) {
+   967→      onDelete(p.id);
+   968→      toast.success("تم حذف المنتج");
+   969→    }
+   970→  };
+   971→
+   972→  return (
+   973→    <div
+   974→      className="min-h-screen bg-night font-arabic"
+   975→     
+   976→     
+   977→    >
+   978→      {/* Admin header */}
+   979→      <div className="sticky top-0 z-30 border-b border-emerald/15 bg-night-soft/90 backdrop-blur-lg">
+   980→        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
+   981→          <div>
+   982→            <h1 className="font-arabic text-xl font-bold text-charcoal">
+   983→              لوحة التحكم · {BRAND.name}
+   984→            </h1>
+   985→            <p className="text-xs text-gray-light">إدارة المنتجات</p>
+   986→          </div>
+   987→          <button
+   988→            type="button"
+   989→            onClick={onClose}
+   990→            className="rounded-full border border-emerald/30 bg-night-soft/60 px-4 py-2 text-sm font-medium text-charcoal hover:bg-emerald/10"
+   991→          >
+   992→            خروج
+   993→          </button>
+   994→        </div>
+   995→      </div>
+   996→
+   997→      <div className="mx-auto max-w-5xl px-4 py-6">
+   998→        {!authed ? (
+   999→          <PasswordGate onAuthed={() => setAuthed(true)} />
+  1000→        ) : editing ? (
+  1001→          <EditForm
+  1002→            product={editing}
+  1003→            categories={categories}
+  1004→            onSave={handleSave}
+  1005→            onCancel={() => setEditing(null)}
+  1006→          />
+  1007→        ) : (
+  1008→          <>
+  1009→            {/* Toolbar */}
+  1010→            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+  1011→              <p className="text-sm text-gray">
+  1012→                {products.length} منتج{products.length > 1 ? "ات" : ""}
+  1013→              </p>
+  1014→              <div className="flex gap-2">
+  1015→                <button
+  1016→                  type="button"
+  1017→                  onClick={handleAddBlank}
+  1018→                  className="flex items-center gap-1.5 rounded-full bg-emerald px-5 py-2.5 text-base font-bold text-night hover:bg-emerald-bright"
+  1019→                  style={{ boxShadow: "0 0 18px rgba(42, 125, 91, 0.45)" }}
+  1020→                >
+  1021→                  <Plus className="h-5 w-5" />
+  1022→                  إضافة منتج
+  1023→                </button>
+  1024→              </div>
+  1025→            </div>
+  1026→
+  1027→            {/* Help text */}
+  1028→            <p className="mb-3 text-center font-arabic text-xs text-gray-light">
+  1029→              اختر منتجاً للتعديل أو اضغط لإضافة منتج جديد
+  1030→            </p>
+  1031→
+  1032→            {/* Product list — grouped by category, ordered by sortOrder within category */}
+  1033→            <div className="overflow-hidden rounded-2xl border border-clay/40 bg-night-soft/70 backdrop-blur-md">
+  1034→              {products.length === 0 ? (
+  1035→                <p className="p-8 text-center font-arabic text-sm text-gray-light">
+  1036→                  لا توجد منتجات. اضغط على «إضافة منتج».
+  1037→                </p>
+  1038→              ) : (
+  1039→                (() => {
+  1040→                  // Group products by category, then sort each category by sortOrder
+  1041→                  const grouped: Record<string, typeof products> = {};
+  1042→                  products.forEach((p) => {
+  1043→                    const cat = (p.category || "").trim() || "بدون فئة";
+  1044→                    if (!grouped[cat]) grouped[cat] = [];
+  1045→                    grouped[cat].push(p);
+  1046→                  });
+  1047→                  // Sort each category's products by sortOrder
+  1048→                  Object.keys(grouped).forEach((cat) => {
+  1049→                    grouped[cat].sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+  1050→                  });
+  1051→                  // Get category order (sorted alphabetically for consistency)
+  1052→                  const cats = Object.keys(grouped).sort();
+  1053→
+  1054→                  let globalIdx = 0;
+  1055→                  return (
+  1056→                    <ul className="divide-y divide-clay/40">
+  1057→                      {cats.map((cat) => (
+  1058→                        <div key={cat}>
+  1059→                          {/* Category header */}
+  1060→                          <li className="bg-clay/20 px-3 py-1.5">
+  1061→                            <p className="font-arabic text-xs font-bold text-brass-deep">
+  1062→                              {cat} ({grouped[cat].length})
+  1063→                            </p>
+  1064→                          </li>
+  1065→                          {/* Products in this category */}
+  1066→                          {grouped[cat].map((p, catIdx) => {
+  1067→                            const imgs = getProductImages(p);
+  1068→                            const cover = imgs[0] || "";
+  1069→                            const photoCount = imgs.length;
+  1070→                            const isFirst = catIdx === 0;
+  1071→                            const isLast = catIdx === grouped[cat].length - 1;
+  1072→                            globalIdx++;
+  1073→                            return (
+  1074→                              <li
+  1075→                                key={p.id}
+  1076→                                className="flex items-center gap-3 p-3"
+  1077→                              >
+  1078→                                {/* Position number (within category) + up/down arrows */}
+  1079→                                <div className="flex flex-col items-center gap-0.5">
+  1080→                                  <button
+  1081→                                    type="button"
+  1082→                                    onClick={() => onMove(p.id, "up")}
+  1083→                                    disabled={isFirst}
+  1084→                                    aria-label="تحريك للأعلى"
+  1085→                                    title="تحريك للأعلى"
+  1086→                                    className="flex h-6 w-6 items-center justify-center rounded-md text-gray transition-colors hover:bg-emerald/10 hover:text-emerald disabled:opacity-25 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray"
+  1087→                                  >
+  1088→                                    <ArrowUp className="h-3.5 w-3.5" />
+  1089→                                  </button>
+  1090→                                  <span className="flex h-5 w-5 items-center justify-center rounded-full border border-emerald/30 bg-emerald/10 font-arabic text-[10px] font-bold text-emerald">
+  1091→                                    {catIdx + 1}
+  1092→                                  </span>
+  1093→                                  <button
+  1094→                                    type="button"
+  1095→                                    onClick={() => onMove(p.id, "down")}
+  1096→                                    disabled={isLast}
+  1097→                                    aria-label="تحريك للأسفل"
+  1098→                                    title="تحريك للأسفل"
+  1099→                                    className="flex h-6 w-6 items-center justify-center rounded-md text-gray transition-colors hover:bg-emerald/10 hover:text-emerald disabled:opacity-25 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray"
+  1100→                                  >
+  1101→                                    <ArrowDown className="h-3.5 w-3.5" />
+  1102→                                  </button>
+  1103→                                </div>
+  1104→
+  1105→                                <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg bg-night">
+  1106→                                  {cover ? (
+  1107→                                    <img
+  1108→                                      src={cover}
+  1109→                                      alt={p.name}
+  1110→                                      className="h-full w-full object-contain"
+  1111→                                    />
+  1112→                                  ) : (
+  1113→                                    <div className="flex h-full w-full items-center justify-center">
+  1114→                                      <ImageIcon className="h-5 w-5 text-gray-light" />
+  1115→                                    </div>
+  1116→                                  )}
+  1117→                                  {photoCount > 1 && (
+  1118→                                    <span className="absolute bottom-0 left-0 rounded-tr bg-ink/70 px-1 text-[9px] font-semibold text-cream">
+  1119→                                      {photoCount}
+  1120→                                    </span>
+  1121→                                  )}
+  1122→                                </div>
+  1123→                                <div className="min-w-0 flex-1">
+  1124→                                  <p className="truncate font-arabic text-sm font-medium text-charcoal">
+  1125→                                    {p.name || "(بدون اسم)"}
+  1126→                                  </p>
+  1127→                                  <p className="font-arabic text-xs text-emerald">
+  1128→                                    {formatPrice(p.price)}
+  1129→                                  </p>
+  1130→                                  <p className="font-arabic text-xs text-gray-light">
+  1131→                                    {p.category || "بدون فئة"}
+  1132→                                    {p.featured ? " · مميّز" : ""}
+  1133→                                    {p.isSpecialOffer ? " · 🎁 عرض خاص" : ""}
+  1134→                                    {p.badge ? ` · ${p.badge}` : ""}
+  1135→                                  </p>
+  1136→                                </div>
+  1137→                                <div className="flex gap-1">
+  1138→                                  <button
+  1139→                                    type="button"
+  1140→                                    onClick={() => setEditing(p)}
+  1141→                                    aria-label="تعديل"
+  1142→                                    className="flex h-9 w-9 items-center justify-center rounded-full text-charcoal hover:bg-emerald/10"
+  1143→                                  >
+  1144→                                    <Pencil className="h-4 w-4" />
+  1145→                                  </button>
+  1146→                                  <button
+  1147→                                    type="button"
+  1148→                                    onClick={() => handleDelete(p)}
+  1149→                                    aria-label="حذف"
+  1150→                                    className="flex h-9 w-9 items-center justify-center rounded-full text-terracotta hover:bg-terracotta/10"
+  1151→                                  >
+  1152→                                    <Trash2 className="h-4 w-4" />
+  1153→                                  </button>
+  1154→                                </div>
+  1155→                              </li>
+  1156→                            );
+  1157→                          })}
+  1158→                        </div>
+  1159→                      ))}
+  1160→                    </ul>
+  1161→                  );
+  1162→                })()
+  1163→              )}
+  1164→            </div>
+  1165→
+  1166→          </>
+  1167→        )}
+  1168→      </div>
+  1169→    </div>
+  1170→  );
+  1171→}
+  1172→

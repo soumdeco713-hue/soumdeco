@@ -1,0 +1,1004 @@
+     1→---
+     2→Task ID: 1
+     3→Agent: main
+     4→Task: Build the El Miizaan (الميزان) e-commerce storefront from uploaded deploy zip + assets.
+     5→
+     6→Work Log:
+     7→- Read PROMPT.md, NETLIFY-OPTIMIZATION-GUIDE.md, apps-script.gs to understand the full architecture
+     8→- Extracted `el-miizaan-deploy(this alone can do).zip` to /home/z/my-project/extracted_deploy
+     9→- Initialized the fullstack-dev environment via the official init script
+    10→- Copied all source files (src/, public/, prisma/, db/, scripts/, upload/, mini-services/, configs) from extracted_deploy into the active /home/z/my-project project
+    11→- Wrote .env with: DATABASE_URL, NEXT_PUBLIC_SHEET_URL (Google Apps Script), NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME=mxhc8k5i, NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET=miizaan
+    12→- Verified bun install: 846 packages, no changes needed (scaffold already had same package.json)
+    13→- Started dev server via .zscripts/dev.sh — ready in 645ms on port 3000
+    14→- Cleaned up: removed extracted_deploy directory (was causing 1 lint error from a placeholder script)
+    15→- Ran ESLint: PASS (0 errors, 0 warnings)
+    16→- Loaded agent-browser skill, opened http://localhost:3000/ — page renders correctly
+    17→- Verified homepage: Arabic RTL, Navy #0A1E3A + Gold #D4AF37 theme, hero, featured carousel with 3 products, all-products grid, brand story, footer with TikTok link
+    18→- Verified real product data flowing from Google Sheets (3 products: car parasol, mosquito lamp, mosquito net with old/new prices in دج)
+    19→- Verified product page (#product/{id}): image gallery, full description, COD order form with all 58 Algerian wilayas loaded
+    20→- Verified add-to-cart: button text correctly changed to "تمت الإضافة إلى السلة"
+    21→- Verified cart drawer: opens with "السلة" heading, close button visible
+    22→- Verified admin panel at /#admin: password gate, entered "007", dashboard shows 3 products with edit/delete/move-up/move-down buttons + "إضافة منتج" + "خروج"
+    23→- Verified mobile responsiveness: set viewport to 390x844 (iPhone 13), all content renders correctly with no horizontal overflow
+    24→- Console: 0 errors, only standard React DevTools + HMR connected logs
+    25→- Captured 5 screenshots in /home/z/my-project/download/: desktop home, product page, mobile home, admin login, admin logged in, cart drawer
+    26→
+    27→Stage Summary:
+    28→- Site is LIVE and fully functional on the dev server (PID 1731)
+    29→- All three integration points working: Products (Google Sheet → /api/products), Stock (Google Sheet → /api/stock), Orders (POST → Google Sheet Orders tab)
+    30→- Tech stack verified: Next.js 16.1.3 (Turbopack) + TypeScript + Tailwind 4 + shadcn/ui + Prisma/SQLite
+    31→- Lint clean, no console errors, all API routes 200 OK
+    32→- Brand: الميزان / El Miizaan, navy+gold theme, Noto Naskh Arabic font, RTL layout
+    33→- Admin access: /#admin with password 007
+    34→- Ready for user's iterative refinement commands
+    35→
+    36→---
+    37→Task ID: 2
+    38→Agent: main
+    39→Task: Rebrand the entire site from "El Miizaan" (navy+gold Arabic general store) to "SOUM DECO" — French-Algerian home decor boutique matching soumdeco.netlify.app.
+    40→
+    41→Work Log:
+    42→- Researched @soumdecodz Instagram via web_search — found brand is "Boutique de décoration intérieur maison basée à Alger"
+    43→- Fetched soumdeco.netlify.app via page_reader to extract reference content + brand voice
+    44→- Downloaded soumdeco.netlify.app CSS file from /_next/static/chunks/82af0bc813dbcb21.css
+    45→- Extracted EXACT color palette from reference site's :root CSS variables:
+    46→  - cream: #FAF8F4 (warm ivory)
+    47→  - sand: #F1ECE3, stone: #E8E4DC, clay: #D4CDBF
+    48→  - charcoal: #2A2520 (warm dark text)
+    49→  - ink: #1C1815 (near-black for strong text)
+    50→  - brass: #9A7E3A (DEEP antique brass — NOT bright gold)
+    51→  - brass-bright: #B89656, brass-dark: #6E5C2A
+    52→  - emerald: #2F7D5B (sage green for "in stock" accent)
+    53→  - terracotta: #8A4A32 (warm rust for out-of-stock)
+    54→  - gray: #6B6358, gray-light: #9B9489
+    55→  - cocoa: #3D3530
+    56→- Updated src/lib/brand-config.ts:
+    57→  - name: "SOUM DECO", nameLatin: "SoumDecoDZ"
+    58→  - tagline: "L'art de sublimer votre intérieur" (matches reference)
+    59→  - Instagram primary (@soumdecodz) + Facebook (soumdeco) + phone "0541 645 727"
+    60→  - Fresh localStorage keys (soumdeco_*) + Cloudinary preset (soumdeco)
+    61→  - Arabic story paragraphs (Arabic primary, like El Miizaan) with stats: 58 ولاية / +100 عميل / 24h
+    62→- Created new SVG logo (/public/logo.svg) — Cormorant Garamond wordmark "SOUM DÉCO" with brass ring, laurel flourish, and "ÉLÉGANCE & MAISON" tagline at bottom
+    63→- Updated src/app/globals.css via sed bulk replacements:
+    64→  - Replaced all #B8956A → #B89656, #D4B58A → #D4B46A, #8B6E47 → #6E5C2A (deeper antique brass)
+    65→  - Replaced all #5C4F44 → #2A2520, #3D332B → #3D3530 (darker charcoal)
+    66→  - Replaced all #2E2520 → #2A2520, #1C1815 → #1C1815 (warm dark text)
+    67→  - Replaced rgba(92, 79, 68) → rgba(42, 37, 32), rgba(184, 149, 106) → rgba(154, 126, 58) (warm rgba)
+    68→  - Replaced #FAF6F0 → #FAF8F4 (warm ivory), #D8CFC2 → #D4CDBF (warm clay)
+    69→  - Replaced #8B7B6E → #6B6358, #6B5E54 → #6B6358, #9A8E83 → #9B9489 (warm grays)
+    70→  - Updated --emerald to #2F7D5B (real sage green, matches reference's "in stock" color)
+    71→  - Updated --chart-* palette to match reference (brass, gray, clay, cocoa, stone)
+    72→  - Updated primary mapping: --primary: var(--charcoal) (was --taupe-deep, now charcoal)
+    73→  - Updated --foreground: var(--ink) (was --espresso)
+    74→  - Updated body background halos with rgba(154, 126, 58) instead of rgba(184, 149, 106)
+    75→  - Updated .text-blue-black-animated to use espresso → brass → espresso gradient (was taupe → brass → taupe)
+    76→  - Updated .neon-ring, .gold-ring, .brass-ring, .brass-text to use new brass values
+    77→- Updated src/app/layout.tsx:
+    78→  - themeColor: "#FAF8F4" (warm cream, was navy)
+    79→  - metadata description: "متجر ديكور المنزل وفنّ المائدة" (Arabic — home decor + table art)
+    80→  - keywords updated for "ديكور المنزل", "فنّ المائدة", "decoration maison", "art de la table"
+    81→  - Toaster styling: warm charcoal shadows + brass border + white bg
+    82→- Restored all 19 original Arabic component files (cart-bar, site-menu, all-products, featured-carousel, special-offers-section, product-card, categories, hero, brand-story, site-footer, free-shipping-section, product-image, product-detail-modal, product-page, cod-order-form, checkout-modal, admin-panel, layout, page) from the deploy zip — preserving ALL El Miizaan animations and Arabic UI text
+    83→- Made targeted edits to site-footer.tsx:
+    84→  - Removed TikTokIcon import, added Instagram, Facebook, Phone, MapPin from lucide-react
+    85→  - Replaced single TikTok link with three-link row: Instagram (@soumdecodz), Facebook, Téléphone (0541 645 727)
+    86→  - Added address line "Alger, Algérie" with MapPin icon
+    87→  - Updated COD line to bilingual: "💵 Paiement à la livraison · الدفع عند الاستلام" (matches reference)
+    88→- Made targeted edits to site-menu.tsx:
+    89→  - Removed TikTokIcon import, added Instagram, Facebook, Phone
+    90→  - Replaced TikTok link with three social links in drawer footer
+    91→  - Hover color: text-brass (was text-emerald)
+    92→- Updated src/app/api/order/route.ts: service name "El Miizaan order API" → "Soum Deco order API"
+    93→- Updated src/lib/drive-upload.ts: Cloudinary defaults "mxhc8k5i"/"miizaan" → "soumdeco"/"soumdeco"
+    94→- Restarted dev server cleanly (killed old PID, ran .zscripts/dev.sh)
+    95→- Ran ESLint: PASS (0 errors, 0 warnings)
+    96→- Browser-verified via agent-browser:
+    97→  - Homepage loads with "SOUM DECO" brand + French tagline (page title: "SOUM DECO — L'art de sublimer votre intérieur")
+    98→  - Arabic RTL preserved throughout (القائمة, السلة, منتجات مميّزة, كل المنتجات, حكايتنا)
+    99→  - Featured carousel shows real product data with prices in دج
+   100→  - Footer shows 3 social links (Instagram, Facebook, Téléphone) + bilingual COD line + Alger address
+   101→  - Admin panel shows "لوحة التحكم · SOUM DECO" — Arabic UI + French brand name
+   102→  - Mobile responsive (390x844 viewport) — no horizontal overflow
+   103→  - 0 console errors, only React DevTools + HMR connected logs
+   104→- Vision-model verification confirmed:
+   105→  - Brand "SOUM DECO" visible everywhere ✓
+   106→  - Warm cream background (~#F5F3EF) ✓
+   107→  - Deep charcoal text ✓
+   108→  - Antique brass accent (NOT bright gold) ✓
+   109→  - Mixed Arabic RTL + French tagline ✓
+   110→
+   111→Stage Summary:
+   112→- Site is LIVE with new SOUM DECO brand identity on dev server (PID 5334)
+   113→- All El Miizaan animations PRESERVED (ken-burns, name-reveal, glow-pulse, border-glow, sparkle-drift, carousel-fade, drawer slide, etc.)
+   114→- Arabic is primary UI language (RTL preserved) — only brand name + tagline are in French (matches reference style)
+   115→- Color palette EXACTLY matches soumdeco.netlify.app reference (extracted from their CSS):
+   116→  • Background: #FAF8F4 warm cream
+   117→  • Text: #2A2520 / #1C1815 warm charcoal
+   118→  • Accent: #9A7E3A deep antique brass (NOT bright gold like El Miizaan)
+   119→  • In-stock: #2F7D5B sage green
+   120→  • Out-of-stock: #8A4A32 terracotta
+   121→- Logo is new SVG with Cormorant Garamond serif wordmark + brass ring + laurel flourish + "ÉLÉGANCE & MAISON" tagline
+   122→- Phone number matches reference: "0541 645 727" (tel: link + LTR display in RTL layout)
+   123→- Mixed-language footer: "💵 Paiement à la livraison · الدفع عند الاستلام"
+   124→- All 3 social platforms in footer/menu: Instagram + Facebook + Téléphone
+   125→- Lint clean, 0 console errors, all API routes 200 OK
+   126→- Ready for user to provide new Google Sheet URL + Cloudinary creds (currently still using El Miizaan's)
+   127→
+   128→---
+   129→Task ID: 3
+   130→Agent: main
+   131→Task: Rebrand to SOUM DECO with exact reference palette, add email, seed 29 real products, fix admin input bug, create xlsx sheet.
+   132→
+   133→Work Log:
+   134→- Fetched soumdeco.netlify.app/api/products → got 64 real products with Cloudinary URLs
+   135→- Extracted email from reference HTML: soumdecorationdz@gmail.com (mailto link)
+   136→- Downloaded reference CSS and identified green (#2F7D5B emerald) was used as primary brand color in El Miizaan components — not appropriate for Soum Deco (which uses charcoal #2A2520 as primary)
+   137→- Selected exactly 29 products per user's specification:
+   138→  • First 6 (all arts de la table): Blanc Luxe, Blanc luxe doré, Blanc luxe avec reliefs, Blanc cassé gris, beige luxe, café au lait A
+   139→  • arts de la table positions 12,14,15,16,17: avec motifs, motif gris, Blue, Blanc luxe doré ref02, 24p vert
+   140→  • All Coussins (2): Coussin de voyage Rose, Marron
+   141→  • All Électroménager (3): Mixeur Cristor, CRISTOR BLEND-IT Noir, Blanc
+   142→  • Cuisine positions 1,5,9,13: Cocotte 06L Ref01, 06L Ref01, 06L Ref03, 06L Ref04
+   143→  • Miroirs position 1: Miroir Noir
+   144→  • Décoration positions 1,4: Jarr Terracotta, Vase décoratif Blanc
+   145→  • Lampe de chevet positions 1,5,6: Veilleuse cylindrique BB, Veilleuse OVNI, Veilleuse BB8
+   146→  • Meubes positions 1,3,4: Porte manteaux Rose, Meuble salle de bain, Meuble rangements Ref01
+   147→- Updated brand-config.ts: added email soumdecorationdz@gmail.com to contact object
+   148→- Updated globals.css: mapped --emerald to var(--charcoal) so all text-emerald/bg-emerald/border-emerald classes automatically use warm charcoal (NOT green) — matches reference's actual primary color. Kept --sage as the only green variable for rare in-stock indicators.
+   149→- Updated site-footer.tsx: added Mail icon + email link (mailto:soumdecorationdz@gmail.com) alongside Instagram, Facebook, Téléphone. Updated decorative orbs to use brass rgba instead of green rgba.
+   150→- Updated site-menu.tsx: added Mail icon + email link in drawer footer alongside Instagram, Facebook, Téléphone
+   151→- Fixed admin-panel.tsx input overwrite bug (root cause: inputs lacked id/name/autoComplete attributes, causing browser autofill to map category + badge to the same field category and overwrite each other):
+   152→  • Added unique id attributes (fld-name-{id}, fld-desc-{id}, fld-category-{id}, fld-price-{id}, fld-oldprice-{id}, fld-badge-{id}) to all text/number/textarea inputs
+   153→  • Added unique name attributes (productName, productDescription, productCategory, productPrice, productOldPrice, productBadge)
+   154→  • Added htmlFor attributes to all labels (accessibility fix — clicking label now focuses input)
+   155→  • Added autoComplete="off" + autoCorrect="off" + spellCheck={false} to all text inputs
+   156→  • Changed inputClass focus:border-emerald → focus:border-brass + focus:ring-brass/30
+   157→  • Changed checkbox accent-emerald → accent-brass, accent-neon-magenta → accent-rose-deep
+   158→  • Changed "add color/size" button bg-emerald/10 → bg-brass/10 with text-brass-deep
+   159→- Created src/lib/seed-products.ts with all 29 products as SheetProduct[] (string-based format matching sheet structure)
+   160→- Replaced SEED_PRODUCTS in src/lib/products.ts: removed old 3 El Miizaan products, added 29 Soum Deco products as Product[] (with images as string arrays, proper sortOrder 1-29)
+   161→- Updated src/app/api/products/route.ts: now tries sheet first, falls back to SEED_PRODUCTS when sheet is unreachable or returns empty. Returns { ok, products, seed } flag.
+   162→- Fixed src/lib/sheet.ts: removed hardcoded fallback to old El Miizaan sheet URL in getSheetBaseUrl() — now returns null when no env var is set, triggering seed fallback
+   163→- Updated .env: commented out NEXT_PUBLIC_SHEET_URL (so seed kicks in), updated Cloudinary creds to soumdeco placeholders, added documentation comments explaining how to configure each
+   164→- Created scripts/build-sheet-template.py: Python script using openpyxl to generate Soum-Deco-Sheet-Template.xlsx with:
+   165→  • Products tab: 17 columns (matching apps-script.gs PRODUCTS_COLS exactly), 29 products pre-filled with real Cloudinary URLs, Arabic guidance row 2, frozen panes, conditional formatting
+   166→  • Orders tab: 14 columns, status conditional formatting (New=blue, Confirmed=green, Shipped=yellow, Delivered=dark green, Cancelled=red)
+   167→  • Stock tab: 29 product names pre-filled, stock count empty (= unlimited), conditional formatting (0=red, 1-3=yellow, >3=green)
+   168→- Generated /home/z/my-project/download/Soum-Deco-Sheet-Template.xlsx (16KB)
+   169→- Copied /home/z/my-project/download/apps-script.gs for convenience
+   170→- Restarted dev server cleanly
+   171→- Browser-verified:
+   172→  • Homepage shows SOUM DECO brand + French tagline + 18 featured products in carousel + 8 categories + all 29 products in grid
+   173→  • All product images load from reference site's Cloudinary (anhvhy4j cloud)
+   174→  • Product page works: 5 image thumbnails, Arabic description, COD form with 58 wilayas
+   175→  • Admin panel bug FIXED: typed "arts de la table TEST" in category → badge stayed empty; typed "عرض خاص TEST" in badge → category stayed "arts de la table TEST" (no overwrite!)
+   176→  • 0 console errors
+   177→  • ESLint: clean (0 errors, 0 warnings)
+   178→
+   179→Stage Summary:
+   180→- Site is LIVE with 29 real Soum Deco products (PID 6857)
+   181→- Colors now match reference exactly: cream #FAF8F4 bg, charcoal #2A2520 text, antique brass #9A7E3A accent — NO green as primary
+   182→- Email added everywhere: soumdecorationdz@gmail.com (footer + menu)
+   183→- Admin category/badge overwrite bug FIXED via id/name/htmlFor/autoComplete attributes
+   184→- All El Miizaan animations preserved (ken-burns, name-reveal, glow-pulse, carousel-fade, drawer slide, etc.)
+   185→- Arabic RTL UI preserved (القائمة, السلة, منتجات مميّزة, كل المنتجات, حكايتنا, لوحة التحكم)
+   186→- /home/z/my-project/download/Soum-Deco-Sheet-Template.xlsx ready for Google Sheets import (29 products pre-filled)
+   187→- /home/z/my-project/download/apps-script.gs ready to paste into Apps Script editor
+   188→- Ready for user's future changes — just say what to change
+   189→
+   190→---
+   191→Task ID: 4
+   192→Agent: main
+   193→Task: Replace logo with uploaded image, redesign hero (no trust badge, bigger elegant title + animated tagline), apply all 4 Netlify optimizations, add w_800 Cloudinary bandwidth limit, remove "2500 بكسل" text.
+   194→
+   195→Work Log:
+   196→- Copied uploaded "/home/z/my-project/upload/LOGO .jpg" (1053x1053 JPEG, 44KB) to /home/z/my-project/public/logo.jpg
+   197→- Updated brand-config.ts: logoPath "/logo.svg" → "/logo.jpg"
+   198→- Redesigned hero.tsx completely:
+   199→  • Removed trust badge ("توصيل سريع لكل الولايات · الدفع عند الاستلام")
+   200→  • Removed Sparkles import (no longer needed)
+   201→  • Changed title from font-arabic text-4xl font-bold → font-serif text-5xl font-medium tracking-[0.08em] sm:text-7xl (Cormorant Garamond serif, lighter weight, more elegant)
+   202→  • Added letter-reveal animation to title (starts wide+blurred, settles into place over 1.2s)
+   203→  • Replaced single decorative line with elegant 3-part divider (line + dot + line) in brass
+   204→  • Made tagline bigger: font-arabic text-base → font-serif text-xl italic sm:text-3xl
+   205→  • Added tagline-float animation (gentle 3px vertical drift over 5s)
+   206→  • Updated background halos from green/gold/magenta rgba → brass/rose/sage rgba (matches brand)
+   207→  • Increased top padding (pt-14 → pt-16 sm:pt-24) for more breathing room
+   208→- Added 2 new CSS animations to globals.css:
+   209→  • tagline-float: slow 5s vertical drift (3px max) for hero tagline
+   210→  • letter-reveal: 1.2s entrance with letter-spacing collapse + blur clear for hero title
+   211→
+   212→=== NETLIFY OPTIMIZATIONS (all 4 now applied) ===
+   213→
+   214→#1: ISR revalidate=1800 (30-min server cache)
+   215→- Added `export const revalidate = 1800;` to /api/products/route.ts
+   216→- Added `export const revalidate = 1800;` to /api/stock/route.ts
+   217→- Result: thousands of visitors share 1 single function invocation
+   218→
+   219→#2: 30-minute client polling
+   220→- use-catalog.ts: POLL_MS 330_000 → 1_800_000, HIDDEN_POLL_MS 1_100_000 → 3_600_000
+   221→- use-stock.ts: POLL_MS 330_000 → 1_800_000, HIDDEN_POLL_MS 1_100_000 → 3_600_000
+   222→- Result: 80% reduction in web requests
+   223→
+   224→#3: Google Fonts CDN (instead of next/font)
+   225→- Removed `import { Inter, Cormorant_Garamond, Noto_Naskh_Arabic } from "next/font/google"` from layout.tsx
+   226→- Added <link rel="preconnect"> for fonts.googleapis.com and fonts.gstatic.com
+   227→- Added <link href="...css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,500&family=Inter:wght@300;400;500;600;700&family=Noto+Naskh+Arabic:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
+   228→- Updated globals.css @theme: --font-sans: 'Jost', 'Inter', sans-serif; --font-serif: 'Cormorant Garamond', serif; --font-arabic: 'Noto Naskh Arabic', sans-serif (was using CSS variables from next/font)
+   229→- Added italic + multiple weights for Cormorant Garamond (for elegant tagline)
+   230→- Result: ~80KB saved per first visit on Netlify bandwidth
+   231→
+   232→#4: 24-hour static asset cache headers
+   233→- Rewrote next.config.ts with async headers() function
+   234→- Added 24h immutable Cache-Control for: /_next/static/*, /products/*, /logo.jpg, /logo.svg, /data/*
+   235→- Result: repeat visitors within 24h download zero static assets
+   236→
+   237→=== CLOUDINARY BANDWIDTH OPTIMIZATION ===
+   238→- Updated product-image.tsx optimizeImageUrl() function:
+   239→  • Old: added "q_auto,f_auto/" → minimal savings (1-4%)
+   240→  • New: added "c_limit,w_800,q_auto,f_auto/" → caps delivery width at 800px, never upscales
+   241→  • c_limit is critical: plain w_800 FORCES upscaling of small images (made them 28-128% BIGGER in testing)
+   242→  • c_limit,w_800 means "max 800px, never upscale" — pure savings, zero quality loss on screens
+   243→- Tested with 4 reference images: confirmed no size increase vs original, protects against future large uploads
+   244→- Removed "جودة عالية حتى 2500 بكسل" text from admin-panel.tsx (was misleading — actual compression is 1500px)
+   245→- Replaced with simple "انقر أو اسحب وأفلت الصور هنا"
+   246→
+   247→=== IMAGE QUALITY ADVICE (provided to user) ===
+   248→Explained the Cloudinary architecture:
+   249→- Storage (25GB free) stores the ORIGINAL upload — 1500-2500px images are fine, storage is generous
+   250→- Bandwidth (25GB/month free on Cloudinary, NOT Netlify) serves TRANSFORMED versions
+   251→- Google Sheet cell stores URL (~80 chars), NOT image data — no cell limit concern
+   252→- The 2500px upload limit was about upload time + storage, NOT bandwidth
+   253→- Real bandwidth win is in DELIVERY transformations (c_limit,w_800,q_auto,f_auto)
+   254→- Recommended: keep 1500px upload quality, add w_800 delivery limit, keep q_auto,f_auto
+   255→
+   256→Stage Summary:
+   257→- Site is LIVE with new logo (uploaded LOGO .jpg), elegant hero (no trust badge, big serif title + animated tagline), all 4 Netlify optimizations applied, Cloudinary bandwidth protection active
+   258→- All El Miizaan animations preserved + 2 new ones (tagline-float, letter-reveal)
+   259→- Arabic RTL UI preserved
+   260→- 29 Soum Deco products still loading correctly
+   261→- Admin panel "2500 بكسل" text removed (silent 1500px compression)
+   262→- Lint: 0 errors, 1 warning (custom font — expected tradeoff for Netlify bandwidth savings)
+   263→- Browser-verified: 0 console errors, logo loads, Cloudinary URLs use c_limit,w_800
+   264→
+   265→---
+   266→Task ID: 5
+   267→Agent: main
+   268→Task: Fix hydration error, redesign featured carousel to match reference, fix SOUM DECO title gap + colors, verify trust badge removal.
+   269→
+   270→Work Log:
+   271→- Investigated hydration error: root cause was the `letter-reveal` CSS animation that started at `opacity: 0` with `animation-fill-mode: both`, causing server/client render mismatch. Also added `suppressHydrationWarning` to `<head>` for Google Fonts CDN links.
+   272→- Fixed hero title: 
+   273→  • Removed `letter-reveal` animation (hydration fix) — now uses simple `fade-up`
+   274→  • Split "SOUM DECO" into two spans: `<span className="brass-text">SOUM</span>` + `<span className="text-terracotta">DECO</span>`
+   275→  • SOUM = brass-text (gold gradient), DECO = text-terracotta (rust color) — matches reference exactly
+   276→  • Used `flex items-center justify-center gap-4` for reliable 16px gap (me-4/mr-4 didn't work in RTL)
+   277→  • Font: `font-serif text-5xl font-semibold tracking-tight` (Cormorant Garamond, semibold, tight tracking) — matches reference
+   278→  • Removed decorative brass divider (reference doesn't have one)
+   279→  • Tagline: `font-serif text-lg italic text-gray sm:text-xl` with `tagline-float` animation
+   280→- Redesigned featured-carousel.tsx to match reference exactly:
+   281→  • Eyebrow: "Nos Coups de Cœur" (was "Sélection")
+   282→  • Card: `bg-paper/90 shadow-xl shadow-brass/10 backdrop-blur-sm border border-brass/20` (transparent)
+   283→  • Dark gradient overlay on image: `bg-gradient-to-t from-ink/60 via-transparent to-transparent`
+   284→  • Category badge: top-LEFT (was top-right), `bg-paper/70 backdrop-blur-sm border border-brass/20`
+   285→  • Title + price OVERLAID on image at bottom: `text-cream drop-shadow-md` for title, `text-brass-bright` for price
+   286→  • No separate title/price section below image — everything overlaid
+   287→  • Arrows: `h-9 w-9 bg-paper/80 backdrop-blur-sm border-brass/30` (smaller, transparent)
+   288→  • Dots: `h-1.5` (thinner), active `w-6 bg-brass`, inactive `w-1.5 bg-clay/60`
+   289→  • Rupture overlay: `bg-ink/50` with `bg-charcoal` badge
+   290→- Verified trust badge removal: `curl -s http://localhost:3000/ | grep -c "توصيل سريع لكل الولايات"` returns 0. Vision model confirmed no Arabic trust badges at top. User was seeing cached version.
+   291→- Added `suppressHydrationWarning` to `<head>` element in layout.tsx for Google Fonts CDN links
+   292→
+   293→Stage Summary:
+   294→- Hydration error FIXED (removed letter-reveal animation + suppressHydrationWarning on head)
+   295→- SOUM DECO title FIXED (visible gap, SOUM gold + DECO terracotta, matching reference font)
+   296→- Featured carousel REDESIGNED (transparent card, overlay title+price, dark gradient, "Nos Coups de Cœur" eyebrow)
+   297→- Trust badge CONFIRMED REMOVED (0 occurrences in HTML, vision-verified)
+   298→- Vision model confirmed: gap visible, SOUM gold, DECO burgundy/terracotta
+   299→- 0 console errors, 0 hydration errors
+   300→- Lint: 0 errors, 1 warning (custom font — expected tradeoff)
+   301→
+   302→---
+   303→Task ID: 6
+   304→Agent: main
+   305→Task: Fix SOUM DECO header, add vivid gold gradient to tagline (no float), convert entire site from RTL to LTR, reduce CPU animations, verify all admin panel functions.
+   306→
+   307→Work Log:
+   308→- Added .text-gold-glow CSS class to globals.css: vivid gold shimmer (#6E5C2A → #B89656 → #D4B46A → #E8C878 → #D4B46A → #B89656 → #6E5C2A) with drop-shadow glow (rgba 184,150,86 + rgba 212,180,106). 4s linear infinite.
+   309→- Rewrote hero.tsx:
+   310→  • Removed dir="rtl" lang="ar" (LTR)
+   311→  • Removed float-strong from 3 background orbs → now static (CPU optimization)
+   312→  • Removed pulse-soft from logo glow → now static (CPU optimization)
+   313→  • Removed tagline-float animation (user requested)
+   314→  • Tagline now uses .text-gold-glow class (vivid gold gradient + glow halo)
+   315→  • SOUM/DECO split preserved: brass-text SOUM + text-terracotta DECO, flex gap-4
+   316→- Changed layout.tsx: <html lang="ar" dir="rtl"> → <html lang="fr" dir="ltr">
+   317→- Bulk removed ALL dir="rtl" and lang="ar" from every .tsx file (45 instances across 15+ components)
+   318→- Changed ALL text-right → text-left across all components (LTR alignment)
+   319→- Swapped drawer directions for LTR:
+   320→  • Cart drawer: drawer-panel-left absolute left-0 border-r → drawer-panel-right absolute right-0 border-l (slides from RIGHT)
+   321→  • Menu drawer: drawer-panel-right absolute right-0 border-l → drawer-panel-left absolute left-0 border-r (slides from LEFT)
+   322→- Verified admin panel functions:
+   323→  • Login works (password 007) ✅
+   324→  • Dashboard shows 29 products with edit/delete/move buttons ✅
+   325→  • Edit form opens with ALL fields: name, description, category (combobox), price, old price, badge, featured checkbox, special offer checkbox ✅
+   326→  • Category + badge bug fix VERIFIED: typed "arts de la table TEST" in category → badge stayed empty; typed "عرض خاص TEST" in badge → category stayed "arts de la table TEST" ✅
+   327→  • "عرض في المنتجات المميزة" (featured) checkbox present and checked ✅
+   328→  • "عرض في قسم العروض الخاصة" (special offer) checkbox present and unchecked ✅
+   329→  • Save + Cancel buttons present ✅
+   330→- Browser-verified:
+   331→  • 0 console errors, 0 page errors
+   332→  • LTR layout: menu button LEFT, cart button RIGHT (standard LTR convention)
+   333→  • Menu drawer slides from LEFT ✅ (shows Instagram, Facebook, Téléphone, Email links)
+   334→  • Cart drawer slides from RIGHT ✅
+   335→  • All home page sections present: Hero (SOUM DECO + gold tagline), Featured Carousel (Nos Coups de Cœur), Categories (8 categories), All Products (29 products)
+   336→- Lint: 0 errors, 0 warnings
+   337→
+   338→Stage Summary:
+   339→- Site is now fully LTR (left-to-right) layout matching French e-commerce convention
+   340→- SOUM DECO title: brass-text (gold) + text-terracotta (rust) with gap-4, font-serif semibold
+   341→- Tagline: vivid gold gradient glow (.text-gold-glow), no float animation
+   342→- CPU optimized: background orbs static, logo glow static, no continuous floating animations
+   343→- All admin panel functions verified working: login, edit, category/badge fix, featured/special offer checkboxes, save/cancel
+   344→- Drawers: menu from left, cart from right (LTR convention)
+   345→- 0 errors, 0 warnings, 0 console errors
+   346→
+   347→---
+   348→Task ID: 7
+   349→Agent: main
+   350→Task: Move gold glow from tagline to SOUM DECO title (gray-gold slow gradient), fix admin CRUD bug (changes not persisting), complete revision and testing.
+   351→
+   352→Work Log:
+   353→
+   354→=== CRITICAL BUG FIX: Admin CRUD not persisting ===
+   355→ROOT CAUSE: In use-catalog.ts refresh() function, when the API returned seed products (data.seed === true), the code called saveCatalog(next) which OVERWROTE localStorage with the 29 seed products — destroying every admin edit (add/delete/modify/tick). This happened on every refresh() call (after every upsert/delete, and every 5.5 min via polling).
+   356→
+   357→FIX: Added a `data.seed === true` branch in refresh():
+   358→- If localStorage key is null (first visit ever) → seed with 29 demo products
+   359→- If localStorage has data (admin made edits) → load from localStorage (preserve edits)
+   360→- Only real sheet data (seed === false) overwrites localStorage
+   361→
+   362→=== HERO GLOW SWAP ===
+   363→- Added .text-soum-deco-glow CSS class: gray (#6B6358) → gold (#9A7E3A) → bright gold (#D4B46A) → gold → gray, 6s linear infinite, with drop-shadow glow
+   364→- Applied to BOTH "SOUM" and "DECO" spans in the h1 title
+   365→- Removed .text-gold-glow from tagline — now plain italic gray (text-gray)
+   366→
+   367→=== COMPLETE ADMIN CRUD TESTING (all verified) ===
+   368→TEST 1 — DELETE:
+   369→  • Started with 29 products
+   370→  • Clicked delete on first product → confirm dialog appeared
+   371→  • Accepted dialog → product removed
+   372→  • Result: 28 products, deleted product gone from localStorage AND storefront ✓
+   373→
+   374→TEST 2 — EDIT + TICK:
+   375→  • Opened edit form on first product
+   376→  • Changed name from "Service a table Blanc luxe doré" to "TEST EDITED PRODUCT"
+   377→  • Ticked "عرض في قسم العروض الخاصة" (special offer) checkbox
+   378→  • Clicked save
+   379→  • Result: localStorage shows {name: "TEST EDITED PRODUCT", isSpecialOffer: true} ✓
+   380→
+   381→TEST 3 — ADD:
+   382→  • Clicked "إضافة منتج" (add product)
+   383→  • Filled name="NEW TEST PRODUCT", description, category="Test Category", price=999
+   384→  • Clicked save
+   385→  • Result: 29 products (28+1), new product in localStorage with correct fields ✓
+   386→
+   387→TEST 4 — PERSISTENCE AFTER REFRESH:
+   388→  • Refreshed the page (navigated to / then back)
+   389→  • Result: count=29, edited product preserved (name + isSpecialOffer), added product preserved, deleted product correctly gone ✓
+   390→  • Storefront reflected all changes: edited product showed with special offer badge, deleted product absent ✓
+   391→
+   392→CLEANUP: Reset localStorage to restore 29 seed products for clean state.
+   393→
+   394→=== FINAL VERIFICATION ===
+   395→- 29 products in localStorage (re-seeded after cleanup)
+   396→- First product: "Service a table Blanc Luxe" (original seed)
+   397→- SOUM DECO title: gray-to-gold glow (text-soum-deco-glow class)
+   398→- Tagline: plain italic gray (no glow)
+   399→- 0 console errors, 0 page errors
+   400→- Lint: 0 errors, 0 warnings
+   401→
+   402→Stage Summary:
+   403→- ADMIN CRUD BUG FIXED: all add/edit/delete/tick/untick operations now persist correctly
+   404→- The 29 seed products can be freely deleted, modified, or have new products added — all changes persist across page refreshes
+   405→- When user configures a real Google Sheet, the sheet becomes source of truth (seed mode disabled)
+   406→- Hero title has gray-gold slow gradient glow, tagline is plain
+   407→- Complete revision done: 0 errors, all functions working perfectly
+   408→
+   409→---
+   410→Task ID: 8
+   411→Agent: main
+   412→Task: Fix special offer badge not appearing + add vivid red glow frame on special offer cards.
+   413→
+   414→Work Log:
+   415→=== BUG FIX: Special offer badge (شارة العرض) not appearing ===
+   416→ROOT CAUSE: special-offers-section.tsx only showed a static 🎁 emoji badge — it never displayed the product's `p.badge` text field that admins set in the "شارة العرض" input.
+   417→
+   418→FIX: Rewrote special-offers-section.tsx:
+   419→- If `p.badge` is set (non-empty): shows "🎁 {p.badge}" (emoji + the admin's custom badge text)
+   420→- If `p.badge` is empty: shows just "🎁" (fallback emoji)
+   421→- Badge styling: red border + red text + shadow to match the red glow theme
+   422→- Price color changed to text-red-600 for special offer cards (was text-emerald)
+   423→
+   424→=== FEATURE: Vivid red glow frame on special offer cards ===
+   425→Added .special-red-frame CSS class to globals.css:
+   426→- 2s ease-in-out infinite animation
+   427→- Two-layer pulsing red box-shadow:
+   428→  • Outer: 0 0 0 2px red border + 20px + 40px expanding glow
+   429→  • Drop shadow: 8px 24px -6px red
+   430→- Animated red border (rgba 220,38,38 → rgba 239,68,68 → back)
+   431→- Colors: red-600 (#DC2626) to red-500 (#EF4444) — vivid and evident
+   432→- Applied to the entire card button element (frames the whole product card)
+   433→
+   434→=== VERIFICATION (complete flow tested) ===
+   435→1. Admin: edited "Service a table Blanc Luxe"
+   436→2. Ticked "عرض في قسم العروض الخاصة" checkbox → verified checked=true
+   437→3. Typed "عرض ذهبي" in "شارة العرض" field → verified value saved
+   438→4. Clicked save → verified localStorage: {isSpecialOffer: true, badge: "عرض ذهبي"}
+   439→5. Went to storefront → verified:
+   440→   • "عروض خاصة" section appeared (heading + red divider)
+   441→   • "عرض ذهبي" badge text appeared on the product card
+   442→   • 1 element with .special-red-frame class (the glowing card)
+   443→   • Product also appeared in all-products grid with badge text
+   444→6. 0 console errors, 0 page errors
+   445→7. Reset localStorage to clean 29-product seed state
+   446→
+   447→Stage Summary:
+   448→- Special offer badge text NOW APPEARS on special offer cards (was only showing 🎁 emoji before)
+   449→- Vivid red animated glow frame on every special offer card (2s pulse, red-600 to red-500)
+   450→- Badge shows "🎁 {custom text}" when admin sets badge, "🎁" when empty
+   451→- All admin changes persist correctly (verified in previous task)
+   452→- 0 errors, 0 warnings, all functions working perfectly
+   453→
+   454→---
+   455→Task ID: 9
+   456→Agent: main
+   457→Task: Replace red glow with elmiizaan-style elegant gray/brass glow (matching glow speeds and types).
+   458→
+   459→Work Log:
+   460→- Fetched elmiizaan.space-z.ai reference site + downloaded both CSS files
+   461→- Analyzed elmiizaan glow classes:
+   462→  • glow-pulse: 4s ease-in-out infinite, gray (#4a5568) box-shadow halo
+   463→  • border-glow: 4s ease-in-out infinite, animated border color
+   464→  • cat-glow: 4.5s ease-in-out infinite (category buttons)
+   465→  • No red glow anywhere — elmiizaan uses warm gray/brass tones throughout
+   466→- Removed the red glow CSS (.special-red-frame, @keyframes special-red-glow) from globals.css
+   467→- Updated existing glow-pulse and border-glow from 5s → 4s timing (matches elmiizaan exactly)
+   468→- Rewrote special-offers-section.tsx:
+   469→  • Replaced .special-red-frame with .glow-pulse + .border-glow (elmiizaan-style)
+   470→  • Changed border color from red to brass (border-brass/30, hover:border-brass/60)
+   471→  • Changed badge colors from red to brass (border-brass/60, text-brass-deep)
+   472→  • Changed price color from red to brass-deep
+   473→  • Changed header accent from red to brass (✧ symbols, brass divider)
+   474→  • Kept the badge text display (🎁 + p.badge) — critical feature preserved
+   475→- Verified glow speeds match elmiizaan:
+   476→  • glow-pulse: 4s ease-in-out infinite ✓
+   477→  • border-glow: 4s ease-in-out infinite ✓
+   478→  • cat-glow: 4.5s (unchanged, already existed) ✓
+   479→- Browser-tested: set product as special offer with badge "عرض ذهبي"
+   480→  • Special offers section appeared with "عروض خاصة" heading ✓
+   481→  • Badge text "عرض ذهبي" displayed on card ✓
+   482→  • 1 element with .glow-pulse class ✓
+   483→  • 1 element with .border-glow class ✓
+   484→  • 0 console errors ✓
+   485→- Reset localStorage to clean 29-product seed state
+   486→
+   487→Stage Summary:
+   488→- Red glow REPLACED with elmiizaan-style elegant warm brass glow
+   489→- Glow speeds match elmiizaan exactly (4s glow-pulse, 4s border-glow)
+   490→- Special offer cards now have: warm brass halo (glow-pulse) + animated brass border (border-glow)
+   491→- Badge text (شارة العرض) still displays correctly
+   492→- All colors consistent with the Soum Deco brand palette (brass, not red)
+   493→- 0 errors, 0 warnings
+   494→
+   495→---
+   496→Task ID: 10
+   497→Agent: main
+   498→Task: Revert special-offers-section.tsx to original (keep ONLY glow + badge text display). Clarify seed products have no special priority.
+   499→
+   500→Work Log:
+   501→- Restored original special-offers-section.tsx from deploy zip (all original text, colors, dir="rtl", lang="ar", neon-magenta accents, 🎁 emoji, structure preserved)
+   502→- Made ONLY 2 minimal additions to the restored original:
+   503→  1. Added `glow-pulse border-glow` classes to the card button (elmiizaan-style glow, 4s ease-in-out)
+   504→  2. Kept the badge text display: if p.badge is set → shows "🎁 {badge text}", otherwise shows just "🎁"
+   505→- Reverted ALL other text/UI changes:
+   506→  • Header: back to 🎁 emoji + "عروض" (was changed to ✧ + brass)
+   507→  • Divider: back to magenta gradient (was changed to brass)
+   508→  • Card border: back to border-neon-magenta/40 (was changed to brass)
+   509→  • Badge colors: back to text-neon-magenta (was changed to brass-deep)
+   510→  • Price color: back to text-emerald (was changed to brass-deep)
+   511→  • All dir="rtl" lang="ar" preserved (was removed in LTR conversion)
+   512→  • All text-right preserved (was changed to text-left)
+   513→
+   514→=== SEED PRODUCTS CLARIFICATION ===
+   515→- The 29 seed products are NOT reference products, NOT special, NOT protected
+   516→- They are just regular products with normal fields: id, name, description, category, price, image, featured (true/false), sortOrder
+   517→- 18 of them have featured=true (because they were featured on the reference site)
+   518→- All 29 have: isSpecialOffer=false, badge="", oldPrice=null, stock=null
+   519→- Admin can freely: delete any, modify any, tick/untick featured, tick/untick special offer, reorder
+   520→- They behave IDENTICALLY to products the admin adds manually
+   521→- The only difference: they were pre-loaded (by me) instead of added by the admin
+   522→- The "Reset" button in admin panel restores them — that's a feature, not protection
+   523→
+   524→=== VERIFICATION ===
+   525→- Original magenta colors restored (text-neon-magenta found in DOM) ✓
+   526→- glow-pulse class applied to special offer card (1 element) ✓
+   527→- Badge text "عرض ذهبي" displays correctly ✓
+   528→- 0 console errors, 0 page errors ✓
+   529→- Lint: 0 errors, 0 warnings ✓
+   530→- Reset localStorage to clean 29-product seed state
+   531→
+   532→Stage Summary:
+   533→- special-offers-section.tsx is back to original EXCEPT for the 2 requested features (glow + badge text)
+   534→- All original text, colors, structure, RTL, Arabic preserved
+   535→- Seed products confirmed to have no special priority — they are regular products
+   536→
+   537→---
+   538→Task ID: 11
+   539→Agent: main
+   540→Task: Complete code scan — fix errors, verify wiring, optimize for phone CPU.
+   541→
+   542→Work Log:
+   543→
+   544→=== CRITICAL BUG FIX ===
+   545→- products.ts normalizeProduct() was missing the required `inStock` field in its return object
+   546→- This caused a TypeScript error and could cause runtime issues when components accessed product.inStock
+   547→- Fixed: added `inStock: p.inStock !== false` (defaults to true unless explicitly false)
+   548→
+   549→=== CPU OPTIMIZATION FOR PHONES ===
+   550→1. Replaced text-blue-black-animated (8s background-position shimmer) with text-blue-black (static gradient) on ALL product cards:
+   551→   - product-card.tsx: 29 cards on home page were running 29 simultaneous shimmer animations
+   552→   - special-offers-section.tsx: product names in special offers grid
+   553→   - Result: 29 continuous background-position animations REMOVED — biggest CPU win
+   554→   - Kept animated version for section titles only (4 elements total: all-products, categories, brand-story, footer)
+   555→
+   556→2. Made cat-glow and badge-glow STATIC (were continuous 5s/4s box-shadow animations):
+   557→   - Was: 8+ category buttons each running continuous box-shadow pulse = 8 repaint loops
+   558→   - Now: no continuous animation on category buttons
+   559→   - The .cat-glow and .badge-glow classes still exist (for compatibility) but have no animation
+   560→
+   561→3. Removed 3 unused CSS animation classes:
+   562→   - text-gold-glow (replaced by text-soum-deco-glow, not used anywhere)
+   563→   - tagline-float (removed from hero, not used)
+   564→   - letter-reveal (removed from hero, was causing hydration issues)
+   565→   - CSS file: 35KB → 32KB (smaller = faster parse on phones)
+   566→
+   567→4. Infinite animations reduced: 25 → 21 (removed 4 unused)
+   568→
+   569→=== CODE CLEANUP ===
+   570→- Removed debug console.log from api/order/route.ts (was logging customer data in dev mode)
+   571→- Kept console.error for actual error handling (appropriate)
+   572→
+   573→=== VERIFICATION ===
+   574→- Lint: 0 errors, 0 warnings ✓
+   575→- TypeScript: 0 errors in src/ ✓ (inStock bug fixed)
+   576→- Build: succeeds ✓
+   577→- Browser: 0 console errors, 0 page errors ✓
+   578→- 29 products render correctly ✓
+   579→- All sections present: Hero, Featured Carousel, Categories, All Products, Brand Story, Footer ✓
+   580→- Animated shimmer: only 4 elements (section titles) — down from 33+ (was 29 product cards + 4 titles)
+   581→- Static gradient: 29 elements (all product cards) — zero CPU cost
+   582→- CSS size: 32KB (was 35KB)
+   583→
+   584→=== REMAINING INFINITE ANIMATIONS (all acceptable) ===
+   585→- soum-deco-shimmer (hero title): 1 element, 6s — the brand centerpiece
+   586→- blue-black-shimmer (section titles): 4 elements, 8s — elegant accent
+   587→- shimmer-line (skeleton loaders): only during loading, stops when content arrives
+   588→- glow-pulse + border-glow (special offers): only on special offer cards (0-3 typically)
+   589→- brass-shimmer (gradient borders, badge shimmer): 2 elements max
+   590→- Others (neon-pulse, float-strong, etc.): defined but not actively used in current layout
+   591→
+   592→Stage Summary:
+   593→- Critical inStock bug FIXED
+   594→- Phone CPU optimized: 29 continuous shimmer animations removed from product grid
+   595→- Category button glows made static (was 8 continuous box-shadow animations)
+   596→- 3 unused CSS classes removed (CSS 35KB → 32KB)
+   597→- All wiring verified correct: lint, type check, build all pass
+   598→- 0 errors, 0 warnings, site runs smoothly
+   599→
+   600→---
+   601→Task ID: 12
+   602→Agent: main
+   603→Task: Redesign AllProducts to horizontal category sections with horizontal product scroll.
+   604→
+   605→Work Log:
+   606→
+   607→=== SHARED CATEGORY ICON ===
+   608→- Extracted CategoryIcon function (365 lines, 18 icon types) from categories.tsx into new shared file: src/components/site/category-icon.tsx
+   609→- Updated categories.tsx to import CategoryIcon from the shared file
+   610→- Both Categories (filter buttons) and AllProducts (section headers) now use the same icon logic
+   611→
+   612→=== ALLPRODUCTS REDESIGN ===
+   613→- Rewrote all-products.tsx with horizontal category sections:
+   614→  • Each category has a small elegant header: icon (in brass-tinted square) + name + count + brass divider line
+   615→  • Products below the header are in a horizontal scrollable row (cat-row-scroll)
+   616→  • Horizontal scroll with snap, hidden scrollbars, smooth touch scrolling
+   617→  • Product cards have fixed width (9rem phone, 11rem desktop) for clean horizontal layout
+   618→- "منتجات أخرى" (Other Products) section automatically appears for products with no category
+   619→- If a category filter is active, shows that single category as a horizontal row
+   620→- Empty state message for when there are no products at all
+   621→
+   622→=== PRODUCT CARD UPDATE ===
+   623→- Removed the category badge from product cards (was redundant since products are now grouped by category)
+   624→- Kept: badge (شارة العرض), low-stock badge, rupture overlay
+   625→- Cards work in both horizontal scroll (fixed width) and grid layouts
+   626→
+   627→=== CSS ADDITIONS ===
+   628→- .cat-row-scroll: horizontal flex, scroll-snap-x, hidden scrollbars, touch scrolling
+   629→- .cat-section-header: flex layout with icon + name + count + divider
+   630→- .cat-icon-wrap: 2rem brass-tinted square for category icon
+   631→- .product-card-h: fixed width for horizontal scroll (9rem phone, 11rem desktop)
+   632→
+   633→=== EDGE CASES TESTED ===
+   634→1. Product with no category → appears in "منتجات أخرى" section ✓
+   635→2. Delete all products in a category → category section disappears automatically ✓
+   636→3. Add new category → new section appears automatically ✓
+   637→4. No products at all → shows empty state message ✓
+   638→5. Category filter active → shows single category as horizontal row ✓
+   639→6. 29 seed products render in 8 category sections ✓
+   640→
+   641→=== VERIFICATION ===
+   642→- Lint: 0 errors, 0 warnings ✓
+   643→- TypeScript: 0 errors ✓
+   644→- Browser: 0 console errors ✓
+   645→- 8 category headers with icons ✓
+   646→- 8 horizontal scroll rows ✓
+   647→- Products grouped correctly by category ✓
+   648→- "منتجات أخرى" section for uncategorized products ✓
+   649→- Empty categories automatically removed ✓
+   650→- Reset to clean 29-product seed state
+   651→
+   652→Stage Summary:
+   653→- AllProducts now shows categories as horizontal sections — customers see all categories without scrolling down
+   654→- Each category: small elegant header (icon + name + count) + horizontal product scroll
+   655→- Products without category → "منتجات أخرى" section
+   656→- All add/delete scenarios work perfectly: empty categories disappear, new categories appear, uncategorized products grouped
+   657→- Charm and elegance preserved: Cormorant Garamond serif headers, brass accents, smooth scroll, no visual clutter
+   658→
+   659→---
+   660→Task ID: 13
+   661→Agent: main
+   662→Task: Add scroll arrows, fix category filtering bug, treat Other Products as regular category, increase special offer glow.
+   663→
+   664→Work Log:
+   665→
+   666→=== FIX #1: SCROLL ARROWS ===
+   667→- Added left/right chevron arrows to each CategoryRow in AllProducts
+   668→- Arrows appear/disappear based on scroll position (canScrollLeft, canScrollRight state)
+   669→- Clicking an arrow scrolls by one card width + gap (smooth scroll)
+   670→- Arrows styled: white/90 bg, brass border, backdrop-blur, hover to charcoal
+   671→- Arrows disappear at start/end of scroll (no dead arrows)
+   672→
+   673→=== FIX #2: CATEGORY FILTERING BUG (false category) ===
+   674→ROOT CAUSE: When a category was selected, AllProducts showed <CategoryRow name={activeCategory} products={products} /> — passing ALL products, not filtered. So clicking "Coussins" showed all 29 products under the "Coussins" header.
+   675→
+   676→FIX: Added proper filtering logic:
+   677→- filteredProducts = useMemo that filters by activeCategory
+   678→- If activeCategory === OTHER_CATEGORY → filters products with empty category
+   679→- Else → filters products where category matches activeCategory
+   680→- CategoryRow now receives filteredProducts (not all products)
+   681→- Empty filter result shows "لا توجد منتجات في هذه الفئة" message
+   682→
+   683→=== FIX #3: OTHER PRODUCTS AS REGULAR CATEGORY ===
+   684→- Updated Categories.tsx: if any product has empty category, add OTHER_CATEGORY ("منتجات أخرى") to the categories list
+   685→- Updated Categories.tsx: render the "other" icon (3 dots) for OTHER_CATEGORY button
+   686→- Updated AllProducts.tsx: products with empty category are grouped under OTHER_CATEGORY
+   687→- OTHER_CATEGORY now appears in: category buttons grid, AllProducts horizontal sections, AND can be filtered
+   688→- Both components share the same OTHER_CATEGORY constant
+   689→
+   690→=== FIX #4: STRONGER SPECIAL OFFER GLOW ===
+   691→- Created new .special-glow-pulse CSS class (stronger than .glow-pulse):
+   692→  • 0%/100%: 4px shadow + 1px brass border + 28px brass glow + 50px bright brass outer glow
+   693→  • 50%: 8px shadow + 2px brass border (0.50 opacity) + 44px brass glow (0.55) + 72px bright brass outer (0.40)
+   694→  • 4s ease-in-out infinite (same speed as glow-pulse, just stronger values)
+   695→- Updated special-offers-section.tsx: glow-pulse border-glow → special-glow-pulse border-glow
+   696→- Original .glow-pulse kept for other potential uses (not currently used elsewhere)
+   697→
+   698→=== VERIFICATION (all scenarios tested) ===
+   699→1. Arrows: 4 arrow buttons appear after scrolling, disappear at start/end ✓
+   700→2. Category filter: clicking "Coussins" shows ONLY 2 Coussin products (not 29) ✓
+   701→3. Other Products: appears as category button, clicking filters to uncategorized products ✓
+   702→4. Special glow: special-glow-pulse class applied to special offer card ✓
+   703→5. 0 console errors throughout all tests ✓
+   704→6. Lint: 0 errors, 0 warnings ✓
+   705→7. Reset to clean 29-product seed state (8 categories, no uncategorized)
+   706→
+   707→Stage Summary:
+   708→- All 4 issues fixed and tested
+   709→- Horizontal scroll rows now have elegant left/right arrows
+   710→- Category filtering works correctly (no more false category bug)
+   711→- "منتجات أخرى" is a regular category (button + filterable + same treatment)
+   712→- Special offer cards glow more evidently (stronger brass halo, same 4s speed)
+   713→- All edge cases handled: empty categories disappear, new categories appear, uncategorized grouped
+   714→
+   715→---
+   716→Task ID: 14
+   717→Agent: main
+   718→Task: Make hero title thinner, add quantity input for >4pcs, fix product card height inconsistency.
+   719→
+   720→Work Log:
+   721→
+   722→=== FIX #1: HERO TITLE — THINNER + SIMPLER + ELEGANT ===
+   723→- Changed font weight: font-semibold (600) → font-light (300) — much thinner, more elegant
+   724→- Changed letter-spacing: tracking-tight (-0.025em) → tracking-[0.15em] — wider, more refined
+   725→- Kept: gap-4 (space between SOUM and DECO), text-soum-deco-glow (gray-to-gold gradient glow)
+   726→- Kept: font-serif (Cormorant Garamond), text-5xl sm:text-6xl (same size)
+   727→- Verified: font-light class applied, gap-4 preserved
+   728→
+   729→=== FIX #2: QUANTITY INPUT FOR >4PCS ===
+   730→- Kept the 4 quick-select buttons (1, 2, 3, 4) exactly as they were
+   731→- Added a "+" separator and a number input after the 4 buttons
+   732→- Input features:
+   733→  • Placeholder "5+" indicates it's for quantities >4
+   734→  • min={5} attribute
+   735→  • Styled identically to the buttons (same height, border, bg)
+   736→  • When value >4: gets the active style (bg-animated-black, white text)
+   737→  • When value 1-4: buttons are active, input is empty
+   738→  • onFocus clears the input if current qty is 1-4 (so user can type fresh)
+   739→  • aria-label="كمية مخصصة" for accessibility
+   740→- Tested: typing 7 sets quantity to 7, total calculates correctly (16600 × 7 = 116200 DA)
+   741→- Updated comment to reflect the new behavior
+   742→
+   743→=== FIX #3: PRODUCT CARD HEIGHT — ALL IDENTICAL ===
+   744→ROOT CAUSE: Product cards had different heights because:
+   745→1. Titles used line-clamp-2 (could be 1 or 2 lines) — different title heights
+   746→2. The button didn't have w-full, so in horizontal rows it didn't stretch to card width
+   747→3. Without stretching, the image (aspect-square) was smaller on some cards
+   748→
+   749→FIX (3 changes):
+   750→1. Title: min-h-[2.5rem] → h-10 (fixed 2-line height, 40px)
+   751→2. Price: min-h-[1.25rem] → h-5 (fixed height, 20px)
+   752→3. Button: added h-full w-full (stretches to fill the product-card-h wrapper)
+   753→4. CSS: added align-items: stretch to .cat-row-scroll (forces all cards in a row to same height)
+   754→5. CSS: added display: flex + align-self: stretch to .product-card-h
+   755→
+   756→RESULT: All 29 product cards are now EXACTLY 264px tall — allSame: true
+   757→
+   758→=== VERIFICATION ===
+   759→- Lint: 0 errors, 0 warnings ✓
+   760→- TypeScript: 0 errors ✓
+   761→- Hero title: font-light + tracking-[0.15em] + gap-4 all applied ✓
+   762→- Product cards: all 29 cards = 264px (was 195-264px, 6 different heights) ✓
+   763→- Quantity input: typing 7 → quantity=7, total=116,200 DA (16600×7) ✓
+   764→- 4 quick-select buttons still work ✓
+   765→- 0 console errors ✓
+   766→
+   767→Stage Summary:
+   768→- Hero title: thin, elegant, light weight (300), wide letter-spacing, gold glow preserved, gap preserved
+   769→- Order form: 4 buttons (1-4) + number input for any quantity (5+), total calculates correctly
+   770→- Product cards: ALL identical height (264px) regardless of title length
+   771→- All 3 issues fixed and tested, 0 errors
+   772→
+   773→---
+   774→Task ID: 15
+   775→Agent: main
+   776→Task: Fix hero letter-spacing, prepare multi-company shipping architecture, update sheet + apps-script.
+   777→
+   778→Work Log:
+   779→
+   780→=== FIX #1: HERO TITLE — NO LETTER-SPACING, SMALLER ===
+   781→- Changed tracking-[0.15em] → tracking-normal (no extra space between letters)
+   782→- Changed text-5xl sm:text-6xl → text-4xl sm:text-5xl (smaller, more elegant)
+   783→- Kept: gap-4 (16px gap between SOUM and DECO only), font-light (300), font-serif
+   784→- Verified: letterSpacing="normal", fontSize="48px", fontWeight="300", gap="16px"
+   785→
+   786→=== FIX #2: MULTI-COMPANY SHIPPING ARCHITECTURE PREPARED ===
+   787→Added the full infrastructure for multiple shipping companies (not yet implemented in UI — ready for when user says to implement):
+   788→
+   789→1. xlsx template (Soum-Deco-Sheet-Template.xlsx):
+   790→   - NEW "Shipping" tab with columns: Company | Wilaya Code | Wilaya Name | Stop Desk Price | Home Price | Delay (days)
+   791→   - Pre-filled with 116 rows (2 companies × 58 wilayas): Yalidine Express + Économique
+   792→   - Admin can add/remove companies from this tab directly
+   793→
+   794→2. apps-script.gs (in /download/):
+   795→   - Added SHIPPING_SHEET = 'Shipping' constant
+   796→   - Added ?action=shipping endpoint to doGet()
+   797→   - Added serveShipping() function: reads Shipping tab, returns JSON array
+   798→   - Returns: [{ company, wilayaCode, wilayaName, stopDesk, home, delay }, ...]
+   799→   - If no Shipping tab exists → returns empty array (website falls back to hardcoded)
+   800→
+   801→3. /api/shipping/route.ts (NEW):
+   802→   - GET /api/shipping → fetches from sheet's ?action=shipping
+   803→   - Falls back to FALLBACK_SHIPPING when no sheet configured
+   804→   - Returns: { ok, shipping: [...], source: "sheet" | "fallback" }
+   805→
+   806→4. shipping.ts updates:
+   807→   - Added ShippingCompanyEntry type: { company, wilayaCode, wilayaName, stopDesk, home, delay }
+   808→   - Added WILAYA_NAMES record (58 wilaya names)
+   809→   - Added FALLBACK_SHIPPING: 116 entries built from existing SHIPPING_TABLE
+   810→   - Current express/economique system preserved (backward compatible)
+   811→   - Fixed declaration order: WILAYA_NAMES before FALLBACK_SHIPPING
+   812→
+   813→=== VERIFICATION ===
+   814→- /api/shipping returns 116 entries, source="fallback" ✓
+   815→- Sample: Yalidine Express → Wilaya 1 (Adrar): desk=1750DA, home=1850DA, delay=4d ✓
+   816→- Lint: 0 errors, 0 warnings ✓
+   817→- TypeScript: 0 errors ✓
+   818→- Browser: 0 console errors ✓
+   819→- Hero title: letterSpacing="normal", fontSize="48px", fontWeight="300", gap="16px" ✓
+   820→
+   821→=== CURRENT STATE (backward compatible) ===
+   822→- The website still uses the current express/economique shipping system
+   823→- The /api/shipping endpoint is ready but not yet used by the order form
+   824→- When user is ready to implement multi-company UI, the infrastructure is in place
+   825→- Sheet template has the Shipping tab ready for when user pastes the apps-script
+   826→
+   827→---
+   828→Task ID: 16
+   829→Agent: main
+   830→Task: Revert sheet/API multi-company changes — just add simple client-side company selector in order form.
+   831→
+   832→Work Log:
+   833→
+   834→=== REVERTED (per user request — keep it simple) ===
+   835→1. Removed /api/shipping route (deleted entire /src/app/api/shipping/ directory)
+   836→2. Restored original apps-script.gs (no serveShipping function)
+   837→3. Rebuilt xlsx template WITHOUT Shipping tab (back to 3 tabs: Products, Orders, Stock)
+   838→4. Removed multi-company shipping additions from shipping.ts (FALLBACK_SHIPPING, ShippingCompanyEntry, WILAYA_NAMES)
+   839→
+   840→=== SIMPLE COMPANY SELECTOR (client-side only) ===
+   841→The existing express/economique system was ALREADY a company selector — just mislabeled as "speed".
+   842→- Relabeled SHIPPING_SPEED_LABELS_AR:
+   843→  • express: "توصيل سريع" → "Yalidine Express"
+   844→  • economique: "توصيل عادي" → "Économique"
+   845→- Relabeled the order form section:
+   846→  • "سرعة التوصيل" → "شركة التوصيل · Société de livraison"
+   847→  • Help text: "نوفّر التوصيل عبر Yalidine Express" → "اختر شركة التوصيل المناسبة لك"
+   848→- The selected company is already sent to the sheet's Company column (existing wiring, no changes needed)
+   849→
+   850→=== VERIFICATION ===
+   851→- Lint: 0 errors, 0 warnings ✓
+   852→- Browser: company selector shows "Yalidine Express" + "Économique" buttons ✓
+   853→- Label: "شركة التوصيل · Société de livraison" ✓
+   854→- 0 console errors ✓
+   855→- xlsx: 3 tabs only (Products, Orders, Stock) — no Shipping tab ✓
+   856→- apps-script.gs: original (no shipping endpoint) ✓
+   857→- No /api/shipping route ✓
+   858→
+   859→Stage Summary:
+   860→- SIMPLE approach: client chooses company via 2 buttons (Yalidine Express / Économique)
+   861→- NO sheet involvement for shipping — prices are hardcoded in shipping.ts
+   862→- Selected company is sent to sheet's Company column (existing behavior)
+   863→- All multi-company infrastructure reverted (no complexity)
+   864→
+   865→---
+   866→Task ID: 17
+   867→Agent: main
+   868→Task: Update admin password, redesign xlsx template (beautiful/guided/colored), output apps-script for user.
+   869→
+   870→Work Log:
+   871→
+   872→=== 1. ADMIN PASSWORD UPDATED ===
+   873→- brand-config.ts: adminPassword "007" → "dimou2411@dz"
+   874→- Browser-tested: login with new password works, dashboard opens with all products
+   875→
+   876→=== 2. XLSX TEMPLATE REDESIGNED (beautiful, guided, colored) ===
+   877→Rebuilt scripts/build-sheet-template.py with:
+   878→- Colored tabs: Products (brass #9A7E3A), Orders (blue #3080FF), Stock (green #2F7D5B)
+   879→- Dark charcoal headers (#2A2520) with white bold text + brass bottom border
+   880→- Light brass guidance row (#F5EFE2) with italic muted text + emojis (🆔🏷️📝📂💰🖼️ etc.)
+   881→- Zebra stripes on data rows (cream #FAF8F4 / white alternating)
+   882→- Brass-tinted featured column (#E8D9B0) for featured products
+   883→- Vivid status colors on Orders: New=blue, Confirmed=green, Shipped=yellow, Delivered=dark green, Cancelled=red
+   884→- Stock colors: 0=red, 1-3=yellow, >3=green
+   885→- Frozen header rows (freeze_panes='A3')
+   886→- 3 tabs only: Products (29 products), Orders (empty), Stock (29 product names pre-filled)
+   887→- NO Shipping tab
+   888→
+   889→=== 3. APPS-SCRIPT.GS READY ===
+   890→- /home/z/my-project/download/apps-script.gs (314 lines)
+   891→- 3 tabs supported: Products, Orders, Stock
+   892→- Endpoints: ?action=products, ?action=stock, ?action=order, ?action=product_create, ?action=product_delete, ?action=product_reset
+   893→- setupAllSheets() function to initialize all tabs
+   894→- onStockEdit() trigger for automatic stock decrement on "Confirmed" orders
+   895→- Output in chat for user to copy-paste
+   896→
+   897→=== VERIFICATION ===
+   898→- Admin password: dimou2411@dz ✓ (login tested)
+   899→- xlsx: 3 tabs, colored, guided, beautiful ✓
+   900→- apps-script.gs: ready, 314 lines ✓
+   901→- Lint: 0 errors ✓
+   902→- Browser: 0 console errors ✓
+   903→
+   904→---
+   905→Task ID: 18
+   906→Agent: main
+   907→Task: Wire up Google Sheet + Cloudinary credentials, fix guidance row leak, create downloadable zip.
+   908→
+   909→Work Log:
+   910→
+   911→=== CREDENTIALS WIRED ===
+   912→- .env: NEXT_PUBLIC_SHEET_URL = user's Google Apps Script URL (live)
+   913→- .env: NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME = anhvhy4j
+   914→- .env: NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET = soumdeco
+   915→- drive-upload.ts: defaults updated to anhvhy4j/soumdeco
+   916→
+   917→=== GUIDANCE ROW FIX ===
+   918→Problem: The sheet's row 2 (Arabic guidance with emojis like 🆔🏷️📝) was being read as a product by the apps-script, causing "Failed to construct URL" errors on the storefront.
+   919→Fix: Added client-side filter in page.tsx — skips products whose ID contains emojis or Arabic characters, and whose image doesn't start with http/data/leading-slash.
+   920→Result: 29 real products load correctly, 0 console errors.
+   921→
+   922→Also updated apps-script.gs (in /download/) to skip guidance rows server-side (for future re-paste).
+   923→
+   924→=== VERIFICATION ===
+   925→- /api/products: ok=True, count=29, seed=False (reading from SHEET) ✓
+   926→- /api/stock: returns stock CSV from sheet ✓
+   927→- Storefront: 29 products in 8 category sections ✓
+   928→- 0 console errors ✓
+   929→- Lint: 0 errors ✓
+   930→- Admin password: dimou2411@dz ✓
+   931→- Cloudinary: wired (anhvhy4j / soumdeco) ✓
+   932→
+   933→=== DOWNLOADABLE ZIP CREATED ===
+   934→- /download/soum-deco-website.zip (11MB, 147 files)
+   935→- Contains: src/, public/, prisma/, db/, scripts/, upload/, .env, all config files
+   936→- Excludes: node_modules/, .next/, logs
+   937→- Key files verified: brand-config.ts, seed-products.ts, hero.tsx, all-products.tsx, cod-order-form.tsx, admin-panel.tsx, globals.css, logo.jpg, .env
+   938→
+   939→---
+   940→Task ID: 19
+   941→Agent: main
+   942→Task: Fix quantity input on phone, category filter vertical grid, add more category icon shapes.
+   943→
+   944→Work Log:
+   945→
+   946→=== FIX #1: QUANTITY INPUT — LOCAL STATE ===
+   947→Problem: On phone, typing "10" in the quantity input would set quantity to 1 (first digit), clear the input, then "0" would fail. Multi-digit quantities were impossible.
+   948→Root cause: Controlled input with value={items[0].quantity > 4 ? qty : ""} — typing "1" set qty to 1, which made the input value "" again.
+   949→Fix: Added local state `customQty` (string) that holds the input text independently. The actual quantity updates via setSingleQty() on every change, but the input display is controlled by customQty — so typing "10" shows "10" in the input while quantity updates to 10.
+   950→- Clicking buttons 1-4 clears customQty (input shows empty, button is active)
+   951→- Typing any number ≥1 in input sets customQty + updates quantity
+   952→- onBlur clears customQty if invalid
+   953→- onKeyDown Enter blurs the input
+   954→- inputMode="numeric" for better phone keyboard
+   955→Tested: qty=10 → total 166,000 DA ✓, qty=7 → total 116,200 DA ✓, click button 3 → input clears ✓
+   956→
+   957→=== FIX #2: CATEGORY FILTER — VERTICAL GRID ===
+   958→Problem: When selecting a category, products showed in horizontal scroll (same as default view — no visual difference).
+   959→Fix: When isFiltered is true, render products in a vertical grid (grid-cols-2 sm:grid-cols-3 lg:grid-cols-4) instead of a CategoryRow with horizontal scroll.
+   960→- Category header still shows (icon + name + count + divider)
+   961→- Grid layout differentiates filtered view from default horizontal sections
+   962→Tested: clicking "Coussins" → 2 products in vertical grid ✓
+   963→
+   964→=== FIX #3: MORE CATEGORY ICON SHAPES ===
+   965→Added 7 new icon shapes to category-icon.tsx:
+   966→1. Mirrors (miroir/mirror/مراه) — ellipse with stand
+   967→2. Lamps/Nightlights (lampe/veilleuse/lamp/مصباح) — lamp shape
+   968→3. Vases/Jars/Pottery (vase/jarr/jar/pottery/مزهرية/جره) — vase shape
+   969→4. Cookware/Pots/Cocotte (cocotte/marmite/casserol/قدر) — pot shape
+   970→5. Blender/Mixer (blend/mixeur/mixer/خلاط) — blender shape
+   971→6. Furniture/Meubles (meuble/mobilier/armoire/rangements/خزانه) — cabinet shape
+   972→7. Coffee/Tea Service (cafe/café/coffee/tea/قهوه/شاي) — cup shape
+   973→Total icon types now: 18 (was 11) + default tag icon = 19 shapes
+   974→All 8 current categories now have specific matching icons.
+   975→
+   976→---
+   977→Task ID: products-fix-29-to-96
+   978→Agent: main
+   979→Task: Fix website showing only 29 products instead of 96 from Google Sheet
+   980→
+   981→Work Log:
+   982→- Diagnosed root cause: ALL Cloudflare Pages edge API routes (/api, /api/products, /api/stock, /api/order) return HTTP 500 "Internal Server Error". This is due to Next.js 16 edge runtime deprecation + @cloudflare/next-on-pages v1.13.16 incompatibility.
+   983→- Verified Google Sheet has 96 product rows (83 unique IDs due to 13 duplicates) by hitting Apps Script endpoint directly — sheet is healthy and complete.
+   984→- Frontend was falling back to SEED_PRODUCTS (29 products) because API returned 500 → caught as error → fallback to localStorage (seeded with 29 on first visit).
+   985→- Fix #1: Created /src/lib/client-sheet.ts with client-side functions that fetch directly from Google Apps Script (bypassing broken edge API entirely):
+   986→  • clientListProducts() — GET ?action=products
+   987→  • clientGetStockCsv() — GET ?action=stock
+   988→  • clientUpsertProduct() — POST ?action=product_create
+   989→  • clientDeleteProduct() — GET ?action=product_delete
+   990→  • clientResetProducts() — GET ?action=product_reset
+   991→  • clientUploadImage/clientUploadImages — Cloudinary unsigned upload from browser
+   992→- Fix #2: Rewrote /src/hooks/use-catalog.ts to use clientListProducts() directly. All admin operations (upsert/delete/reset/move) now go directly to Apps Script + Cloudinary. Added client-side product deduplication by ID (sheet has 13 duplicate rows → collapses to 83 unique).
+   993→- Fix #3: Updated /src/hooks/use-stock.ts to use clientGetStockCsv() directly.
+   994→- Fix #4: Added fixCategoryTypos() in useCatalog — converts "Meubes" → "Meubles" automatically.
+   995→- Fix #5: Added bulletproof try/catch in /api/products/route.ts GET handler — never returns bare 500, always returns JSON with seed fallback.
+   996→- Fix #6: Added dedupeProducts() in API route as defense-in-depth.
+   997→- Exported SHEET_BASE_URL + getClientSheetBaseUrl() from /src/lib/sheet.ts for client-side use.
+   998→
+   999→Stage Summary:
+  1000→- The website will now load ALL 83 unique products (96 rows - 13 duplicates) directly from the Google Sheet via the browser, completely bypassing the broken Cloudflare edge API.
+  1001→- Seed fallback (29 products) is now ONLY used on the very first visit when the sheet is unreachable.
+  1002→- Admin operations work fully client-side: Cloudinary unsigned upload + Apps Script direct POST.
+  1003→- This mirrors the architecture already used for order submission (which was already direct-to-Apps-Script per commit 103b886).
+  1004→

@@ -631,6 +631,8 @@ export const SEED_PRODUCTS: Product[] = [
 
 export function formatPrice(price: number | null): string {
   if (price === null || price === undefined) return "السعر عند الطلب";
+  // Guard against NaN (from Number("abc") or malformed sheet data)
+  if (typeof price !== "number" || isNaN(price)) return "السعر عند الطلب";
   return `${price.toLocaleString("fr-FR")} دج`;
 }
 

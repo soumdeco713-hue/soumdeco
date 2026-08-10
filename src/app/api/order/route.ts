@@ -51,18 +51,26 @@ export async function POST(req: NextRequest) {
       });
 
       if (!ok) {
-        // Instead of failing, still return ok:true to the customer
-        // The order data is in the request body — it's not lost.
-        // The admin can see failed orders in Cloudflare logs.
-        // This prevents customers from seeing errors and abandoning checkout.
+        // Order failed to reach the sheet — log it for the admin to investigate.
+        // We still return ok:true to the customer (so they don't see an error),
+        // but we mark it with a warning so the client can save it to localStorage
+        // for retry.
+        console.error("[api/order] FAILED to submit order to Apps Script:", {
+          product: body.product,
+          fullName: body.fullName,
+          phone,
+          wilaya: body.wilaya,
+          grandTotal: body.grandTotal,
+        });
         return NextResponse.json({ ok: true, warning: "order_queued" });
       }
     }
 
     return NextResponse.json({ ok: true });
   } catch (e) {
-    // Even on error, return ok:true so customer doesn't see an error
-    // The order details are captured in the exception
+    // Log the full error for debugging
+    console.error("[api/order] Exception:", e);
+    // Still return ok:true so customer doesn't see an error
     return NextResponse.json({ ok: true, warning: "order_fallback" });
   }
 }

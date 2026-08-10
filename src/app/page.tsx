@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { Hero } from "@/components/site/hero";
 import { SiteMenu, SiteMenuButton } from "@/components/site/site-menu";
@@ -14,6 +14,7 @@ import { SiteFooter } from "@/components/site/site-footer";
 import { ProductPage } from "@/components/site/product-page";
 import { CheckoutModal } from "@/components/site/checkout-modal";
 import { AdminPanel } from "@/components/site/admin-panel";
+import { ErrorBoundary } from "@/components/site/error-boundary";
 import { useCatalog } from "@/hooks/use-catalog";
 import { useCart } from "@/hooks/use-cart";
 import { useStock } from "@/hooks/use-stock";
@@ -155,18 +156,26 @@ export default function Home() {
 
   // Filter out products with no image AND skip guidance/invalid rows
   // (rows with emoji IDs or non-URL image fields from the sheet's guidance row)
-  const validProducts = catalog.products.filter(
-    (p) =>
-      p.image &&
-      p.image.trim() !== "" &&
-      // Skip products whose ID contains emojis or Arabic (guidance row leak)
-      !/[\u0600-\u06FF\u{1F000}-\u{1FFFF}]/u.test(p.id || "") &&
-      // Skip products whose image is not a valid URL or data URL
-      (p.image.startsWith("http") || p.image.startsWith("data:") || p.image.startsWith("/")),
+  // Memoized to avoid re-running the O(n) + regex filter on every render.
+  const validProducts = useMemo(
+    () =>
+      catalog.products.filter(
+        (p) =>
+          p.image &&
+          p.image.trim() !== "" &&
+          // Skip products whose ID contains emojis or Arabic (guidance row leak)
+          !/[\u0600-\u06FF\u{1F000}-\u{1FFFF}]/u.test(p.id || "") &&
+          // Skip products whose image is not a valid URL or data URL
+          (p.image.startsWith("http") || p.image.startsWith("data:") || p.image.startsWith("/")),
+      ),
+    [catalog.products],
   );
-  const featured = validProducts.filter((p) => p.featured);
+  const featured = useMemo(() => validProducts.filter((p) => p.featured), [validProducts]);
   // Special offer products are shown ONLY in the special offers section, not in All Products
-  const allProductsList = validProducts.filter((p) => !p.isSpecialOffer);
+  const allProductsList = useMemo(
+    () => validProducts.filter((p) => !p.isSpecialOffer),
+    [validProducts],
+  );
   const showSkeletons = catalog.loading && validProducts.length === 0;
 
   // Rupture + low stock checks — from the Stock tab (polled every 5.5 min)
@@ -183,15 +192,18 @@ export default function Home() {
   // ===== ADMIN VIEW =====
   if (view.kind === "admin") {
     return (
-      <AdminPanel
-        products={catalog.products}
-        onUpsert={catalog.upsertProduct}
-        onDelete={catalog.deleteProduct}
-        onAddBlank={catalog.addBlankProduct}
-        onMove={catalog.moveProduct}
-        onReset={catalog.resetCatalog}
-        onClose={exitToHome}
-      />
+      <ErrorBoundary>
+        <AdminPanel
+          products={catalog.products}
+          onUpsert={catalog.upsertProduct}
+          onDelete={catalog.deleteProduct}
+          onAddBlank={catalog.addBlankProduct}
+          onMove={catalog.moveProduct}
+          onReset={catalog.resetCatalog}
+          onClose={exitToHome}
+          syncing={catalog.syncing}
+        />
+      </ErrorBoundary>
     );
   }
 
@@ -213,14 +225,16 @@ export default function Home() {
       const relatedFinal = [...related, ...fill];
 
       return (
-        <ProductPage
-          product={product}
-          onAddToCart={handleAddToCart}
-          onBack={exitToHome}
-          rupture={stock.isRupture(product.name)}
-          relatedProducts={relatedFinal}
-          onProductClick={handleProductClick}
-        />
+        <ErrorBoundary>
+          <ProductPage
+            product={product}
+            onAddToCart={handleAddToCart}
+            onBack={exitToHome}
+            rupture={stock.isRupture(product.name)}
+            relatedProducts={relatedFinal}
+            onProductClick={handleProductClick}
+          />
+        </ErrorBoundary>
       );
     }
     // Product not found — fall through to home (catalog may still be loading)
@@ -228,6 +242,7 @@ export default function Home() {
 
   // ===== HOME VIEW =====
   return (
+    <ErrorBoundary>
     <div className="flex min-h-screen flex-col">
       {/* Fixed header — constant height, no layout shift.
           overflow: visible so the logo is never clipped. */}
@@ -357,5 +372,6 @@ export default function Home() {
         onOrderSuccess={handleOrderSuccess}
       />
     </div>
+    </ErrorBoundary>
   );
 }

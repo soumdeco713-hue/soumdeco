@@ -74,7 +74,7 @@ function normalizeName(name: string): string {
     .replace(/\s+/g, " ");
 }
 
-const POLL_MS = 330_000; // 5.5 minutes (dev — will bump to 30min on push)
+const POLL_MS = 330_000; // 5.5 minutes
 const HIDDEN_POLL_MS = 1_100_000; // ~18 min when tab is hidden
 
 export function useStock() {
@@ -82,6 +82,19 @@ export function useStock() {
   const [loading, setLoading] = useState(true);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isVisibleRef = useRef(true);
+
+  // Pre-normalized lookup map — O(1) lookups instead of O(n×m) linear scans.
+  // Built once whenever stockMap changes, then reused by isRupture/isLowStock.
+  // Key = normalized product name, Value = stock count
+  const [normalizedMap, setNormalizedMap] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    const next: Record<string, number> = {};
+    for (const key of Object.keys(stockMap)) {
+      next[normalizeName(key)] = stockMap[key];
+    }
+    setNormalizedMap(next);
+  }, [stockMap]);
 
   const fetchStock = useCallback(async () => {
     try {
@@ -133,14 +146,10 @@ export function useStock() {
     (productName: string): boolean => {
       if (!productName) return false;
       const normalized = normalizeName(productName);
-      for (const key of Object.keys(stockMap)) {
-        if (normalizeName(key) === normalized) {
-          return stockMap[key] === 0;
-        }
-      }
-      return false;
+      // O(1) lookup in the pre-normalized map
+      return normalized in normalizedMap && normalizedMap[normalized] === 0;
     },
-    [stockMap],
+    [normalizedMap],
   );
 
   /** Returns the stock count for a product, or null if not in the Stock tab (unlimited) */
@@ -148,14 +157,10 @@ export function useStock() {
     (productName: string): number | null => {
       if (!productName) return null;
       const normalized = normalizeName(productName);
-      for (const key of Object.keys(stockMap)) {
-        if (normalizeName(key) === normalized) {
-          return stockMap[key];
-        }
-      }
-      return null;
+      // O(1) lookup in the pre-normalized map
+      return normalized in normalizedMap ? normalizedMap[normalized] : null;
     },
-    [stockMap],
+    [normalizedMap],
   );
 
   /** Returns true if the product has low stock (1-3 items) */

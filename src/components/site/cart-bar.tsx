@@ -52,9 +52,17 @@ export function CartDrawer({
   onItemClick,
   onCheckout,
 }: CartDrawerProps) {
-  const total = items.reduce(
-    (sum, i) => sum + (i.price ?? 0) * i.quantity,
-    0,
+  // Compute cart total — guard against NaN/undefined prices (from malformed localStorage)
+  const total = items.reduce((sum, i) => {
+    const price = typeof i.price === "number" && !isNaN(i.price) ? i.price : 0;
+    return sum + price * i.quantity;
+  }, 0);
+  // Check if any item has no price (price-on-request) — show "السعر عند الطلب" instead of total
+  const hasPricedItems = items.some(
+    (i) => typeof i.price === "number" && !isNaN(i.price),
+  );
+  const hasUnpricedItems = items.some(
+    (i) => !(typeof i.price === "number" && !isNaN(i.price)),
   );
 
   if (!open) return null;
@@ -96,7 +104,7 @@ export function CartDrawer({
             <div className="scroll-area flex-1 overflow-y-auto p-3">
               {items.map((item) => (
                 <div
-                  key={item.productId}
+                  key={`${item.productId}-${item.variantKey || ""}`}
                   className="mb-3 flex gap-3 rounded-xl border border-clay/30 bg-night/60 p-2 backdrop-blur-sm"
                 >
                   <button
@@ -171,7 +179,11 @@ export function CartDrawer({
               <div className="mb-3 flex items-center justify-between">
                 <span className="font-arabic text-sm text-gray">المجموع</span>
                 <span className="font-arabic text-xl font-bold text-emerald neon-text-emerald">
-                  {formatPrice(total)}
+                  {hasPricedItems && !hasUnpricedItems
+                    ? formatPrice(total)
+                    : hasPricedItems && hasUnpricedItems
+                    ? `${formatPrice(total)} + سعر عند الطلب`
+                    : "السعر عند الطلب"}
                 </span>
               </div>
               <button

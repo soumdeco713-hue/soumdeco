@@ -181,23 +181,27 @@ export function useCatalog() {
   // ---- UPSERT (admin) ----
   // Uploads images to Cloudinary (client-side unsigned upload), then
   // POSTs the product directly to Google Apps Script.
+  //
+  // BULLETPROOF: On failure, rolls back the optimistic update so the UI
+  // stays consistent with the sheet. Throws an error so the admin panel
+  // can show a failure toast.
   const upsertProduct = useCallback(
     async (product: Product) => {
+      // Save the previous state for rollback
+      const previousProducts = productsRef.current;
+
       // Optimistic local update
-      setProducts((prev) => {
-        const idx = prev.findIndex((p) => p.id === product.id);
-        let next: Product[];
-        if (idx >= 0) {
-          next = [...prev];
-          next[idx] = product;
-        } else {
-          next = [product, ...prev];
-        }
-        // Sort by sortOrder
-        next.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
-        saveCatalog(next);
-        return next;
-      });
+      const idx = previousProducts.findIndex((p) => p.id === product.id);
+      let optimisticNext: Product[];
+      if (idx >= 0) {
+        optimisticNext = [...previousProducts];
+        optimisticNext[idx] = product;
+      } else {
+        optimisticNext = [product, ...previousProducts];
+      }
+      optimisticNext.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+      setProducts(optimisticNext);
+      saveCatalog(optimisticNext);
 
       // Sync directly to Apps Script (with Cloudinary image upload)
       setSyncing(true);
@@ -236,12 +240,20 @@ export function useCatalog() {
         // 3. POST to Apps Script
         const ok = await clientUpsertProduct(sheetProduct);
         if (!ok) {
-          console.error("[upsertProduct] Apps Script POST failed");
+          // ROLLBACK — the product didn't save to the sheet.
+          // Restore the previous state so the UI matches reality.
+          setProducts(previousProducts);
+          saveCatalog(previousProducts);
+          throw new Error("Apps Script POST failed — product not saved to sheet");
         }
         // Refresh to get the canonical state from the sheet
-        if (ok) await refresh();
+        await refresh();
       } catch (e) {
+        // If error happened AFTER the optimistic update, rollback
         console.error("[upsertProduct] error:", e);
+        setProducts(previousProducts);
+        saveCatalog(previousProducts);
+        throw e; // re-throw so admin panel can show error toast
       } finally {
         setSyncing(false);
       }
@@ -250,17 +262,42 @@ export function useCatalog() {
   );
 
   // ---- DELETE (admin) ----
+  // BULLETPROOF: On failure, restores the deleted product so the UI
+  // stays consistent with the sheet. Throws on failure.
   const deleteProduct = useCallback(
     async (id: string) => {
-      setProducts((prev) => {
-        const next = prev.filter((p) => p.id !== id);
-        saveCatalog(next);
-        return next;
-      });
+      const previousProducts = productsRef.current;
+      const deletedProduct = previousProducts.find((p) => p.id === id);
+
+      // Optimistic: remove from state + localStorage
+      const next = previousProducts.filter((p) => p.id !== id);
+      setProducts(next);
+      saveCatalog(next);
+
       setSyncing(true);
       try {
-        await clientDeleteProduct(id);
+        const ok = await clientDeleteProduct(id);
+        if (!ok) {
+          // ROLLBACK — restore the deleted product
+          if (deletedProduct) {
+            const restored = [...previousProducts];
+            restored.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+            setProducts(restored);
+            saveCatalog(restored);
+          }
+          throw new Error("Apps Script delete failed — product not removed from sheet");
+        }
         await refresh();
+      } catch (e) {
+        console.error("[deleteProduct] error:", e);
+        // Rollback if not already done
+        if (deletedProduct) {
+          const restored = [...previousProducts];
+          restored.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+          setProducts(restored);
+          saveCatalog(restored);
+        }
+        throw e;
       } finally {
         setSyncing(false);
       }

@@ -4,3 +4,46 @@ compatibility_flags = ["nodejs_compat"]
 
 # Required by Cloudflare Pages
 pages_build_output_dir = ".vercel/output/static"
+
+# ============================================================
+#  KV NAMESPACE — Product + Stock cache (3-minute TTL)
+# ============================================================
+#  Caches the Google Apps Script response so the site loads instantly
+#  for returning visitors. Falls back to Apps Script on cache miss.
+#
+#  To create: npx wrangler kv namespace create CATALOG_KV
+#  Then paste the returned ID below.
+# ============================================================
+[[kv_namespaces]]
+binding = "CATALOG_KV"
+id = "YOUR_KV_NAMESPACE_ID_HERE"
+preview_id = "YOUR_KV_PREVIEW_NAMESPACE_ID_HERE"
+
+# ============================================================
+#  R2 BUCKET — Image storage (replaces Cloudinary long-term)
+# ============================================================
+#  Stores product images uploaded by the admin.
+#  10 GB free tier = ~9,500 products × 5 images × 200 KB.
+#  The site falls back to Cloudinary if R2 is not configured.
+#
+#  To create: npx wrangler r2 bucket create soumdeco-images
+# ============================================================
+[[r2_buckets]]
+binding = "PRODUCT_IMAGES"
+bucket_name = "soumdeco-images"
+
+# ============================================================
+#  ENVIRONMENT VARIABLES (set via Cloudflare dashboard or CLI)
+# ============================================================
+#  These are set in the Cloudflare Pages dashboard under
+#  Settings → Environment variables, NOT in this file.
+#
+#  Required:
+#    NEXT_PUBLIC_SHEET_URL              — Google Apps Script URL
+#    NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME  — "anhvhy4j" (fallback if R2 not set up)
+#    NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET — "soumdeco"
+#
+#  Optional (for R2 image uploads):
+#    R2_PUBLIC_BASE_URL — e.g. "https://images.soumdeco.pages.dev"
+#                         (public URL prefix for R2 images)
+# ============================================================

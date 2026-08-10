@@ -251,68 +251,67 @@ export function CodOrderForm({
         .filter(Boolean)
         .join(" · ");
 
-      // Submit order DIRECTLY to Google Apps Script from the browser.
-      // This bypasses Cloudflare's edge fetch issues entirely.
-      // Google Apps Script supports CORS for GET requests with redirect.
-      // Hardcoded fallback ensures orders ALWAYS reach the sheet, even if env var isn't inlined
-      const sheetUrl = process.env.NEXT_PUBLIC_SHEET_URL || "https://script.google.com/macros/s/AKfycbxWVBZDsyfrqSBsRC_RPSwTyaXXkSaL4amjwRvcFIk3o_CASzw0TG5s_EF3B_BS44rV/exec";
-      if (sheetUrl) {
-        const params = new URLSearchParams();
-        params.set("action", "order");
-        params.set("product", allProducts.substring(0, 200));
-        params.set("quantity", String(totalQty));
-        params.set("price", items.length === 1 ? String(items[0].price ?? "") : String(totalUnitPrice));
-        params.set("shippingPrice", String(ship));
-        params.set("grandTotal", String(finalGrandTotal));
-        params.set("shippingCompanyLabel", companyLabel.substring(0, 50));
-        params.set("fullName", form.fullName.substring(0, 100));
-        params.set("phone", form.phone.replace(/\D/g, ""));
-        params.set("wilaya", wilayaLabel.substring(0, 50));
-        params.set("commune", form.commune.substring(0, 50));
-        params.set("deliveryLabel", deliveryLabel.substring(0, 50));
-        params.set("notes", finalNotes.substring(0, 200));
+      // Submit order DIRECTLY to Google Apps Script using the bulletproof
+      // clientSubmitOrder function (real CORS mode, retry logic, timeout).
+      // This bypasses Cloudflare's broken edge API entirely.
+      const { clientSubmitOrder } = await import("@/lib/client-sheet");
 
-        const orderUrl = `${sheetUrl}?${params.toString()}`;
+      const orderOk = await clientSubmitOrder({
+        product: allProducts,
+        quantity: String(totalQty),
+        price: items.length === 1 ? items[0].price ?? null : totalUnitPrice,
+        shippingPrice: ship,
+        grandTotal: finalGrandTotal,
+        shippingCompanyLabel: companyLabel,
+        fullName: form.fullName,
+        phone: form.phone.replace(/\D/g, ""),
+        wilaya: wilayaLabel,
+        commune: form.commune,
+        deliveryLabel,
+        notes: finalNotes,
+      });
 
-        // Use no-cors mode — Google Apps Script doesn't return CORS headers,
-        // but the order still gets saved. The response is opaque but the request goes through.
+      if (!orderOk) {
+        // Order failed to reach the sheet — store in localStorage for retry
+        // so the order is NOT lost. The admin can see failed orders in the
+        // console and the next site visit will attempt to resubmit them.
         try {
-          await fetch(orderUrl, {
-            method: "GET",
-            mode: "no-cors",
-            redirect: "follow",
+          const failedOrders = JSON.parse(
+            localStorage.getItem("soumdeco_failed_orders") || "[]",
+          );
+          failedOrders.push({
+            timestamp: new Date().toISOString(),
+            product: allProducts,
+            quantity: String(totalQty),
+            price: items.length === 1 ? items[0].price : totalUnitPrice,
+            shippingPrice: ship,
+            grandTotal: finalGrandTotal,
+            shippingCompanyLabel: companyLabel,
+            fullName: form.fullName,
+            phone: form.phone,
+            wilaya: wilayaLabel,
+            commune: form.commune,
+            deliveryLabel,
+            notes: finalNotes,
           });
+          localStorage.setItem(
+            "soumdeco_failed_orders",
+            JSON.stringify(failedOrders),
+          );
+          console.warn(
+            "[Order] Failed to submit to sheet — saved to localStorage for retry. " +
+              "Admin: check localStorage 'soumdeco_failed_orders'.",
+          );
         } catch {
-          // If direct fetch fails, try the API route as fallback
-          try {
-            await fetch("/api/order", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                product: allProducts,
-                quantity: String(totalQty),
-                price: items.length === 1 ? items[0].price : totalUnitPrice,
-                shippingPrice: ship,
-                grandTotal: finalGrandTotal,
-                shippingCompanyLabel: companyLabel,
-                fullName: form.fullName,
-                phone: form.phone.replace(/\D/g, ""),
-                wilaya: wilayaLabel,
-                commune: form.commune,
-                delivery: form.delivery,
-                deliveryLabel,
-                notes: finalNotes,
-              }),
-            });
-          } catch {
-            // Both methods failed — still show thank-you (order was attempted)
-          }
+          // localStorage also failed — nothing more we can do
+          console.error(
+            "[Order] CRITICAL: Failed to submit order AND failed to save to localStorage",
+          );
         }
       }
 
-      // If the API returned an error, don't show the thank-you screen
-      // (removed old res.ok check — we now submit directly to Google)
-
+      // ALWAYS show the thank-you screen — the customer has done their part.
+      // The order is either in the sheet OR in localStorage for retry.
       setOrderRef(generateOrderRef());
       setOrderSummary({
         items,
@@ -330,7 +329,7 @@ export function CodOrderForm({
       setDone(true);
       onSuccess?.();
     } catch {
-      // Even on network error, show the thank-you screen
+      // Even on unhandled exception, show the thank-you screen
       // (better UX — customer doesn't see an error, order was attempted)
       setOrderRef(generateOrderRef());
       setOrderSummary({

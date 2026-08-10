@@ -74,14 +74,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="fr" dir="ltr" suppressHydrationWarning>
+    <html lang="ar" dir="rtl" suppressHydrationWarning>
       <head suppressHydrationWarning>
-        {/* Preload API calls — starts fetching before JS loads (saves 1-2s) */}
-        <link rel="preload" as="fetch" href="/api/products" crossOrigin="anonymous" />
-        <link rel="preload" as="fetch" href="/api/stock" crossOrigin="anonymous" />
-        {/* DNS prefetch for Cloudinary — faster image loading */}
+        {/* DNS prefetch for Cloudinary + Apps Script — faster image + data loading */}
         <link rel="dns-prefetch" href="https://res.cloudinary.com" />
         <link rel="preconnect" href="https://res.cloudinary.com" />
+        <link rel="dns-prefetch" href="https://script.google.com" />
+        <link rel="preconnect" href="https://script.google.com" />
       </head>
       <body
         className={`${jost.variable} ${cormorant.variable} ${inter.variable} ${arabic.variable} font-arabic antialiased bg-background text-foreground`}

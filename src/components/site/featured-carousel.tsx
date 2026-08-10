@@ -50,7 +50,10 @@ export function FeaturedCarousel({
 
   if (count === 0) return null;
 
-  const current = products[index];
+  // Bulletproof guard: if index is somehow out of bounds (race condition
+  // during catalog refresh), fall back to the first product instead of crashing.
+  const current = products[index] ?? products[0];
+  if (!current) return null;
   const rupture = isRupture?.(current);
 
   return (

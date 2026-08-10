@@ -39,6 +39,9 @@ function doGet(e) {
     if (action === 'order') return doCreateOrderFromParams(p);
     if (action === 'product_delete') return doDeleteProduct(p.id || '');
     if (action === 'product_reset') return doResetProducts();
+    if (action === 'dedupe') return doDedupeProducts();
+    if (action === 'cleanup') return doCleanupSheet();
+    if (action === 'health') return jsonOut({ ok: true, time: new Date().toISOString(), sheet: SpreadsheetApp.getActiveSpreadsheet().getName() });
     return jsonOut({ ok: false, error: 'unknown action: ' + action });
   } catch (err) { return jsonOut({ ok: false, error: String(err) }); }
 }
@@ -376,4 +379,140 @@ function decrementProductStock_(productName, qty) {
       return;
     }
   }
+}
+
+// ============================================================
+//  DEDUPE + CLEANUP — one-time maintenance actions
+// ============================================================
+
+/**
+ * Remove duplicate product rows (same ID appearing multiple times).
+ * Keeps the FIRST occurrence (which is usually the original, most-complete row)
+ * and deletes subsequent duplicates.
+ *
+ * Also fixes the "Meubes" → "Meubles" typo in-place for all rows.
+ *
+ * Called via: ?action=dedupe
+ * Returns: { ok: true, removed: <count>, fixed_categories: <count>, remaining: <count> }
+ */
+function doDedupeProducts() {
+  var sheet = ensureProductsSheet();
+  var values = sheet.getDataRange().getValues();
+  if (values.length < 2) return jsonOut({ ok: true, removed: 0, remaining: 0 });
+
+  var header = values[0];
+  var idCol = 0;            // column A
+  var categoryCol = header.indexOf('category');
+  var nameCol = header.indexOf('name');
+
+  // First pass: fix "Meubes" → "Meubles" in-place for every row
+  var categoryFixes = 0;
+  if (categoryCol >= 0) {
+    for (var i = 1; i < values.length; i++) {
+      var cat = String(values[i][categoryCol] || '').trim();
+      if (cat === 'Meubes') {
+        sheet.getRange(i + 1, categoryCol + 1).setValue('Meubles');
+        categoryFixes++;
+      }
+    }
+  }
+
+  // Second pass: find duplicate IDs and mark rows for deletion
+  // (iterate from the END so deleting doesn't shift indices we still need)
+  var seenIds = {};
+  var rowsToDelete = [];
+  for (var j = 1; j < values.length; j++) {
+    var idVal = String(values[j][idCol] || '').trim();
+    if (!idVal) continue;
+    // Skip guidance rows (emoji/Arabic in ID)
+    if (/[\u0600-\u06FF\u{1F000}-\u{1FFFF}]/u.test(idVal)) continue;
+    if (seenIds[idVal]) {
+      rowsToDelete.push(j + 1); // sheet rows are 1-indexed, +1 because header is row 1
+    } else {
+      seenIds[idVal] = true;
+    }
+  }
+
+  // Delete rows from the BOTTOM UP so indices stay valid
+  rowsToDelete.sort(function(a, b) { return b - a; });
+  for (var k = 0; k < rowsToDelete.length; k++) {
+    sheet.deleteRow(rowsToDelete[k]);
+  }
+
+  var remaining = sheet.getLastRow() - 1; // minus header
+  return jsonOut({
+    ok: true,
+    removed: rowsToDelete.length,
+    fixed_categories: categoryFixes,
+    remaining: remaining
+  });
+}
+
+/**
+ * Full sheet cleanup — runs dedupe + fixes category typos + removes
+ * completely empty rows (no id, no name, no image).
+ *
+ * Called via: ?action=cleanup
+ */
+function doCleanupSheet() {
+  var sheet = ensureProductsSheet();
+  var values = sheet.getDataRange().getValues();
+  if (values.length < 2) return jsonOut({ ok: true, removed: 0, remaining: 0 });
+
+  var header = values[0];
+  var idCol = 0;
+  var nameCol = header.indexOf('name');
+  var imageCol = header.indexOf('image');
+  var categoryCol = header.indexOf('category');
+
+  // Fix "Meubes" → "Meubles"
+  var categoryFixes = 0;
+  if (categoryCol >= 0) {
+    for (var i = 1; i < values.length; i++) {
+      var cat = String(values[i][categoryCol] || '').trim();
+      if (cat === 'Meubes') {
+        sheet.getRange(i + 1, categoryCol + 1).setValue('Meubles');
+        categoryFixes++;
+      }
+    }
+  }
+
+  // Find rows to delete: duplicates OR completely empty
+  var seenIds = {};
+  var rowsToDelete = [];
+  for (var j = 1; j < values.length; j++) {
+    var idVal = String(values[j][idCol] || '').trim();
+    var nameVal = nameCol >= 0 ? String(values[j][nameCol] || '').trim() : '';
+    var imgVal = imageCol >= 0 ? String(values[j][imageCol] || '').trim() : '';
+
+    // Skip guidance rows (emoji/Arabic in ID) — but DON'T delete them
+    // (they're in row 2 and provide admin guidance)
+    if (/[\u0600-\u06FF\u{1F000}-\u{1FFFF}]/u.test(idVal)) continue;
+
+    // Delete completely empty rows (no id, no name, no image)
+    if (!idVal && !nameVal && !imgVal) {
+      rowsToDelete.push(j + 1);
+      continue;
+    }
+
+    // Delete duplicate IDs (keep first)
+    if (idVal && seenIds[idVal]) {
+      rowsToDelete.push(j + 1);
+      continue;
+    }
+    if (idVal) seenIds[idVal] = true;
+  }
+
+  rowsToDelete.sort(function(a, b) { return b - a; });
+  for (var k = 0; k < rowsToDelete.length; k++) {
+    sheet.deleteRow(rowsToDelete[k]);
+  }
+
+  var remaining = sheet.getLastRow() - 1;
+  return jsonOut({
+    ok: true,
+    removed: rowsToDelete.length,
+    fixed_categories: categoryFixes,
+    remaining: remaining
+  });
 }
