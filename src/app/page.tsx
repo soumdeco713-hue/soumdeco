@@ -261,7 +261,42 @@ export default function Home() {
         </ErrorBoundary>
       );
     }
-    // Product not found — fall through to home (catalog may still be loading)
+    // Product not found (was deleted or doesn't exist) — show friendly message
+    // instead of silently falling through to home
+    if (catalog.hydrated && catalog.products.length > 0) {
+      return (
+        <ErrorBoundary>
+          <div className="flex min-h-screen items-center justify-center p-6" style={{ background: "#FAF8F4" }}>
+            <div className="text-center" style={{ maxWidth: 420 }}>
+              <div style={{ fontSize: 48, marginBottom: 16 }}>✦</div>
+              <h1 className="font-arabic" style={{ fontSize: 24, fontWeight: 700, color: "#1C1815", marginBottom: 12 }}>
+                هذا المنتج لم يعد متاحاً
+              </h1>
+              <p className="font-arabic" style={{ fontSize: 14, color: "#6B5D4F", marginBottom: 24, lineHeight: 1.6 }}>
+                ربما تم حذفه أو تعديله. تصفح بقية المنتجات المتاحة.
+              </p>
+              <button
+                onClick={exitToHome}
+                className="font-arabic"
+                style={{
+                  background: "#1C1815",
+                  color: "#FAF8F4",
+                  border: "none",
+                  borderRadius: 9999,
+                  padding: "12px 32px",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                العودة للمتجر
+              </button>
+            </div>
+          </div>
+        </ErrorBoundary>
+      );
+    }
+    // Catalog still loading — fall through to home (shows skeletons)
   }
 
   // ===== HOME VIEW =====
