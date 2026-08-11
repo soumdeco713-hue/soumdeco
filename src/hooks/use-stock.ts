@@ -12,26 +12,76 @@ const STOCK_CACHE_KEY = "soumdeco_stock_cache_v1";
 // Cache TTL: 25 minutes (slightly less than poll interval to avoid stale data)
 const STOCK_CACHE_TTL_MS = 25 * 60 * 1000;
 
+// P0 FIX: Proper RFC 4180 CSV parser — handles quoted fields with commas + newlines
 function parseCsv(text: string): StockMap {
   const map: StockMap = {};
-  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  if (lines.length === 0) return map;
+  if (!text || typeof text !== "string") return map;
+
+  // Parse CSV properly (handles quoted fields with embedded commas)
+  const rows: string[][] = [];
+  let currentRow: string[] = [];
+  let currentField = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const nextChar = text[i + 1];
+
+    if (inQuotes) {
+      if (char === '"') {
+        if (nextChar === '"') {
+          // Escaped quote
+          currentField += '"';
+          i++; // skip next char
+        } else {
+          // End of quoted field
+          inQuotes = false;
+        }
+      } else {
+        currentField += char;
+      }
+    } else {
+      if (char === '"') {
+        inQuotes = true;
+      } else if (char === ',') {
+        currentRow.push(currentField);
+        currentField = "";
+      } else if (char === '\n' || char === '\r') {
+        // Handle \r\n and \n
+        if (char === '\r' && nextChar === '\n') i++;
+        currentRow.push(currentField);
+        if (currentRow.length > 0 && currentRow.some((c) => c.trim() !== "")) {
+          rows.push(currentRow);
+        }
+        currentRow = [];
+        currentField = "";
+      } else {
+        currentField += char;
+      }
+    }
+  }
+  // Don't forget the last field
+  if (currentField !== "" || currentRow.length > 0) {
+    currentRow.push(currentField);
+    if (currentRow.some((c) => c.trim() !== "")) {
+      rows.push(currentRow);
+    }
+  }
+
+  if (rows.length === 0) return map;
 
   let nameIdx = 0;
   let countIdx = 1;
   let startLine = 0;
 
-  const firstLine = lines[0].toLowerCase();
+  // Check if first row is a header
+  const firstLine = rows[0].map((c) => c.toLowerCase().trim());
   if (
-    firstLine.includes("stock") ||
-    firstLine.includes("name") ||
-    firstLine.includes("produit") ||
-    firstLine.includes("اسم")
+    firstLine.some((h) =>
+      h.includes("stock") || h.includes("name") || h.includes("produit") || h.includes("اسم")
+    )
   ) {
-    const headers = firstLine
-      .split(",")
-      .map((h) => h.trim().replace(/^"|"$/g, ""));
-    headers.forEach((h, i) => {
+    firstLine.forEach((h, i) => {
       if (
         h.includes("produit") ||
         h.includes("name") ||
@@ -52,12 +102,11 @@ function parseCsv(text: string): StockMap {
     startLine = 1;
   }
 
-  for (let i = startLine; i < lines.length; i++) {
-    const cols = lines[i]
-      .split(",")
-      .map((c) => c.trim().replace(/^"|"$/g, ""));
-    const name = cols[nameIdx];
-    const countStr = cols[countIdx] || "";
+  for (let i = startLine; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.length <= nameIdx) continue;
+    const name = (row[nameIdx] || "").trim();
+    const countStr = (row[countIdx] || "").trim();
     if (!name) continue;
     const count = parseInt(countStr, 10);
     if (!isNaN(count)) {
@@ -128,15 +177,33 @@ async function loadStockSeed(): Promise<StockMap> {
       // G4 FIX: Add a 5-second timeout so a hanging fetch doesn't block forever
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
+      // P0 FIX: Changed from "force-cache" to "no-cache" — Chrome was caching
+      // the stale seed forever, causing "everything out of stock" bug
       const res = await fetch("/stock-seed.json", {
-        cache: "force-cache",
+        cache: "no-cache",
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
       if (!res.ok) return {};
       const data = await res.json();
       if (!data || !data.map || typeof data.map !== "object") return {};
-      stockSeedCache = data.map as StockMap;
+      const seedMap = data.map as StockMap;
+
+      // P0 FIX: Sanity check — reject seeds where >90% of products have 0 stock
+      // (indicates a corrupted/stale seed that would show everything as out of stock)
+      const entries = Object.values(seedMap);
+      if (entries.length > 0) {
+        const zeroCount = entries.filter((v) => v === 0).length;
+        const zeroRatio = zeroCount / entries.length;
+        if (zeroRatio > 0.9) {
+          console.warn(
+            `[Stock] Seed rejected: ${zeroCount}/${entries.length} (${(zeroRatio * 100).toFixed(1)}%) products have 0 stock — likely corrupted seed`,
+          );
+          return {};
+        }
+      }
+
+      stockSeedCache = seedMap;
       return stockSeedCache;
     } catch {
       // G4 FIX: Reset the promise so retries are possible
@@ -191,6 +258,21 @@ export function useStock() {
       const text = await clientGetStockCsv();
       if (text) {
         const newMap = parseCsv(text);
+
+        // P0 FIX: Sanity check — don't overwrite with all-zero data
+        // (indicates a broken CSV parse or Apps Script error)
+        const entries = Object.values(newMap);
+        if (entries.length > 0) {
+          const zeroCount = entries.filter((v) => v === 0).length;
+          const zeroRatio = zeroCount / entries.length;
+          if (zeroRatio > 0.9) {
+            console.warn(
+              `[Stock] Fetch rejected: ${zeroCount}/${entries.length} (${(zeroRatio * 100).toFixed(1)}%) products have 0 stock — keeping current data`,
+            );
+            return; // keep current state, don't overwrite with bad data
+          }
+        }
+
         setStockMap(newMap);
         // Cache for next page load (instant load)
         saveCachedStock(newMap);
