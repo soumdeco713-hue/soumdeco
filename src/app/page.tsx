@@ -167,7 +167,6 @@ export default function Home() {
   }, [cart]);
 
   // Filter out products with no image AND skip guidance/invalid rows
-  // (rows with emoji IDs or non-URL image fields from the sheet's guidance row)
   // Memoized to avoid re-running the O(n) + regex filter on every render.
   const validProducts = useMemo(
     () =>
@@ -182,6 +181,15 @@ export default function Home() {
       ),
     [catalog.products],
   );
+
+  // P0 FIX #3: Prune orphan cart items when catalog changes.
+  // Removes cart items whose productId no longer exists in the live catalog.
+  useEffect(() => {
+    if (catalog.products.length > 0 && cart.hydrated) {
+      const validIds = new Set(catalog.products.map((p) => p.id));
+      cart.pruneOrphanItems(validIds);
+    }
+  }, [catalog.products, cart.hydrated, cart.pruneOrphanItems]);
   const featured = useMemo(() => validProducts.filter((p) => p.featured), [validProducts]);
   // Special offer products are shown ONLY in the special offers section, not in All Products
   const allProductsList = useMemo(

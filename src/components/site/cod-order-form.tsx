@@ -247,6 +247,33 @@ export function CodOrderForm({
   const handleSubmit = async () => {
     if (rupture) return;
     if (!validate()) return;
+
+    // P0 FIX #2: Re-check rupture at checkout submit time
+    // (admin may have marked product as out of stock while customer was filling the form)
+    if (typeof rupture !== "undefined" && rupture) {
+      toast.error("هذا المنتج نفدت الكمية. لا يمكن إتمام الطلب.");
+      return;
+    }
+
+    // P0 FIX #4: Sanitize items — remove NaN prices, prevent NaN from reaching Apps Script
+    const sanitizedItems = items.map((it) => ({
+      ...it,
+      price:
+        typeof it.price === "number" && !isNaN(it.price) && it.price >= 0
+          ? it.price
+          : null, // null = price-on-request (prevents NaN in sheet)
+      name: it.name || "منتج بدون اسم", // prevent empty names
+      image: it.image || "", // prevent undefined image
+    }));
+
+    // P0 FIX #3: Filter out orphan cart items (products that no longer exist)
+    // This prevents orders for deleted products from reaching the sheet
+    const validItems = sanitizedItems.filter((it) => it.productId && it.name);
+    if (validItems.length === 0) {
+      toast.error("السلة فارغة أو تحتوي على منتجات لم تعد متاحة.");
+      return;
+    }
+
     setSubmitting(true);
 
     const wilayaLabel =
@@ -258,11 +285,14 @@ export function CodOrderForm({
 
     try {
       // Send ALL items as ONE single order (1 row in the sheet, 1 shipping price)
-      const allProducts = items
+      const allProducts = validItems
         .map((it) => `${it.name} ×${it.quantity}`)
         .join(" + ");
-      const totalQty = items.reduce((s, i) => s + i.quantity, 0);
-      const totalUnitPrice = items.reduce((s, i) => s + (i.price ?? 0), 0);
+      const totalQty = validItems.reduce((s, i) => s + i.quantity, 0);
+      const totalUnitPrice = validItems.reduce(
+        (s, i) => s + (i.price ?? 0),
+        0,
+      );
 
       // Combine user notes with variation summary (if any)
       const companyNote = SHIPPING_COMPANY_LABELS_AR[form.company];

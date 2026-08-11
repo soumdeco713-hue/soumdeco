@@ -157,6 +157,24 @@ export function useCart() {
 
   const count = items.reduce((sum, i) => sum + i.quantity, 0);
 
+  // P0 FIX #3: Prune orphan cart items — called by the catalog when it refreshes.
+  // Removes cart items whose productId no longer exists in the live catalog.
+  // This prevents orders for deleted products from reaching the sheet.
+  const pruneOrphanItems = useCallback(
+    (validProductIds: Set<string>) => {
+      if (validProductIds.size === 0) return; // don't prune if catalog is empty/loading
+      const before = items.length;
+      const next = items.filter((i) => validProductIds.has(i.productId));
+      if (next.length < before) {
+        console.warn(
+          `[Cart] Pruned ${before - next.length} orphan item(s) — product no longer exists`,
+        );
+        persist(next);
+      }
+    },
+    [items, persist],
+  );
+
   return {
     items,
     hydrated,
@@ -165,5 +183,6 @@ export function useCart() {
     updateQuantity,
     removeItem,
     clearCart,
+    pruneOrphanItems,
   };
 }

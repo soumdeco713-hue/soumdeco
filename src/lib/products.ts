@@ -999,28 +999,31 @@ function normalizeProduct(p: any): Product | null {
     name: toStr(p.name),
     description: toStr(p.description ?? ""),
     category: toStr(p.category),
-    price:
-      p.price === null || p.price === undefined
-        ? null
-        : typeof p.price === "object" && p.price !== null
-        ? null
-        : Number(p.price),
-    oldPrice:
-      p.oldPrice === null || p.oldPrice === undefined || p.oldPrice === ""
-        ? null
-        : typeof p.oldPrice === "object" && p.oldPrice !== null
-        ? null
-        : Number(p.oldPrice),
+    price: (() => {
+      if (p.price === null || p.price === undefined) return null;
+      if (typeof p.price === "object" && p.price !== null) return null;
+      const n = Number(p.price);
+      // P0 FIX #4: Guard against NaN — treat as null (price-on-request)
+      return isNaN(n) ? null : n;
+    })(),
+    oldPrice: (() => {
+      if (p.oldPrice === null || p.oldPrice === undefined || p.oldPrice === "") return null;
+      if (typeof p.oldPrice === "object" && p.oldPrice !== null) return null;
+      const n = Number(p.oldPrice);
+      // P0 FIX #4: Guard against NaN
+      return isNaN(n) ? null : n;
+    })(),
     image,
     images,
     variations,
     variants,
-    stock:
-      p.stock === null || p.stock === undefined || p.stock === ""
-        ? null
-        : typeof p.stock === "object" && p.stock !== null
-        ? null
-        : Number(p.stock),
+    stock: (() => {
+      if (p.stock === null || p.stock === undefined || p.stock === "") return null;
+      if (typeof p.stock === "object" && p.stock !== null) return null;
+      const n = Number(p.stock);
+      // P0 FIX #4: Guard against NaN
+      return isNaN(n) ? null : n;
+    })(),
     highlights,
     sortOrder:
       p.sortOrder === null || p.sortOrder === undefined
