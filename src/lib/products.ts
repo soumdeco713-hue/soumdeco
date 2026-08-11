@@ -10,10 +10,11 @@ export type Variation = {
   options: string[];
 };
 
-/** Simpler per-variant model — a single color or size entry with optional
- * price adjustment. Replaces the old generic `variations` editor in the admin. */
+/** Simpler per-variant model — a single color, size, or custom variable
+ * entry with optional price adjustment. */
 export type ProductVariant = {
-  type: "color" | "size";
+  /** Variant type: "color", "size", or any custom string (e.g. "weight", "material") */
+  type: string;
   name: string;
   /** Added to the base price (can be 0 or negative). Optional. */
   priceAdjustment?: number;
@@ -742,8 +743,8 @@ export function parseVariants(s: string | undefined | null): ProductVariant[] {
     // LAST segment.
     const firstColon = clean.indexOf(":");
     if (firstColon < 0) continue;
-    const type = clean.slice(0, firstColon).trim().toLowerCase();
-    if (type !== "color" && type !== "size") continue;
+    const type = clean.slice(0, firstColon).trim();
+    if (!type) continue; // accept any non-empty type (color, size, or custom)
     const rest = clean.slice(firstColon + 1);
     const lastColon = rest.lastIndexOf(":");
     let name: string;
@@ -785,7 +786,8 @@ export function normalizeVariants(raw: unknown): ProductVariant[] {
     return (raw as any[])
       .filter((v) => v && typeof v === "object" && v.name)
       .map((v) => {
-        const type: "color" | "size" = v.type === "size" ? "size" : "color";
+        // Preserve any type string (color, size, or custom like "weight")
+        const type = String(v.type || "custom");
         const adj =
           v.priceAdjustment == null
             ? undefined

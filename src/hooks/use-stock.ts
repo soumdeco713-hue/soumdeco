@@ -364,5 +364,19 @@ export function useStock() {
     [getStockCount],
   );
 
-  return { stockMap, loading, isRupture, isLowStock, getStockCount };
+  /** Returns true if a SPECIFIC VARIANT is out of stock.
+   *  Uses naming convention: "Product Name - Variant Name" in the Stock tab.
+   *  Example: "Service a table - Red" with count 0 → Red variant is out of stock.
+   *  If no variant-specific entry exists, returns false (variant is available). */
+  const isVariantRupture = useCallback(
+    (productName: string, variantName: string): boolean => {
+      if (!productName || !variantName) return false;
+      const key = `${productName} - ${variantName}`;
+      const normalized = normalizeName(key);
+      return normalized in normalizedMap && normalizedMap[normalized] === 0;
+    },
+    [normalizedMap],
+  );
+
+  return { stockMap, loading, isRupture, isLowStock, getStockCount, isVariantRupture };
 }

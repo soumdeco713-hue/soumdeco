@@ -248,6 +248,7 @@ export default function Home() {
             rupture={stock.isRupture(product.name)}
             relatedProducts={relatedFinal}
             onProductClick={handleProductClick}
+            isVariantRupture={stock.isVariantRupture}
           />
         </ErrorBoundary>
       );

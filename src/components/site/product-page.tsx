@@ -33,6 +33,8 @@ type ProductPageProps = {
   rupture?: boolean;
   relatedProducts?: Product[];
   onProductClick?: (product: Product) => void;
+  /** Per-variant rupture check: (productName, variantName) → boolean */
+  isVariantRupture?: (productName: string, variantName: string) => boolean;
 };
 
 export function ProductPage({
@@ -42,12 +44,14 @@ export function ProductPage({
   rupture,
   relatedProducts = [],
   onProductClick,
+  isVariantRupture: isVariantRuptureFn,
 }: ProductPageProps) {
   const images = getProductImages(product);
   const [activeIdx, setActiveIdx] = useState(0);
   const [added, setAdded] = useState(false);
   const [selectedColor, setSelectedColor] = useState<string>("");
   const [selectedSize, setSelectedSize] = useState<string>("");
+  const [selectedCustom, setSelectedCustom] = useState<Record<string, string>>({});
   const [selectedQty, setSelectedQty] = useState(1);
 
   useEffect(() => {
@@ -55,6 +59,7 @@ export function ProductPage({
     setActiveIdx(0);
     setSelectedColor("");
     setSelectedSize("");
+    setSelectedCustom({});
     setSelectedQty(1);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [product?.id]);
@@ -75,19 +80,47 @@ export function ProductPage({
     setActiveIdx((i) => (i + dir + images.length) % images.length);
   };
 
-  // Variants — split into colors and sizes for the simple two-section UI.
+  // Variants — split into colors, sizes, and custom types.
   const variants: ProductVariant[] = product.variants ?? [];
   const colorVariants = variants.filter((v) => v.type === "color");
   const sizeVariants = variants.filter((v) => v.type === "size");
+  // Custom types (not color and not size) — up to 2
+  const customTypes = Array.from(
+    new Set(
+      variants
+        .map((v) => v.type)
+        .filter((t) => t !== "color" && t !== "size" && t.trim() !== ""),
+    ),
+  );
 
   // The selected color/size objects (for their price adjustments).
   const selectedColorVariant = colorVariants.find((v) => v.name === selectedColor);
   const selectedSizeVariant = sizeVariants.find((v) => v.name === selectedSize);
 
-  // Total price adjustment = color adj + size adj.
+  // Custom variant selections — for price adjustments
+  const selectedCustomVariants = customTypes.flatMap((ct) => {
+    const sel = selectedCustom[ct];
+    if (!sel) return [];
+    const found = variants.find((v) => v.type === ct && v.name === sel);
+    return found ? [found] : [];
+  });
+
+  // Total price adjustment = color adj + size adj + all custom adj.
   const variantAdjustment =
     (selectedColorVariant?.priceAdjustment ?? 0) +
-    (selectedSizeVariant?.priceAdjustment ?? 0);
+    (selectedSizeVariant?.priceAdjustment ?? 0) +
+    selectedCustomVariants.reduce((sum, v) => sum + (v.priceAdjustment ?? 0), 0);
+
+  // Per-variant stock check: if the selected variant is out of stock,
+  // show a message and disable add-to-cart.
+  const isVariantRupture = isVariantRuptureFn ?? (() => false);
+  const selectedVariantName =
+    [selectedColor, selectedSize, ...customTypes.map((ct) => selectedCustom[ct])]
+      .filter(Boolean)
+      .join(" - ") || "";
+  const isVariantOutOfStock = selectedVariantName
+    ? isVariantRupture(product.name, selectedVariantName)
+    : false;
 
   // Adjusted unit price — null stays null (price-on-request).
   const adjustedPrice =
@@ -134,9 +167,15 @@ export function ProductPage({
   ];
 
   const handleAdd = () => {
+    if (isVariantOutOfStock) return; // prevent adding out-of-stock variant
     // Build variantKey so the cart can distinguish items with different
-    // color/size selections (prevents merging different variants into one line item)
-    const variantKey = [selectedColor, selectedSize].filter(Boolean).join("_") || undefined;
+    // color/size/custom selections (prevents merging different variants into one line item)
+    const allSelections = [
+      selectedColor,
+      selectedSize,
+      ...customTypes.map((ct) => selectedCustom[ct]),
+    ].filter(Boolean);
+    const variantKey = allSelections.join("_") || undefined;
     onAddToCart({
       productId: product.id,
       name: variantSummary ? `${product.name} (${variantSummary})` : product.name,
@@ -148,14 +187,18 @@ export function ProductPage({
     setTimeout(() => setAdded(false), 2000);
   };
 
-  // Human-readable variant summary, e.g. "اللون: أحمر · المقاس: كبير".
+  // Human-readable variant summary, e.g. "اللون: أحمر · المقاس: كبير · الوزن: 1كغ".
   // Empty when nothing is selected — keeps the order notes clean.
   const variantSummary = useMemo(() => {
     const parts: string[] = [];
     if (selectedColor) parts.push(`اللون: ${selectedColor}`);
     if (selectedSize) parts.push(`المقاس: ${selectedSize}`);
+    for (const ct of customTypes) {
+      const sel = selectedCustom[ct];
+      if (sel) parts.push(`${ct}: ${sel}`);
+    }
     return parts.join(" · ");
-  }, [selectedColor, selectedSize]);
+  }, [selectedColor, selectedSize, selectedCustom, customTypes]);
 
   return (
     <div
@@ -409,6 +452,63 @@ export function ProductPage({
                     </div>
                   </div>
                 )}
+                {/* Custom variable dropdowns — up to 2 custom types */}
+                {customTypes.map((ct) => {
+                  const ctVariants = variants.filter((v) => v.type === ct);
+                  if (ctVariants.length === 0) return null;
+                  return (
+                    <div key={ct}>
+                      <label className="mb-2 block font-arabic text-sm font-medium text-charcoal">
+                        {ct}
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {ctVariants.map((c) => {
+                          const isSelected = selectedCustom[ct] === c.name;
+                          const adj = c.priceAdjustment ?? 0;
+                          // Check per-variant stock
+                          const variantStockKey = `${product.name} - ${c.name}`;
+                          const variantRupture = isVariantRupture(product.name, c.name);
+                          return (
+                            <button
+                              key={c.name}
+                              type="button"
+                              onClick={() =>
+                                setSelectedCustom((prev) => ({
+                                  ...prev,
+                                  [ct]: isSelected ? "" : c.name,
+                                }))
+                              }
+                              disabled={variantRupture}
+                              className={`rounded-lg border-2 px-4 py-2 font-arabic text-sm font-medium transition-all active:scale-95 ${
+                                isSelected
+                                  ? "border-emerald bg-emerald/15 text-emerald"
+                                  : "border-clay/40 bg-night-soft/60 text-charcoal hover:border-emerald/40"
+                              } ${variantRupture ? "opacity-40 cursor-not-allowed line-through" : ""}`}
+                            >
+                              {c.name}
+                              {adj !== 0 && (
+                                <span className="ml-1 text-[10px] text-neon-magenta">
+                                  ({adj > 0 ? "+" : ""}{adj} دج)
+                                </span>
+                              )}
+                              {variantRupture && (
+                                <span className="ml-1 text-[10px] text-terracotta">
+                                  (نفدت)
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+                {/* Per-variant out-of-stock message */}
+                {isVariantOutOfStock && (
+                  <p className="font-arabic text-sm text-terracotta">
+                    هذا الخيار غير متوفر حالياً. اختر خياراً آخر.
+                  </p>
+                )}
               </div>
             )}
 
@@ -418,7 +518,7 @@ export function ProductPage({
             <button
               type="button"
               onClick={handleAdd}
-              disabled={rupture}
+              disabled={rupture || isVariantOutOfStock}
               className={`flex w-full items-center justify-center gap-2 rounded-full px-6 py-4 font-arabic text-base font-bold transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 ${
                 added
                   ? "bg-emerald-bright text-night"

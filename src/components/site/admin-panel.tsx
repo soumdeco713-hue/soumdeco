@@ -349,7 +349,7 @@ function EditForm({
   // state update maps over the right entry.
   const variants: ProductVariant[] = draft.variants ?? [];
 
-  const addVariant = (type: "color" | "size") => {
+  const addVariant = (type: string) => {
     setDraft((d) => ({
       ...d,
       variants: [...(d.variants ?? []), { type, name: "", priceAdjustment: 0 }],
@@ -839,6 +839,143 @@ function EditForm({
             </p>
           )}
         </div>
+
+        {/* 7c. Custom Variables — up to 2 custom variable types
+              (e.g., "Weight", "Material") with the same UI as colors/sizes */}
+        {(() => {
+          // Find custom types (not "color" and not "size")
+          const customTypes = Array.from(
+            new Set(
+              variants
+                .map((v) => v.type)
+                .filter((t) => t !== "color" && t !== "size" && t.trim() !== ""),
+            ),
+          );
+
+          const addCustomVariable = () => {
+            if (customTypes.length >= 2) return;
+            const defaultName = `var${customTypes.length + 1}`;
+            addVariant(defaultName);
+          };
+
+          const updateCustomTypeName = (oldType: string, newType: string) => {
+            setDraft((d) => ({
+              ...d,
+              variants: (d.variants ?? []).map((v) =>
+                v.type === oldType ? { ...v, type: newType } : v,
+              ),
+            }));
+          };
+
+          return (
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <label className="block text-sm font-medium text-charcoal">
+                  متغيرات إضافية{" "}
+                  <span className="text-xs font-normal text-gray-light">
+                    (اختياري — حتى متغيرين، مثل الوزن أو المادة)
+                  </span>
+                </label>
+                {customTypes.length < 2 && (
+                  <button
+                    type="button"
+                    onClick={addCustomVariable}
+                    className="flex items-center gap-1 rounded-full bg-brass/10 px-3 py-1 text-xs font-medium text-brass-deep hover:bg-brass/20"
+                  >
+                    <Plus className="h-3 w-3" />
+                    إضافة متغير
+                  </button>
+                )}
+              </div>
+
+              {customTypes.length > 0 ? (
+                <div className="space-y-4">
+                  {customTypes.map((ct) => {
+                    const ctVariants = variants
+                      .map((v, i) => ({ v, i }))
+                      .filter(({ v }) => v.type === ct);
+                    return (
+                      <div key={ct} className="rounded-lg border border-clay/30 bg-night/30 p-3">
+                        <div className="mb-2 flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={ct}
+                            onChange={(e) => updateCustomTypeName(ct, e.target.value)}
+                            placeholder="اسم المتغير (مثال: الوزن)"
+                            className={`${inputClass} flex-1`}
+                            style={{ maxWidth: "200px" }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => addVariant(ct)}
+                            className="flex items-center gap-1 rounded-full bg-brass/10 px-2 py-1 text-[11px] font-medium text-brass-deep hover:bg-brass/20"
+                          >
+                            <Plus className="h-3 w-3" />
+                            خيار
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDraft((d) => ({
+                                ...d,
+                                variants: (d.variants ?? []).filter((v) => v.type !== ct),
+                              }));
+                            }}
+                            aria-label="حذف المتغير"
+                            className="flex h-7 w-7 items-center justify-center rounded-full text-terracotta hover:bg-terracotta/10"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          {ctVariants.map(({ v, i }) => (
+                            <div key={i} className="flex gap-2">
+                              <input
+                                type="text"
+                                value={v.name}
+                                onChange={(e) => updateVariantName(i, e.target.value)}
+                                placeholder="مثال: 1 كغ"
+                                className={`${inputClass} flex-1`}
+                              />
+                              <input
+                                type="number"
+                                value={v.priceAdjustment ?? 0}
+                                onChange={(e) => updateVariantAdjustment(i, Number(e.target.value))}
+                                placeholder="0"
+                                aria-label="تعديل السعر (دج)"
+                                className={`${inputClass} flex-shrink-0`}
+                                style={{ width: "120px" }}
+                              />
+                              <span className="self-center font-arabic text-xs text-gray-light">دج</span>
+                              <button
+                                type="button"
+                                onClick={() => removeVariant(i)}
+                                aria-label="حذف"
+                                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-terracotta hover:bg-terracotta/10"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <p className="font-arabic text-[11px] text-gray-light">
+                    التعديل الإضافي يُضاف إلى السعر الأساسي. للتحكم في المخزون لكل خيار:
+                    أضف صف في تبويب Stock باسم المنتج متبوعاً بـ &quot; - &quot; ثم اسم الخيار
+                    (مثال: &quot;Service a table - Red&quot;).
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-light">
+                  لا توجد متغيرات إضافية. أضف متغيراً إذا كان المنتج متاحاً بأكثر من خيار
+                  (مثل الوزن، المادة، السعة...).
+                </p>
+              )}
+            </div>
+          );
+        })()}
 
         {/* 7d. Quantity tiers (عروض الكمية) — available for ALL products */}
         <div>
