@@ -38,6 +38,7 @@ export function CheckoutModal({
     name: i.name,
     price: i.price,
     quantity: i.quantity,
+    productId: i.productId,
   }));
 
   const handleSuccess = () => {

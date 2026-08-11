@@ -18,6 +18,8 @@ export type OrderItem = {
   name: string;
   price: number | null;
   quantity: number;
+  /** Optional productId — used for orphan detection (not always available) */
+  productId?: string;
 };
 
 type CodOrderFormProps = {
@@ -266,9 +268,11 @@ export function CodOrderForm({
       image: it.image || "", // prevent undefined image
     }));
 
-    // P0 FIX #3: Filter out orphan cart items (products that no longer exist)
-    // This prevents orders for deleted products from reaching the sheet
-    const validItems = sanitizedItems.filter((it) => it.productId && it.name);
+    // P0 FIX #3: Filter out items with no name (orphan/invalid cart items)
+    // Uses productId if available, otherwise falls back to name check
+    const validItems = sanitizedItems.filter(
+      (it) => it.name && it.name.trim() !== "",
+    );
     if (validItems.length === 0) {
       toast.error("السلة فارغة أو تحتوي على منتجات لم تعد متاحة.");
       return;

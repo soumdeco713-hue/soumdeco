@@ -2459,3 +2459,44 @@ Stage Summary:
 **Full 60-scenario analysis with code fixes, priority ranking, and post-fix verification checklist saved to:** `/home/z/my-project/download/STUCK-LOADING-ANALYSIS.md`
 
 **Verdict:** The site is **mostly resilient** but has two real P0 gaps in `LoadingFallback` that can still leave slow-network or blank-screen users stuck. Implementing the 5 P0+P1 fixes (~45 minutes total work) should eliminate all remaining "stuck at loading" reports. Read & report only — no code modified.
+
+---
+
+## FINAL PRE-CLIENT HANDOVER SCAN (task: `final-pre-client-scan`)
+
+**Scope:** Read-only audit of **37 source files** covering the entire SOUM DECO e-commerce codebase (4 app routes, 3 hooks, 8 lib modules, 19 site components, 3 API routes). **No code was modified.**
+
+**Method:** Each file read end-to-end; checked for: TS errors, runtime crashes, infinite loops, memory leaks (intervals/listeners), race conditions, unhandled promise rejections, missing error handling, broken imports, hydration mismatches, XSS, broken logic, edge cases (empty arrays / null / NaN / undefined), UI bugs (overflow/z-index), performance issues, and accessibility issues.
+
+### 🚨 Headline finding
+
+**1 P0 showstopper found** that completely blocks all client operations:
+
+> **`cod-order-form.tsx:271`** — `sanitizedItems.filter((it) => it.productId && it.name)` always returns `[]` because `OrderItem` (line 17-21) has only `{name, price, quantity}` — there is no `productId` field. The validation always fires the toast *"السلة فارغة أو تحتوي على منتجات لم تعد متاحة."* and aborts. **Every checkout attempt fails — the client will receive ZERO orders.**
+
+This bug was missed by all previous scans (PRE-HANDOVER-SCAN, STUCK-LOADING-ANALYSIS, FULL-SCAN-150-SCENARIOS) because they focused on stuck-loading and architecture concerns, not on the actual order submission code path. The previous C4 "cart variantKey plumbing" item is unrelated — `variantKey` plumbing itself is correct; the orphan filter at line 271 is the actual broken piece.
+
+### Issue summary
+
+| Severity | Count | Files |
+|---|---|---|
+| 🔴 P0 (showstopper) | 1 | cod-order-form.tsx:271 |
+| 🟠 P1 (high) | 2 | api/order/route.ts:22 (incomplete required fields, dead code); brand-config.ts:17 (hardcoded admin password) |
+| 🟡 P2 (medium) | 6 | use-catalog polling race; health-monitor listener leak; api/products route drops `mode` field; admin-panel missing `onReset` wiring; product-page dead code (activeTier/tierBenefitText) |
+| 🟢 P3 (low/cosmetic) | 7 | unused import, Meubes typo (auto-fixed), Arabic pluralization, etc. |
+
+### What's working well (no action needed)
+
+Strong defense-in-depth verified on: 4-tier catalog fallback chain, self-healing cart, image pipeline (local→Cloudinary), adaptive localStorage→IndexedDB storage, failed-order retry queue, top-level ErrorBoundary + route-level error.tsx + 404 + `<noscript>`, LoadingFallback safety net, silent health monitor, optimistic admin save with rollback, NaN-safe cart totals.
+
+### Verdict
+
+> ❌ **NEEDS FIXES — DO NOT HAND TO CLIENT YET**
+>
+> The site is visually polished and architecturally sound, but a single 5-minute fix (P0-1) is required before handover. After P0 + P1-2 (password rotation) fixes, the site is safe to hand to the client. Re-scan required after P0 fix to confirm end-to-end order flow (form submit → Apps Script → sheet row).
+
+**Full per-file checklist, issue details with line numbers + fix recommendations, and recommended fix order saved to:** `/home/z/my-project/download/FINAL-PRE-CLIENT-SCAN.md`
+
+**Estimated time to READY FOR CLIENT:** ~1 hour of focused work (30 min must-fix + 30 min cleanup).
+
+Read & report only — no code modified.
