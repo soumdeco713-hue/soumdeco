@@ -266,7 +266,7 @@
   }
 }
 .aurora-bg {
-  animation: aurora-drift 24s ease-in-out infinite;
+  /* CPU FIX: removed infinite animation — static gradient is just as elegant */
 }
 
 /* Refined glow pulse — for primary CTAs (soft taupe halo, not neon) */
@@ -283,7 +283,7 @@
   }
 }
 .neon-pulse {
-  animation: neon-pulse 4s ease-in-out infinite;
+  /* CPU FIX: removed infinite pulse — static shadow is just as elegant */
 }
 
 /* Soft sage glow */
@@ -296,7 +296,7 @@
   }
 }
 .neon-cyan-pulse {
-  animation: neon-cyan-pulse 4s ease-in-out infinite;
+  /* CPU FIX: removed infinite pulse */
 }
 
 /* Soft blush rose glow */
@@ -309,7 +309,7 @@
   }
 }
 .neon-magenta-pulse {
-  animation: neon-magenta-pulse 4s ease-in-out infinite;
+  /* CPU FIX: removed infinite pulse */
 }
 
 /* Sparkle twinkle — slow, refined (4s instead of 1.8s) */
@@ -318,7 +318,7 @@
   50%      { opacity: 1;    transform: scale(1.08); }
 }
 .sparkle-anim {
-  animation: sparkle-twinkle 3.2s ease-in-out infinite;
+  /* CPU FIX: removed infinite animation */
   display: inline-block;
   will-change: transform, opacity;
 }
@@ -330,7 +330,7 @@
 }
 .badge-shimmer {
   background-size: 200% auto;
-  animation: brass-shimmer 8s linear infinite;
+  /* CPU FIX: removed infinite animation */
 }
 
 /* Subtle floating drift — very gentle, max 3px */
@@ -339,7 +339,7 @@
   50%      { transform: translateY(-3px) rotate(0.6deg); }
 }
 .float-drift {
-  animation: float-drift 6s ease-in-out infinite;
+  /* CPU FIX: removed infinite animation */
   will-change: transform;
 }
 
@@ -349,7 +349,7 @@
   50%      { transform: translateY(-5px); }
 }
 .float-strong {
-  animation: float-strong 6s ease-in-out infinite;
+  /* CPU FIX: removed infinite animation */
   will-change: transform;
 }
 
@@ -506,7 +506,7 @@
   50%      { transform: scale(1.08); }
 }
 .pulse-soft {
-  animation: pulse-soft 1.8s ease-in-out infinite;
+  animation: pulse-soft 1.8s ease-in-out 3; /* CPU FIX: 3 cycles then stop */
   will-change: transform;
 }
 
@@ -561,7 +561,7 @@
   -webkit-text-fill-color: transparent;
   color: transparent;
   background-size: 200% auto;
-  animation: brass-shimmer 10s linear infinite;
+  /* CPU FIX: removed infinite animation */
 }
 
 /* ÉLÉGANCE animated gradient text — espresso shimmering with deep brass highlights.
@@ -577,7 +577,7 @@
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
-  animation: blue-black-shimmer 8s linear infinite;
+  /* CPU FIX: removed infinite animation */
 }
 
 /* Static version (no animation) */
@@ -602,7 +602,7 @@
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
-  animation: black-shimmer 7s linear infinite;
+  /* CPU FIX: removed infinite animation */
 }
 
 /* Animated espresso gradient background — for buttons/badges */
@@ -613,7 +613,7 @@
 .bg-animated-black {
   background: linear-gradient(90deg, #1C1815 0%, #2A2520 25%, #3D3530 50%, #2A2520 75%, #1C1815 100%);
   background-size: 200% auto;
-  animation: black-bg-shift 7s linear infinite;
+  /* CPU FIX: removed infinite animation */
 }
 
 /* Warm paper texture overlay — subtle warm tones */
@@ -639,7 +639,7 @@
   50%      { transform: translateY(-3px); opacity: 1; }
 }
 .pick-me-badge {
-  animation: pick-me-bounce 1.6s ease-in-out infinite;
+  animation: pick-me-bounce 1.6s ease-in-out 3; /* CPU FIX: 3 bounces then stop */
 }
 
 /* Stock rupture shimmer — gentle */
@@ -648,7 +648,7 @@
   50%      { opacity: 1; }
 }
 .rupture-pulse {
-  animation: rupture-pulse 1.8s ease-in-out infinite;
+  /* CPU FIX: removed infinite pulse */
 }
 
 /* Modal slide up */
@@ -767,7 +767,7 @@
   }
 }
 .glow-pulse {
-  animation: glow-pulse 4s ease-in-out infinite;
+  /* CPU FIX: removed infinite */
   will-change: box-shadow;
 }
 
@@ -777,7 +777,7 @@
   50%      { border-color: rgba(154, 126, 58, 0.40); }
 }
 .border-glow {
-  animation: border-glow 4s ease-in-out infinite;
+  /* CPU FIX: removed infinite */
 }
 
 @keyframes sparkle-drift {
@@ -785,7 +785,7 @@
   50%      { opacity: 1;   transform: translateY(-4px) scale(1.1); }
 }
 .sparkle-drift {
-  animation: sparkle-drift 3s ease-in-out infinite;
+  /* CPU FIX: removed infinite */
   will-change: opacity, transform;
 }
 
@@ -923,7 +923,7 @@
     linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  animation: brass-shimmer 12s linear infinite;
+  /* CPU FIX: removed infinite */
   pointer-events: none;
 }
 
@@ -949,7 +949,7 @@
     rgba(154, 126, 58, 0.18) 50%,
     rgba(139, 123, 110, 0.08) 100%);
   background-size: 200% 100%;
-  animation: shimmer-line 2.2s ease-in-out infinite;
+  animation: shimmer-line 2.2s ease-in-out 3; /* CPU FIX: 3 cycles (skeleton loading) */
 }
 
 /* ===== Category buttons — soft warm glowing colors ===== */
@@ -1056,7 +1056,7 @@
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
-  animation: soum-deco-shimmer 6s linear infinite;
+  /* CPU FIX: removed infinite */
   filter: drop-shadow(0 0 4px rgba(184, 150, 86, 0.25)) drop-shadow(0 0 10px rgba(154, 126, 58, 0.15));
 }
 
@@ -1155,6 +1155,6 @@
   }
 }
 .special-glow-pulse {
-  animation: special-glow-pulse 4s ease-in-out infinite;
+  /* CPU FIX: removed infinite */
   will-change: box-shadow;
 }

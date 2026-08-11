@@ -158,7 +158,7 @@ function PasswordGate({ onAuthed }: { onAuthed: () => void }) {
      
      
     >
-      <div className="w-full max-w-sm rounded-2xl border border-emerald/30 bg-night-soft/80 p-6 shadow-2xl backdrop-blur-md">
+      <div className="w-full max-w-sm rounded-2xl border border-emerald/30 bg-night-soft/80 p-6 shadow-2xl backdrop-blur-sm">
         <div className="mb-4 flex flex-col items-center text-center">
           <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-emerald/10">
             <Lock className="h-6 w-6 text-emerald" />
@@ -461,7 +461,7 @@ function EditForm({
 
   return (
     <div
-      className="rounded-2xl border border-emerald/25 bg-night-soft/70 p-5 backdrop-blur-md sm:p-6"
+      className="rounded-2xl border border-emerald/25 bg-night-soft/70 p-5 backdrop-blur-sm sm:p-6"
      
      
     >
@@ -1251,7 +1251,7 @@ export function AdminPanel({
      
     >
       {/* Admin header */}
-      <div className="sticky top-0 z-30 border-b border-emerald/15 bg-night-soft/90 backdrop-blur-lg">
+      <div className="sticky top-0 z-30 border-b border-emerald/15 bg-night-soft/90 backdrop-blur-sm">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
           <div>
             <h1 className="font-arabic text-xl font-bold text-charcoal">
@@ -1323,7 +1323,7 @@ export function AdminPanel({
             </p>
 
             {/* Product list — grouped by category, ordered by sortOrder within category */}
-            <div className="overflow-hidden rounded-2xl border border-clay/40 bg-night-soft/70 backdrop-blur-md">
+            <div className="overflow-hidden rounded-2xl border border-clay/40 bg-night-soft/70 backdrop-blur-sm">
               {products.length === 0 ? (
                 <p className="p-8 text-center font-arabic text-sm text-gray-light">
                   لا توجد منتجات. اضغط على «إضافة منتج».

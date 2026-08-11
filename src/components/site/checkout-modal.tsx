@@ -66,7 +66,7 @@ export function CheckoutModal({
         className="modal-overlay fixed inset-0 bg-night/80 backdrop-blur-sm"
       />
       <div
-        className="modal-panel modal-slide-up relative z-10 my-4 w-full max-w-lg overflow-hidden rounded-3xl border border-emerald/25 bg-night-soft/95 shadow-2xl backdrop-blur-xl"
+        className="modal-panel modal-slide-up relative z-10 my-4 w-full max-w-lg overflow-hidden rounded-3xl border border-emerald/25 bg-night-soft/95 shadow-2xl backdrop-blur-sm"
         style={{
           boxShadow:
             "0 24px 80px -12px rgba(107, 100, 87, 0.18), 0 0 0 1px rgba(42, 125, 91, 0.2), 0 0 60px -10px rgba(42, 125, 91, 0.35)",

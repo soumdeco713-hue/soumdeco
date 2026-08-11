@@ -207,12 +207,12 @@ export function ProductPage({
      
     >
       {/* Top bar: back button */}
-      <div className="sticky top-0 z-40 border-b border-clay/30 bg-night-soft/85 backdrop-blur-lg">
+      <div className="sticky top-0 z-40 border-b border-clay/30 bg-night-soft/85 backdrop-blur-sm">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           <button
             type="button"
             onClick={onBack}
-            className="flex items-center gap-2 rounded-full border border-emerald/30 bg-night-soft/70 px-4 py-2 font-arabic text-sm font-medium text-charcoal shadow-lg backdrop-blur-md transition-transform hover:translate-x-1 hover:bg-emerald/10 active:scale-95"
+            className="flex items-center gap-2 rounded-full border border-emerald/30 bg-night-soft/70 px-4 py-2 font-arabic text-sm font-medium text-charcoal shadow-lg backdrop-blur-sm transition-transform hover:translate-x-1 hover:bg-emerald/10 active:scale-95"
           >
             <ArrowRight className="h-4 w-4 text-emerald" />
             <span>العودة للمتجر</span>
@@ -233,7 +233,7 @@ export function ProductPage({
           >
             {/* Hero image */}
             <div
-              className="relative aspect-square w-full overflow-hidden rounded-3xl border border-emerald/20 bg-night-soft/60 shadow-2xl backdrop-blur-md sm:aspect-[4/5]"
+              className="relative aspect-square w-full overflow-hidden rounded-3xl border border-emerald/20 bg-night-soft/60 shadow-2xl backdrop-blur-sm sm:aspect-[4/5]"
               style={{
                 boxShadow:
                   "0 20px 60px -20px rgba(107, 100, 87, 0.18), 0 0 0 1px rgba(42, 125, 91, 0.18), 0 0 80px -20px rgba(42, 125, 91, 0.35)",
@@ -262,13 +262,13 @@ export function ProductPage({
               )}
 
               {product.category && (
-                <span className="absolute right-3 top-3 rounded-full border border-emerald/40 bg-night-soft/80 px-3 py-1 font-arabic text-[11px] font-medium text-emerald backdrop-blur-md">
+                <span className="absolute right-3 top-3 rounded-full border border-emerald/40 bg-night-soft/80 px-3 py-1 font-arabic text-[11px] font-medium text-emerald backdrop-blur-sm">
                   {product.category}
                 </span>
               )}
               {product.badge && (
                 <span
-                  className="absolute left-3 top-3 rounded-full border border-neon-magenta/60 bg-neon-magenta/20 px-3 py-1 font-arabic text-[11px] font-bold text-neon-magenta backdrop-blur-md"
+                  className="absolute left-3 top-3 rounded-full border border-neon-magenta/60 bg-neon-magenta/20 px-3 py-1 font-arabic text-[11px] font-bold text-neon-magenta backdrop-blur-sm"
                   style={{ boxShadow: "0 0 18px rgba(194, 91, 126, 0.30)" }}
                 >
                   {product.badge}
@@ -574,7 +574,7 @@ export function ProductPage({
                   key={p.id}
                   type="button"
                   onClick={() => onProductClick?.(p)}
-                  className="fade-up group flex flex-col overflow-hidden rounded-2xl border border-clay/40 bg-night-soft/70 text-left backdrop-blur-md transition-transform duration-300 hover:-translate-y-1 hover:border-emerald/50 active:scale-[0.98]"
+                  className="fade-up group flex flex-col overflow-hidden rounded-2xl border border-clay/40 bg-night-soft/70 text-left backdrop-blur-sm transition-transform duration-300 hover:-translate-y-1 hover:border-emerald/50 active:scale-[0.98]"
                   style={{ animationDelay: `${i * 80}ms` }}
                 >
                   <div className="relative aspect-square w-full overflow-hidden bg-night">

@@ -12,7 +12,7 @@ export function BrandStory() {
     >
       <div className="mx-auto max-w-3xl">
         <div
-          className="fade-up relative overflow-hidden rounded-3xl border border-emerald/25 bg-night-soft/60 p-6 backdrop-blur-md sm:p-12"
+          className="fade-up relative overflow-hidden rounded-3xl border border-emerald/25 bg-night-soft/60 p-6 backdrop-blur-sm sm:p-12"
           style={{
             boxShadow:
               "0 16px 48px -12px rgba(107, 100, 87, 0.15), 0 0 0 1px rgba(42, 125, 91, 0.15), 0 0 60px -20px rgba(42, 125, 91, 0.4)",

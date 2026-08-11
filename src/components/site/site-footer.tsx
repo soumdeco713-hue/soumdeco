@@ -11,7 +11,7 @@ export function SiteFooter() {
 
   return (
     <footer
-      className="relative mt-auto overflow-hidden border-t border-emerald/15 bg-night-soft/60 backdrop-blur-md"
+      className="relative mt-auto overflow-hidden border-t border-emerald/15 bg-night-soft/60 backdrop-blur-sm"
      
      
     >
