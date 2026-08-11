@@ -92,6 +92,8 @@ export function ProductPage({
         .filter((t) => t !== "color" && t !== "size" && t.trim() !== ""),
     ),
   );
+  // Whether this product has ANY variants (used for obligatory selection check)
+  const hasVariants = colorVariants.length > 0 || sizeVariants.length > 0 || customTypes.length > 0;
 
   // The selected color/size objects (for their price adjustments).
   const selectedColorVariant = colorVariants.find((v) => v.name === selectedColor);
@@ -168,6 +170,37 @@ export function ProductPage({
 
   const handleAdd = () => {
     if (isVariantOutOfStock) return; // prevent adding out-of-stock variant
+
+    // OBLIGATORY VARIANT CHECK: if the product has variants (colors, sizes, or custom),
+    // the customer MUST select at least one option from EACH available variant type
+    // before they can add to cart. This prevents orders without variant info.
+    if (hasVariants) {
+      // Check each variant type — if any has options but none selected, block
+      const missingSelections: string[] = [];
+      if (colorVariants.length > 0 && !selectedColor) {
+        missingSelections.push("اللون");
+      }
+      if (sizeVariants.length > 0 && !selectedSize) {
+        missingSelections.push("المقاس");
+      }
+      for (const ct of customTypes) {
+        if (!selectedCustom[ct]) {
+          missingSelections.push(ct);
+        }
+      }
+      if (missingSelections.length > 0) {
+        // Show toast with the missing variant name(s)
+        import("sonner").then(({ toast }) => {
+          if (missingSelections.length === 1) {
+            toast.error(`الرجاء اختيار ${missingSelections[0]}`);
+          } else {
+            toast.error(`الرجاء اختيار: ${missingSelections.join("، ")}`);
+          }
+        });
+        return; // block add-to-cart
+      }
+    }
+
     // Build variantKey so the cart can distinguish items with different
     // color/size/custom selections (prevents merging different variants into one line item)
     const allSelections = [
@@ -383,15 +416,15 @@ export function ProductPage({
 
             {/* Variants — colors + sizes (replaces the old generic variations UI).
                 Each button reflects the variant's price adjustment next to its name. */}
-            {(colorVariants.length > 0 || sizeVariants.length > 0) && (
+            {(colorVariants.length > 0 || sizeVariants.length > 0 || customTypes.length > 0) && (
               <div className="space-y-4">
                 <h2 className="font-arabic text-sm font-semibold uppercase tracking-wide text-emerald">
-                  الخيارات المتاحة
+                  الخيارات المتاحة <span className="text-terracotta">*</span>
                 </h2>
                 {colorVariants.length > 0 && (
                   <div>
                     <label className="mb-2 block font-arabic text-sm font-medium text-charcoal">
-                      اللون
+                      اللون <span className="text-terracotta">*</span>
                     </label>
                     <div className="flex flex-wrap gap-2">
                       {colorVariants.map((c) => {
@@ -423,7 +456,7 @@ export function ProductPage({
                 {sizeVariants.length > 0 && (
                   <div>
                     <label className="mb-2 block font-arabic text-sm font-medium text-charcoal">
-                      المقاس
+                      المقاس <span className="text-terracotta">*</span>
                     </label>
                     <div className="flex flex-wrap gap-2">
                       {sizeVariants.map((s) => {
@@ -459,7 +492,7 @@ export function ProductPage({
                   return (
                     <div key={ct}>
                       <label className="mb-2 block font-arabic text-sm font-medium text-charcoal">
-                        {ct}
+                        {ct} <span className="text-terracotta">*</span>
                       </label>
                       <div className="flex flex-wrap gap-2">
                         {ctVariants.map((c) => {
