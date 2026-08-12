@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { toast } from "sonner";
 import {
   ArrowRight,
   Check,
@@ -95,6 +96,23 @@ export function ProductPage({
   // Whether this product has ANY variants (used for obligatory selection check)
   const hasVariants = colorVariants.length > 0 || sizeVariants.length > 0 || customTypes.length > 0;
 
+  // OBLIGATORY VARIANT CHECK: compute which variants are missing selection.
+  // This is used to DISABLE the add-to-cart button (not just show a toast).
+  // Same importance as the name field — you can't order without it.
+  const missingVariants = useMemo(() => {
+    if (!hasVariants) return [];
+    const missing: string[] = [];
+    if (colorVariants.length > 0 && !selectedColor) missing.push("اللون");
+    if (sizeVariants.length > 0 && !selectedSize) missing.push("المقاس");
+    for (const ct of customTypes) {
+      if (!selectedCustom[ct]) missing.push(ct);
+    }
+    return missing;
+  }, [hasVariants, colorVariants, sizeVariants, customTypes, selectedColor, selectedSize, selectedCustom]);
+
+  // Whether the add-to-cart button should be disabled due to missing variants
+  const variantsMissing = missingVariants.length > 0;
+
   // The selected color/size objects (for their price adjustments).
   const selectedColorVariant = colorVariants.find((v) => v.name === selectedColor);
   const selectedSizeVariant = sizeVariants.find((v) => v.name === selectedSize);
@@ -169,36 +187,19 @@ export function ProductPage({
   ];
 
   const handleAdd = () => {
-    if (isVariantOutOfStock) return; // prevent adding out-of-stock variant
+    if (isVariantOutOfStock) return;
+    if (rupture) return;
 
-    // OBLIGATORY VARIANT CHECK: if the product has variants (colors, sizes, or custom),
-    // the customer MUST select at least one option from EACH available variant type
-    // before they can add to cart. This prevents orders without variant info.
-    if (hasVariants) {
-      // Check each variant type — if any has options but none selected, block
-      const missingSelections: string[] = [];
-      if (colorVariants.length > 0 && !selectedColor) {
-        missingSelections.push("اللون");
+    // OBLIGATORY VARIANT CHECK — same priority as name field.
+    // The button is ALSO disabled (see disabled prop below), so this is a
+    // double safety net. If somehow the button is clicked, we block here too.
+    if (variantsMissing) {
+      if (missingVariants.length === 1) {
+        toast.error(`الرجاء اختيار ${missingVariants[0]}`);
+      } else {
+        toast.error(`الرجاء اختيار: ${missingVariants.join("، ")}`);
       }
-      if (sizeVariants.length > 0 && !selectedSize) {
-        missingSelections.push("المقاس");
-      }
-      for (const ct of customTypes) {
-        if (!selectedCustom[ct]) {
-          missingSelections.push(ct);
-        }
-      }
-      if (missingSelections.length > 0) {
-        // Show toast with the missing variant name(s)
-        import("sonner").then(({ toast }) => {
-          if (missingSelections.length === 1) {
-            toast.error(`الرجاء اختيار ${missingSelections[0]}`);
-          } else {
-            toast.error(`الرجاء اختيار: ${missingSelections.join("، ")}`);
-          }
-        });
-        return; // block add-to-cart
-      }
+      return;
     }
 
     // Build variantKey so the cart can distinguish items with different
@@ -551,8 +552,8 @@ export function ProductPage({
             <button
               type="button"
               onClick={handleAdd}
-              disabled={rupture || isVariantOutOfStock}
-              className={`flex w-full items-center justify-center gap-2 rounded-full px-6 py-4 font-arabic text-base font-bold transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 ${
+              disabled={rupture || isVariantOutOfStock || variantsMissing}
+              className={`flex w-full items-center justify-center gap-2 rounded-full px-6 py-4 font-arabic text-base font-bold transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
                 added
                   ? "bg-emerald-bright text-night"
                   : "bg-emerald text-night hover:bg-emerald-bright"
@@ -563,6 +564,11 @@ export function ProductPage({
                 <>
                   <Check className="h-5 w-5" strokeWidth={3} />
                   تمت الإضافة إلى السلة
+                </>
+              ) : variantsMissing ? (
+                <>
+                  <ShoppingBag className="h-5 w-5" />
+                  اختر الخيارات أولاً
                 </>
               ) : (
                 <>
