@@ -33,6 +33,10 @@ type CodOrderFormProps = {
    *  selector highlights tier quantities with a ✨ badge and applies discount /
    *  free-shipping benefits to the totals. */
   quantityTiers?: QuantityTier[];
+  /** True when required variants are not selected — blocks order submission. */
+  variantsMissing?: boolean;
+  /** Names of the missing variants (e.g. ["اللون", "المقاس"]) for the error toast. */
+  missingVariantNames?: string[];
 };
 
 type FormState = {
@@ -57,6 +61,8 @@ export function CodOrderForm({
   onContinueShopping,
   extraNotes,
   quantityTiers,
+  variantsMissing = false,
+  missingVariantNames = [],
 }: CodOrderFormProps) {
   const { wilayas, getCommunesForWilaya, loading } = useAlgeriaData();
   const [items, setItems] = useState<OrderItem[]>(initialItems);
@@ -248,10 +254,24 @@ export function CodOrderForm({
 
   const handleSubmit = async () => {
     if (rupture) return;
+
+    // OBLIGATORY VARIANT CHECK — same priority as name field.
+    // If the product has variants and the customer hasn't selected them,
+    // block the order submission. This catches the case where the customer
+    // fills out the order form directly on the product page without
+    // selecting variants first.
+    if (variantsMissing) {
+      if (missingVariantNames.length === 1) {
+        toast.error(`الرجاء اختيار ${missingVariantNames[0]}`);
+      } else {
+        toast.error(`الرجاء اختيار: ${missingVariantNames.join("، ")}`);
+      }
+      return;
+    }
+
     if (!validate()) return;
 
     // P0 FIX #2: Re-check rupture at checkout submit time
-    // (admin may have marked product as out of stock while customer was filling the form)
     if (typeof rupture !== "undefined" && rupture) {
       toast.error("هذا المنتج نفدت الكمية. لا يمكن إتمام الطلب.");
       return;
@@ -1004,12 +1024,12 @@ export function CodOrderForm({
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={submitting}
-          className="flex w-full items-center justify-center gap-2 rounded-full bg-animated-black px-4 py-3 text-sm font-semibold text-white transition-shadow hover:shadow-lg disabled:opacity-60"
+          disabled={submitting || variantsMissing}
+          className="flex w-full items-center justify-center gap-2 rounded-full bg-animated-black px-4 py-3 text-sm font-semibold text-white transition-shadow hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
           style={{ boxShadow: "0 4px 20px -2px rgba(15, 13, 10, 0.35)" }}
         >
           <Send className="h-4 w-4" />
-          {submitting ? "جاري الإرسال..." : "تأكيد الطلب"}
+          {submitting ? "جاري الإرسال..." : variantsMissing ? "اختر الخيارات أولاً" : "تأكيد الطلب"}
         </button>
       </div>
     </div>

@@ -592,6 +592,8 @@ export function ProductPage({
               onContinueShopping={onBack}
               extraNotes={variantSummary}
               quantityTiers={tiers}
+              variantsMissing={variantsMissing}
+              missingVariantNames={missingVariants}
             />
           </div>
         </div>
