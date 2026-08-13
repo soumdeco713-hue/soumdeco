@@ -322,10 +322,6 @@ function onStockEdit(e) {
 
     var newStatus = String(e.value || '').trim().toLowerCase();
     var oldStatus = String((e.oldValue || '')).trim().toLowerCase();
-    // Only fire when transitioning INTO "confirmed" (idempotent — won't re-decrement
-    // if the status was already confirmed and is being re-saved).
-    if (newStatus !== 'confirmed') return;
-    if (oldStatus === 'confirmed') return;
 
     // Read the order row to find the product name + quantity.
     var row = range.getRow();
@@ -338,26 +334,39 @@ function onStockEdit(e) {
     if (isNaN(qty) || qty < 1) qty = 1;
     if (!productName) return;
 
-    // The Orders sheet stores the product as "name ×N" or "name1 ×N1 + name2 ×N2"
-    // (multi-item cart checkout). For multi-item orders, we can't reliably split
-    // the stock decrement per item from this row, so we only handle the simple
-    // single-item case here. Multi-item cart decrements should be done manually.
+    // Multi-item orders (contain "+") — can't reliably split stock per item.
+    // Skip auto-decrement/revert for multi-item orders.
     if (productName.indexOf('+') >= 0) return;
 
     // Strip the trailing " ×N" so we get the bare product name.
     var bareName = productName.replace(/\s*[×x]\s*\d+\s*$/, '').trim();
     if (!bareName) return;
 
-    decrementProductStock_(bareName, qty);
+    // Statuses that have already decremented stock (stock was reduced):
+    var STOCK_DECREMENTED = ['confirmed', 'shipped', 'delivered'];
+
+    // CASE 1: Transition INTO confirmed/shipped/delivered (from a non-decremented status)
+    // → DECREMENT stock (only if old status was NOT already a decremented one)
+    if (STOCK_DECREMENTED.indexOf(newStatus) >= 0) {
+      if (STOCK_DECREMENTED.indexOf(oldStatus) >= 0) return; // already decremented
+      decrementProductStock_(bareName, qty);
+    }
+
+    // CASE 2: Transition INTO cancelled (from a decremented status)
+    // → REVERT stock (add back the quantity)
+    if (newStatus === 'cancelled') {
+      if (STOCK_DECREMENTED.indexOf(oldStatus) < 0) return; // wasn't decremented, nothing to revert
+      incrementProductStock_(bareName, qty);
+    }
+
   } catch (err) {
     // Don't break the user's edit — just log.
     Logger.log('[onStockEdit] error: ' + err);
   }
 }
 
-/** Find the product row in the Products sheet by name (case-insensitive, trimmed)
- *  and decrement its stock by `qty`. Does nothing if the product isn't found or
- *  has no stock column set. Stock is allowed to go to 0 but never negative. */
+/** Find the product row in the Stock sheet by name (exact match) and
+ *  decrement its stock by `qty`. Stock goes to 0 but never negative. */
 function decrementProductStock_(productName, qty) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(STOCK_SHEET);
@@ -375,7 +384,32 @@ function decrementProductStock_(productName, qty) {
       if (currentNum === null || isNaN(currentNum)) return;
       var next = Math.max(0, currentNum - qty);
       sheet.getRange(i + 2, 2).setValue(next);
-      Logger.log('[Stock] ' + productName + ' -' + qty + ' = ' + next);
+      Logger.log('[Stock] DECREMENT ' + productName + ' -' + qty + ' = ' + next);
+      return;
+    }
+  }
+}
+
+/** Find the product row in the Stock sheet by name and INCREMENT its stock
+ *  by `qty` (revert a previous decrement when order is cancelled). */
+function incrementProductStock_(productName, qty) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(STOCK_SHEET);
+  if (!sheet) return;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  var values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+  for (var i = 0; i < values.length; i++) {
+    var rowName = String(values[i][0] || '').trim();
+    if (rowName === productName) {
+      var current = values[i][1];
+      var currentNum = (current === '' || current === null || current === undefined)
+        ? 0  // if stock was empty/null, treat as 0 and add back
+        : Number(current);
+      if (isNaN(currentNum)) currentNum = 0;
+      var next = currentNum + qty;
+      sheet.getRange(i + 2, 2).setValue(next);
+      Logger.log('[Stock] INCREMENT (revert cancel) ' + productName + ' +' + qty + ' = ' + next);
       return;
     }
   }
