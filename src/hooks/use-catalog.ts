@@ -55,32 +55,33 @@ export function useCatalog() {
     productsRef.current = products;
   }, [products]);
 
-  // ---- Fetch DIRECTLY from Google Apps Script (bypasses broken edge API) ----
-  // The Cloudflare Pages edge API routes return 500 errors due to a
-  // Next.js 16 + @cloudflare/next-on-pages v1 incompatibility. To make the
-  // site work reliably, we fetch products directly from the Apps Script
-  // web app in the browser. This is faster AND more reliable.
+  // ---- HYBRID STATIC-FIRST FETCH ----
+  // 1. Static JSON from Cloudflare CDN (50ms, NEVER crashes)
+  // 2. Background Apps Script refresh (non-blocking, 10-min TTL, retry on fail)
+  // 3. Fallback: localStorage → IndexedDB → SEED_PRODUCTS
   //
-  // CRITICAL: We show cached/seed data INSTANTLY (0ms) so users NEVER see
-  // "stuck at loading" even if Apps Script is slow or down.
-  const refresh = useCallback(async () => {
+  // This eliminates the "connection timed out" crash caused by Apps Script
+  // being in the critical loading path. Visitors now get instant content
+  // from Cloudflare's CDN, and Apps Script updates happen silently in
+  // the background.
+  const BACKGROUND_REFRESH_TTL_MS = 10 * 60 * 1000; // 10 minutes
+  const BG_REFRESH_KEY = "soumdeco_bg_refresh_ts";
+
+  // Background refresh from Apps Script — non-blocking, silent, with retry
+  const backgroundRefresh = useCallback(async () => {
+    // Check TTL — only refresh if last refresh was > 10 minutes ago
     try {
-      // 0. INSTANTLY show cached data (so the page is never "stuck at loading")
-      // This runs BEFORE the network fetch — users see products immediately.
-      const instantCached = loadCatalog();
-      if (instantCached.length > 0) {
-        let quick = instantCached.map(optimizeCloudinaryUrls).map(fixCategoryTypos);
-        quick.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
-        setProducts(quick);
-        setLoading(false); // ← KEY: stop loading IMMEDIATELY
-      }
+      const lastRefresh = parseInt(
+        window.localStorage.getItem(BG_REFRESH_KEY) || "0", 10
+      );
+      if (Date.now() - lastRefresh < BACKGROUND_REFRESH_TTL_MS) return;
+    } catch { return; }
 
-      // 1. Try fetching directly from Google Apps Script
-      const fetched = await clientListProducts();
+    const doFetch = async (): Promise<boolean> => {
+      try {
+        const fetched = await clientListProducts();
+        if (fetched.length === 0) return false;
 
-      if (fetched.length > 0) {
-        // ── SHEET MODE (real Google Sheet data) ──
-        // Deduplicate by ID (the sheet sometimes has duplicate rows).
         const seen = new Set<string>();
         const unique: SheetProduct[] = [];
         for (const p of fetched) {
@@ -91,37 +92,101 @@ export function useCatalog() {
         }
 
         let next: Product[] = unique.map(normalizeProduct);
-
-        // Fix common typos in category names
         next = next.map(fixCategoryTypos);
-
-        // Optimize Cloudinary URLs (smaller images = less bandwidth)
         next = next.map(optimizeCloudinaryUrls);
-
-        // Sort by sortOrder (lower first)
         next.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
 
-        // Sheet is the source of truth — always save (uses adaptive storage:
-        // localStorage for small catalogs, IndexedDB for large ones)
         saveCatalog(next);
-        // Also save async (handles IndexedDB if localStorage overflows)
         saveCatalogAsync(next).catch(() => {});
         setProducts(next);
         setLoading(false);
+
+        try {
+          window.localStorage.setItem(BG_REFRESH_KEY, String(Date.now()));
+        } catch {}
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const success = await doFetch();
+    if (!success) {
+      // Retry after 2 minutes
+      setTimeout(() => { doFetch().catch(() => {}); }, 2 * 60 * 1000);
+    }
+  }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      // 0. INSTANTLY show cached data (for returning visitors — 0ms)
+      const instantCached = loadCatalog();
+      if (instantCached.length > 0) {
+        let quick = instantCached.map(optimizeCloudinaryUrls).map(fixCategoryTypos);
+        quick.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+        setProducts(quick);
+        setLoading(false);
+      }
+
+      // 1. Fetch static JSON from Cloudflare CDN (50ms, NEVER crashes)
+      let fetched: SheetProduct[] = [];
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const res = await fetch("/data/products.json", {
+          cache: "no-cache",
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            fetched = data.map(normalizeSheetProductInline);
+          }
+        }
+      } catch {
+        // Static file fetch failed — will fall through to Apps Script
+      }
+
+      // 2. If static JSON failed, fall back to Apps Script (blocking)
+      if (fetched.length === 0) {
+        fetched = await clientListProducts();
+      }
+
+      if (fetched.length > 0) {
+        const seen = new Set<string>();
+        const unique: SheetProduct[] = [];
+        for (const p of fetched) {
+          const id = String(p.id || "").trim();
+          if (!id || seen.has(id)) continue;
+          seen.add(id);
+          unique.push(p);
+        }
+
+        let next: Product[] = unique.map(normalizeProduct);
+        next = next.map(fixCategoryTypos);
+        next = next.map(optimizeCloudinaryUrls);
+        next.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+
+        saveCatalog(next);
+        saveCatalogAsync(next).catch(() => {});
+        setProducts(next);
+        setLoading(false);
+
+        // 3. Schedule background Apps Script refresh (non-blocking)
+        backgroundRefresh();
         return;
       }
 
-      // 2. Sheet returned empty or failed — use adaptive storage cache, then seed
+      // 3. Static + Apps Script both failed — use cache, then seed
       const cached = await loadCatalogAsync();
       if (cached.length > 0) {
-        // Apply URL rewriting + typo fixes to cached data
         let sorted = cached.map(optimizeCloudinaryUrls).map(fixCategoryTypos);
         sorted.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
         setProducts(sorted);
         setLoading(false);
         return;
       }
-      // First visit ever — seed with the 29 demo products
       const seeded = [...SEED_PRODUCTS].sort(
         (a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999),
       );
@@ -514,6 +579,40 @@ export function useCatalog() {
 }
 
 // ---------- internal ----------
+
+// Inline version of normalizeSheetProduct (from client-sheet.ts)
+// Used to normalize the static JSON response (same format as Apps Script)
+function normalizeSheetProductInline(p: any): SheetProduct {
+  return {
+    id: String(p.id ?? ""),
+    name: String(p.name ?? ""),
+    description: String(p.description ?? ""),
+    category: String(p.category ?? ""),
+    price:
+      p.price === null || p.price === undefined || p.price === "" ||
+      (typeof p.price === "object" && p.price !== null)
+        ? null : Number(p.price),
+    image: String(p.image ?? ""),
+    images: String(p.images ?? ""),
+    featured: (p.featured === true || p.featured === 1 || p.featured === "1" ||
+               (typeof p.featured === "string" && p.featured.toLowerCase() === "true")),
+    isSpecialOffer: (p.isSpecialOffer === true || p.isSpecialOffer === 1 ||
+                     p.isSpecialOffer === "1" ||
+                     (typeof p.isSpecialOffer === "string" &&
+                      p.isSpecialOffer.toLowerCase() === "true")),
+    variations: String(p.variations ?? ""),
+    variants: String(p.variants ?? ""),
+    stock:
+      p.stock === null || p.stock === undefined || p.stock === "" ||
+      (typeof p.stock === "object" && p.stock !== null)
+        ? null : Number(p.stock),
+    highlights: String(p.highlights ?? ""),
+    sortOrder: p.sortOrder === null || p.sortOrder === undefined ? 999 : Number(p.sortOrder),
+    badge: String(p.badge ?? ""),
+    oldPrice: p.oldPrice === null || p.oldPrice === undefined || p.oldPrice === "" ? null : Number(p.oldPrice),
+    quantityTiers: String(p.quantityTiers ?? ""),
+  };
+}
 
 /**
  * Fix common category name typos that exist in the Google Sheet data.

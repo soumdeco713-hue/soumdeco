@@ -251,16 +251,47 @@ export function useStock() {
     setNormalizedMap(next);
   }, [stockMap]);
 
+  // ---- HYBRID STATIC-FIRST FETCH ----
+  // 1. Static CSV from Cloudflare CDN (50ms, NEVER crashes)
+  // 2. Background Apps Script refresh (non-blocking, 10-min TTL, retry on fail)
+  const STOCK_BG_TTL_MS = 10 * 60 * 1000;
+  const STOCK_BG_KEY = "soumdeco_stock_bg_ts";
+
   const fetchStock = useCallback(async () => {
     try {
-      // Fetch directly from Google Apps Script
-      const { clientGetStockCsv } = await import("@/lib/client-sheet");
-      const text = await clientGetStockCsv();
-      if (text) {
-        const newMap = parseCsv(text);
+      // 1. Try static CSV from Cloudflare CDN (50ms, never crashes)
+      let csvText = "";
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const res = await fetch("/data/stock.csv", {
+          cache: "no-cache",
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          csvText = await res.text();
+        }
+      } catch {
+        // Static file fetch failed — will fall through to Apps Script
+      }
 
-        // P0 FIX: Sanity check — don't overwrite with all-zero data
-        // (indicates a broken CSV parse or Apps Script error)
+      // 2. If static CSV failed, try stock-seed.json, then Apps Script
+      if (!csvText) {
+        const seedMap = await loadStockSeed();
+        if (seedMap && Object.keys(seedMap).length > 0) {
+          setStockMap(seedMap);
+          setLoading(false);
+        }
+        // Try Apps Script as last resort
+        const { clientGetStockCsv } = await import("@/lib/client-sheet");
+        csvText = await clientGetStockCsv();
+      }
+
+      if (csvText) {
+        const newMap = parseCsv(csvText);
+
+        // Sanity check — don't overwrite with all-zero data
         const entries = Object.values(newMap);
         if (entries.length > 0) {
           const zeroCount = entries.filter((v) => v === 0).length;
@@ -269,21 +300,60 @@ export function useStock() {
             console.warn(
               `[Stock] Fetch rejected: ${zeroCount}/${entries.length} (${(zeroRatio * 100).toFixed(1)}%) products have 0 stock — keeping current data`,
             );
-            return; // keep current state, don't overwrite with bad data
+            return;
           }
         }
 
         setStockMap(newMap);
-        // Cache for next page load (instant load)
         saveCachedStock(newMap);
         hasFetchedRef.current = true;
       }
-      // SELF-HEALING: If fetch returned empty, keep current state (don't wipe)
+
+      // 3. Schedule background Apps Script refresh (non-blocking, 10-min TTL)
+      backgroundStockRefresh();
     } catch {
-      // SELF-HEALING: Network error — keep current state (don't clear)
       console.warn("[Stock] Fetch failed — using cached data");
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  // Background stock refresh from Apps Script — non-blocking, silent, with retry
+  const backgroundStockRefresh = useCallback(async () => {
+    try {
+      const lastRefresh = parseInt(
+        window.localStorage.getItem(STOCK_BG_KEY) || "0", 10
+      );
+      if (Date.now() - lastRefresh < STOCK_BG_TTL_MS) return;
+    } catch { return; }
+
+    const doFetch = async (): Promise<boolean> => {
+      try {
+        const { clientGetStockCsv } = await import("@/lib/client-sheet");
+        const text = await clientGetStockCsv();
+        if (!text) return false;
+
+        const newMap = parseCsv(text);
+        const entries = Object.values(newMap);
+        if (entries.length > 0) {
+          const zeroCount = entries.filter((v) => v === 0).length;
+          if (zeroCount / entries.length > 0.9) return false;
+        }
+
+        setStockMap(newMap);
+        saveCachedStock(newMap);
+        try {
+          window.localStorage.setItem(STOCK_BG_KEY, String(Date.now()));
+        } catch {}
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const success = await doFetch();
+    if (!success) {
+      setTimeout(() => { doFetch().catch(() => {}); }, 2 * 60 * 1000);
     }
   }, []);
 

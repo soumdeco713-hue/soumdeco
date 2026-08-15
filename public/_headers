@@ -30,3 +30,10 @@
 # Service worker un-registration script — NEVER cache
 /unregister-sw.js
   Cache-Control: no-cache, no-store, must-revalidate
+
+# Static data files — 5 min CDN cache + 1 hour stale-while-revalidate
+/data/products.json
+  Cache-Control: public, max-age=300, stale-while-revalidate=3600
+
+/data/stock.csv
+  Cache-Control: public, max-age=300, stale-while-revalidate=3600

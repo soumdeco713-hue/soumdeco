@@ -251,9 +251,27 @@ def main():
         with open(stock_seed_path, "w", encoding="utf-8") as f:
             json.dump(stock_seed, f, ensure_ascii=False, indent=2)
         log(f"Stock seed updated: {len(stock_map)} products")
+
+        # Step 9c: Write raw products JSON + stock CSV for static serving
+        # These files are served from Cloudflare CDN (instant, never crash)
+        data_dir = os.path.join(REPO_ROOT, "public", "data")
+        os.makedirs(data_dir, exist_ok=True)
+
+        # Write products.json (raw Apps Script response)
+        products_json_path = os.path.join(data_dir, "products.json")
+        with open(products_json_path, "w", encoding="utf-8") as f:
+            json.dump(products, f, ensure_ascii=False)
+        log(f"Static products.json written: {len(products)} products")
+
+        # Write stock.csv (raw Apps Script response)
+        stock_csv_path = os.path.join(data_dir, "stock.csv")
+        with open(stock_csv_path, "w", encoding="utf-8") as f:
+            f.write(stock_csv)
+        log(f"Static stock.csv written: {len(stock_map)} entries")
+
     except Exception as e:
-        log(f"WARNING: Failed to fetch stock seed: {e}")
-        log("Stock seed not updated — old version kept (graceful degradation)")
+        log(f"WARNING: Failed to fetch stock/data: {e}")
+        log("Stock/data not updated — old version kept (graceful degradation)")
 
     # Step 10: Summary
     log(f"=== Summary ===")
