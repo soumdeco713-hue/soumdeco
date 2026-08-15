@@ -52,17 +52,19 @@ export function Categories({ products, active, onSelect }: CategoriesProps) {
           }} />
         </div>
 
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6 sm:gap-3">
+        {/* Horizontal scrollable category buttons — bigger + scrollable */}
+        <div className="cat-row-scroll relative">
           <button
             type="button"
             onClick={() => onSelect("")}
-            className={`cat-btn ${active === "" ? "cat-active-default" : "cat-glow"} flex flex-col items-center gap-1.5 rounded-xl border px-2 py-3 font-arabic text-xs font-medium ${
+            className={`cat-btn ${active === "" ? "cat-active-default" : "cat-glow"} flex flex-col items-center gap-2 rounded-xl border px-4 py-4 font-arabic text-sm font-medium ${
               active === ""
                 ? "border-blue-mid bg-blue-mid/10 text-blue-mid"
                 : "border-clay/40 bg-white text-gray hover:border-gray/50 hover:text-charcoal"
             }`}
+            style={{ minWidth: "110px" }}
           >
-            <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="7" height="7" rx="1" />
               <rect x="14" y="3" width="7" height="7" rx="1" />
               <rect x="3" y="14" width="7" height="7" rx="1" />
@@ -79,14 +81,15 @@ export function Categories({ products, active, onSelect }: CategoriesProps) {
                 key={cat}
                 type="button"
                 onClick={() => onSelect(cat)}
-                className={`cat-btn ${isActive ? activeAnim : "cat-glow"} flex flex-col items-center gap-1.5 rounded-xl border px-2 py-3 font-arabic text-xs font-medium ${
+                className={`cat-btn ${isActive ? activeAnim : "cat-glow"} flex flex-col items-center gap-2 rounded-xl border px-4 py-4 font-arabic text-sm font-medium ${
                   isActive
                     ? "border-blue-mid bg-blue-mid/10 text-blue-mid"
                     : "border-clay/40 bg-white text-gray hover:border-gray/50 hover:text-charcoal"
                 }`}
+                style={{ minWidth: "110px" }}
               >
                 {isOther ? (
-                  <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="2" />
                     <circle cx="5" cy="12" r="2" />
                     <circle cx="19" cy="12" r="2" />

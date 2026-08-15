@@ -58,74 +58,76 @@ export function SpecialOffersSection({
           />
         </div>
 
-        {/* Products grid — same style as all-products but with magenta accent */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
+        {/* Products — horizontal scrollable row (like AllProducts category rows,
+            but bigger cards + more elegant styling) */}
+        <div className="cat-row-scroll relative">
           {offerProducts.map((p, i) => {
             const rupture = isRupture?.(p);
             return (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => onProductClick?.(p)}
-                className="fade-up special-glow-pulse border-glow group relative flex flex-col overflow-hidden rounded-2xl border-2 border-neon-magenta/40 bg-white text-right transition-transform duration-300 hover:-translate-y-1.5 hover:border-neon-magenta/70 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-neon-magenta/40 active:scale-[0.98]"
-                style={{
-                  boxShadow:
-                    "0 2px 12px -4px rgba(194, 91, 126, 0.20), 0 0 0 1px rgba(194, 91, 126, 0.08)",
-                  transitionDelay: `${Math.min(i * 30, 240)}ms`,
-                }}
-                dir="rtl"
-                lang="ar"
-              >
-                {/* 🎁 badge — shows شارة العرض text if set, otherwise just 🎁 */}
-                {p.badge && p.badge.trim() !== "" ? (
-                  <span
-                    className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-full border border-neon-magenta/60 bg-white px-2.5 py-1 font-arabic text-[10px] font-bold text-neon-magenta shadow-sm"
-                    aria-label={p.badge}
-                  >
-                    🎁 {p.badge}
-                  </span>
-                ) : (
-                  <span
-                    className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-full border border-neon-magenta/60 bg-white px-2 py-0.5 font-arabic text-[10px] font-bold text-neon-magenta shadow-sm"
-                    aria-label="عرض خاص"
-                  >
-                    🎁
-                  </span>
-                )}
-
-                <div className="relative aspect-square w-full overflow-hidden bg-stone">
-                  <ProductImage src={p.image} alt={p.name} fit="contain" />
-                  {p.category && (
-                    <span className="absolute right-2 top-2 rounded-full border border-clay/50 bg-white/95 px-2 py-0.5 font-arabic text-[10px] font-semibold text-gray shadow-sm">
-                      {p.category}
+              <div key={p.id} className="product-card-h" style={{ width: "200px", minWidth: "200px" }}>
+                <button
+                  type="button"
+                  onClick={() => onProductClick?.(p)}
+                  className="fade-up special-glow-pulse border-glow group relative flex w-full flex-col overflow-hidden rounded-2xl border-2 border-neon-magenta/40 bg-white text-right transition-transform duration-300 hover:-translate-y-1.5 hover:border-neon-magenta/70 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-neon-magenta/40 active:scale-[0.98]"
+                  style={{
+                    boxShadow:
+                      "0 2px 12px -4px rgba(194, 91, 126, 0.20), 0 0 0 1px rgba(194, 91, 126, 0.08)",
+                    transitionDelay: `${Math.min(i * 30, 240)}ms`,
+                  }}
+                  dir="rtl"
+                  lang="ar"
+                >
+                  {/* 🎁 badge */}
+                  {p.badge && p.badge.trim() !== "" ? (
+                    <span
+                      className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-full border border-neon-magenta/60 bg-white px-2.5 py-1 font-arabic text-[10px] font-bold text-neon-magenta shadow-sm"
+                      aria-label={p.badge}
+                    >
+                      🎁 {p.badge}
+                    </span>
+                  ) : (
+                    <span
+                      className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-full border border-neon-magenta/60 bg-white px-2 py-0.5 font-arabic text-[10px] font-bold text-neon-magenta shadow-sm"
+                      aria-label="عرض خاص"
+                    >
+                      🎁
                     </span>
                   )}
-                  {rupture && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-white/70 backdrop-blur-sm">
-                      <span className="rounded-full bg-terracotta px-3 py-1 font-arabic text-xs font-semibold text-white shadow-md">
-                        نفدت الكمية
-                      </span>
-                    </div>
-                  )}
-                </div>
-                <div className="flex flex-1 flex-col gap-1 p-3">
-                  <h3 className="line-clamp-2 font-arabic text-sm font-bold leading-snug">
-                    <span className="text-blue-black">{p.name}</span>
-                  </h3>
-                  <p
-                    className={`font-arabic text-sm font-bold ${
-                      p.price === null ? "italic text-gray-light" : "text-emerald"
-                    }`}
-                  >
-                    {p.oldPrice != null && (
-                      <span className="ml-1 text-xs text-gray-light line-through">
-                        {formatPrice(p.oldPrice)}
+
+                  <div className="relative aspect-square w-full overflow-hidden bg-stone">
+                    <ProductImage src={p.image} alt={p.name} fit="contain" />
+                    {p.category && (
+                      <span className="absolute right-2 top-2 rounded-full border border-clay/50 bg-white/95 px-2 py-0.5 font-arabic text-[10px] font-semibold text-gray shadow-sm">
+                        {p.category}
                       </span>
                     )}
-                    {formatPrice(p.price)}
-                  </p>
-                </div>
-              </button>
+                    {rupture && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-white/25 backdrop-blur-[3px]">
+                        <span className="rounded-full bg-terracotta px-3 py-1 font-arabic text-xs font-semibold text-white shadow-md">
+                          نفدت الكمية
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-1 flex-col gap-1 p-3">
+                    <h3 className="line-clamp-2 font-arabic text-sm font-bold leading-snug">
+                      <span className="text-blue-black">{p.name}</span>
+                    </h3>
+                    <p
+                      className={`font-arabic text-sm font-bold ${
+                        p.price === null ? "italic text-gray-light" : "text-emerald"
+                      }`}
+                    >
+                      {p.oldPrice != null && (
+                        <span className="ml-1 text-xs text-gray-light line-through">
+                          {formatPrice(p.oldPrice)}
+                        </span>
+                      )}
+                      {formatPrice(p.price)}
+                    </p>
+                  </div>
+                </button>
+              </div>
             );
           })}
         </div>
