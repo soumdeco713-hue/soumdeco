@@ -1277,13 +1277,16 @@ export function AdminPanel({
               )}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-emerald/30 bg-night-soft/60 px-4 py-2 text-sm font-medium text-charcoal hover:bg-emerald/10"
-          >
-            خروج
-          </button>
+          <div className="flex items-center gap-2">
+            <DataSyncBadge />
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full border border-emerald/30 bg-night-soft/60 px-4 py-2 text-sm font-medium text-charcoal hover:bg-emerald/10"
+            >
+              خروج
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1457,4 +1460,144 @@ export function AdminPanel({
       </div>
     </div>
   );
+}
+
+// ============================================================
+//  DataSyncBadge — Admin's "Refresh now" button + status indicator
+// ============================================================
+//  Shows admin whether the live-sync service is:
+//  - Healthy (green dot) + when data was last updated
+//  - Unhealthy (amber dot) + retry button
+//  - Not configured (gray dot) — site still works (static fallback)
+//
+//  NO URLs are ever shown to admin. The "Refresh now" button silently
+//  calls the worker's /refresh endpoint with the admin secret.
+//  Admin never needs to know about the worker, KV, or any URLs.
+// ============================================================
+
+function DataSyncBadge() {
+  const [health, setHealth] = useState<{
+    ok: boolean;
+    lastSync?: number | null;
+    productCount?: number;
+    error?: string;
+  } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [configured, setConfigured] = useState(true);
+
+  // Poll worker health every 60 seconds
+  useEffect(() => {
+    let mounted = true;
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    async function check() {
+      try {
+        const { fetchWorkerHealth, isWorkerConfigured } = await import(
+          "@/lib/worker-client"
+        );
+        if (!isWorkerConfigured()) {
+          if (mounted) setConfigured(false);
+          return;
+        }
+        if (mounted) setConfigured(true);
+        const h = await fetchWorkerHealth();
+        if (mounted) setHealth(h);
+      } catch {
+        // Silent — admin doesn't need to see network errors
+      }
+    }
+
+    check();
+    interval = setInterval(check, 60000);
+
+    return () => {
+      mounted = false;
+      if (interval) clearInterval(interval);
+    };
+  }, []);
+
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const { triggerWorkerRefresh } = await import("@/lib/worker-client");
+      const result = await triggerWorkerRefresh();
+      if (result.ok) {
+        toast.success(result.message);
+        // Re-check health after 2s (sync takes a moment)
+        setTimeout(() => {
+          import("@/lib/worker-client").then(({ fetchWorkerHealth }) =>
+            fetchWorkerHealth().then((h) => setHealth(h)),
+          );
+        }, 2000);
+      } else {
+        toast.error(result.message);
+      }
+    } catch {
+      toast.error("Échec de la synchronisation");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Not configured — show subtle "static mode" badge (no error)
+  if (!configured) {
+    return (
+      <div
+        className="flex items-center gap-1.5 rounded-full border border-gray/20 bg-night-soft/40 px-3 py-1.5 text-xs text-gray-light"
+        title="البيانات تُحدّث يومياً تلقائياً"
+      >
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-gray" />
+        وضع ثابت
+      </div>
+    );
+  }
+
+  const ok = health?.ok === true;
+  const lastSyncMs = health?.lastSync || null;
+  const lastSyncLabel = lastSyncMs
+    ? formatRelativeTime(lastSyncMs)
+    : "—";
+  const productCount = health?.productCount || 0;
+
+  return (
+    <button
+      type="button"
+      onClick={handleRefresh}
+      disabled={refreshing}
+      title={
+        ok
+          ? `آخر تحديث: ${lastSyncLabel}\n${productCount} منتج\nاضغط للتحديث الآن`
+          : "الخدمة غير متاحة — اضغط لإعادة المحاولة"
+      }
+      className="flex items-center gap-1.5 rounded-full border border-emerald/30 bg-night-soft/60 px-3 py-1.5 text-xs text-charcoal hover:bg-emerald/10 disabled:opacity-50"
+    >
+      <span
+        className={`inline-block h-1.5 w-1.5 rounded-full ${
+          refreshing
+            ? "animate-pulse bg-amber"
+            : ok
+              ? "bg-emerald"
+              : "bg-terracotta"
+        }`}
+        style={{
+          boxShadow: ok
+            ? "0 0 6px rgba(42, 125, 91, 0.5)"
+            : "0 0 6px rgba(196, 87, 67, 0.5)",
+        }}
+      />
+      {refreshing ? "..." : ok ? lastSyncLabel : "غير متصل"}
+    </button>
+  );
+}
+
+function formatRelativeTime(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return "الآن";
+  if (minutes < 60) return `منذ ${minutes} دقيقة`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `منذ ${hours} ساعة`;
+  const days = Math.floor(hours / 24);
+  return `منذ ${days} يوم`;
 }

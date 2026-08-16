@@ -1,0 +1,9 @@
+# Copy this file to `.dev.vars` and fill in real values for local testing.
+# `.dev.vars` is gitignored — never commit it.
+
+# Your Google Apps Script web app URL (the same one the frontend uses)
+APPS_SCRIPT_URL=https://script.google.com/macros/s/AKfycbxWVBZDsyfrqSBsRC_RPSwTyaXXkSaL4amjwRvcFIk3o_CASzw0TG5s_EF3B_BS44rV/exec
+
+# A random secret string for the admin /refresh endpoint.
+# Generate one with: openssl rand -hex 32
+ADMIN_SECRET=replace_with_random_64_char_hex_string

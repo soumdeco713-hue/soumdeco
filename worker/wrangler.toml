@@ -2,11 +2,20 @@ name = "soumdeco-data-sync"
 main = "data-sync.js"
 compatibility_date = "2024-09-01"
 
-# KV namespace binding (created in temp account — will need to be updated when claimed)
+# KV namespace binding
+# You will replace the id below with the real one after running:
+#   wrangler kv:namespace create CATALOG_KV
 [[kv_namespaces]]
 binding = "CATALOG_KV"
-id = "d98e32ce3761483cbf6660366b3a27d0"
+id = "REPLACE_WITH_REAL_KV_ID"
 
 # Cron trigger: every 5 minutes
+# This pulls fresh data from Google Apps Script into KV
 [triggers]
 crons = ["*/5 * * * *"]
+
+# Non-secret configuration (committed to git)
+[vars]
+# No non-secret vars needed — APPS_SCRIPT_URL and ADMIN_SECRET
+# are secrets (set via `wrangler secret put ...` so they never
+# appear in this file).

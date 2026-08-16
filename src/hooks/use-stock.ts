@@ -251,37 +251,56 @@ export function useStock() {
     setNormalizedMap(next);
   }, [stockMap]);
 
-  // ---- STATIC-FIRST FETCH (no per-visitor Apps Script calls) ----
-  // 1. Static CSV from Cloudflare CDN (50ms, NEVER crashes)
-  // 2. Fallback: stock-seed.json → localStorage → empty
+  // ---- ADAPTIVE FETCH (Worker-first, never crashes) ----
+  // Chain: Worker (?action=catalog returns both products+stock) → static CSV → seed → cache
+  // Worker is OPTIONAL — if NEXT_PUBLIC_WORKER_URL is not set, it's skipped.
+  // This means the site works perfectly WITHOUT the worker (current behavior),
+  // and deploying the worker is an OPT-IN upgrade for 5-minute freshness.
   //
-  // CRITICAL: No per-visitor Apps Script calls. This ensures the site
-  // can handle 50K+ visits/day without hitting Apps Script's 20K/day limit.
-  // Stock updates appear after the daily GitHub Actions sync (max 24h).
+  // VISITOR FLOW:
+  //   1. Try Worker (?action=catalog) — 5s timeout, returns {products, stock}
+  //   2. If Worker fails OR not configured → try static /data/stock.csv
+  //   3. If static also fails → use stock-seed.json
+  //   4. If seed also fails → use localStorage cache (any age)
   //
-  // For 5-minute updates, a standalone Cloudflare Worker is available
-  // (see worker/data-sync.js). Deploy it to enable real-time KV updates.
+  // CRITICAL: No per-visitor Apps Script calls. 50K+ visits/day without
+  // hitting Apps Script's 20K/day limit. Stock updates appear within
+  // 5 minutes (worker cron) or 24 hours (static rebuild).
 
   const fetchStock = useCallback(async () => {
     try {
-      // 1. Try static CSV from Cloudflare CDN (50ms, never crashes)
       let csvText = "";
+
+      // 1. Try Worker first (if configured) — returns combined catalog response
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        const res = await fetch("/data/stock.csv", {
-          cache: "no-cache",
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        if (res.ok) {
-          csvText = await res.text();
+        const { fetchStockCsv } = await import("@/lib/worker-client");
+        const result = await fetchStockCsv();
+        if (result.csv && result.csv.trim().length > 0) {
+          csvText = result.csv;
         }
       } catch {
-        // Static file fetch failed — will fall through to seed
+        // Worker fetch failed — fall through to static
       }
 
-      // 2. If static CSV failed, try stock-seed.json
+      // 2. If Worker didn't return stock, try static CSV from Cloudflare CDN
+      if (!csvText) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
+          const res = await fetch("/data/stock.csv", {
+            cache: "no-cache",
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+          if (res.ok) {
+            csvText = await res.text();
+          }
+        } catch {
+          // Static file fetch failed — will fall through to seed
+        }
+      }
+
+      // 3. If both Worker + static failed, try stock-seed.json
       if (!csvText) {
         const seedMap = await loadStockSeed();
         if (seedMap && Object.keys(seedMap).length > 0) {

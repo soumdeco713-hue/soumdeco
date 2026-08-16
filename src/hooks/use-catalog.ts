@@ -55,20 +55,21 @@ export function useCatalog() {
     productsRef.current = products;
   }, [products]);
 
-  // ---- STATIC-FIRST FETCH (no per-visitor Apps Script calls) ----
-  // 1. Static JSON from Cloudflare CDN (50ms, NEVER crashes)
-  // 2. Fallback: localStorage → IndexedDB → SEED_PRODUCTS
+  // ---- ADAPTIVE FETCH (Worker-first, never crashes) ----
+  // Chain: Worker (5-min fresh) → static JSON (max 24h) → cache → seed
+  // Worker is OPTIONAL — if NEXT_PUBLIC_WORKER_URL is not set, it's skipped
+  // and we use static JSON (current behavior). This means deploying the
+  // worker is an OPT-IN upgrade — site works fine without it.
+  //
+  // VISITOR FLOW:
+  //   1. Try Worker (?action=catalog) — 5s timeout, returns products+stock
+  //   2. If Worker fails OR not configured → try static /data/products.json
+  //   3. If static also fails → use localStorage cache
+  //   4. If cache empty → use SEED_PRODUCTS (built-in fallback)
   //
   // CRITICAL: No per-visitor Apps Script calls. This ensures the site
   // can handle 50K+ visits/day without hitting Apps Script's 20K/day limit.
-  // Admin's changes appear after the daily GitHub Actions sync (max 24h).
-  //
-  // For 5-minute updates, a standalone Cloudflare Worker is available
-  // (see worker/data-sync.js). Deploy it to enable real-time KV updates.
-  // The frontend will automatically use the Worker URL if configured.
-
-  const WORKER_URL = "https://soumdeco-data-sync.iridescent-clematis.workers.dev";
-  const USE_WORKER = false; // Set to true after claiming the Worker account
+  // The Worker pulls from Apps Script via cron (288 calls/day = 1.4% quota).
 
   const refresh = useCallback(async () => {
     try {
@@ -84,21 +85,12 @@ export function useCatalog() {
       // 1. Fetch from Worker (if deployed) or static JSON (fallback)
       let fetched: SheetProduct[] = [];
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        const url = USE_WORKER
-          ? `${WORKER_URL}/?action=products`
-          : "/data/products.json";
-        const res = await fetch(url, {
-          cache: "no-cache",
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data)) {
-            fetched = data.map(normalizeSheetProductInline);
-          }
+        // Dynamic import to avoid bundling worker-client into every page
+        // (it's only used in catalog/stock hooks, but Next.js may over-bundle)
+        const { fetchProducts } = await import("@/lib/worker-client");
+        const result = await fetchProducts();
+        if (result.products.length > 0) {
+          fetched = result.products;
         }
       } catch {
         // Fetch failed — will fall through to cache/seed
@@ -527,40 +519,6 @@ export function useCatalog() {
 }
 
 // ---------- internal ----------
-
-// Inline version of normalizeSheetProduct (from client-sheet.ts)
-// Used to normalize the static JSON response (same format as Apps Script)
-function normalizeSheetProductInline(p: any): SheetProduct {
-  return {
-    id: String(p.id ?? ""),
-    name: String(p.name ?? ""),
-    description: String(p.description ?? ""),
-    category: String(p.category ?? ""),
-    price:
-      p.price === null || p.price === undefined || p.price === "" ||
-      (typeof p.price === "object" && p.price !== null)
-        ? null : Number(p.price),
-    image: String(p.image ?? ""),
-    images: String(p.images ?? ""),
-    featured: (p.featured === true || p.featured === 1 || p.featured === "1" ||
-               (typeof p.featured === "string" && p.featured.toLowerCase() === "true")),
-    isSpecialOffer: (p.isSpecialOffer === true || p.isSpecialOffer === 1 ||
-                     p.isSpecialOffer === "1" ||
-                     (typeof p.isSpecialOffer === "string" &&
-                      p.isSpecialOffer.toLowerCase() === "true")),
-    variations: String(p.variations ?? ""),
-    variants: String(p.variants ?? ""),
-    stock:
-      p.stock === null || p.stock === undefined || p.stock === "" ||
-      (typeof p.stock === "object" && p.stock !== null)
-        ? null : Number(p.stock),
-    highlights: String(p.highlights ?? ""),
-    sortOrder: p.sortOrder === null || p.sortOrder === undefined ? 999 : Number(p.sortOrder),
-    badge: String(p.badge ?? ""),
-    oldPrice: p.oldPrice === null || p.oldPrice === undefined || p.oldPrice === "" ? null : Number(p.oldPrice),
-    quantityTiers: String(p.quantityTiers ?? ""),
-  };
-}
 
 /**
  * Fix common category name typos that exist in the Google Sheet data.

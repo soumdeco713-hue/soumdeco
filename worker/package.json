@@ -1,0 +1,22 @@
+{
+  "name": "soumdeco-data-sync",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker that syncs Google Apps Script data into KV for 50K+ visitors/day",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "kv:create": "wrangler kv:namespace create CATALOG_KV",
+    "kv:list": "wrangler kv:namespace list",
+    "secret:apps-script": "wrangler secret put APPS_SCRIPT_URL",
+    "secret:admin": "wrangler secret put ADMIN_SECRET",
+    "secret:list": "wrangler secret list",
+    "test:health": "curl -s https://soumdeco-data-sync.workers.dev/?action=health | python3 -m json.tool",
+    "test:catalog": "curl -s 'https://soumdeco-data-sync.workers.dev/?action=catalog' | head -c 200",
+    "verify": "bash ../scripts/verify-worker.sh"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}

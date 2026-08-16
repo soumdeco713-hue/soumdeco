@@ -3,7 +3,7 @@
 // ============================================================
 //  Runs in the background to detect and recover from:
 //  - Network connectivity issues
-//  - Apps Script downtime
+//  - Worker downtime (if configured)
 //  - Stale localStorage (corrupted or outdated)
 //  - Image manifest staleness
 //
@@ -19,6 +19,7 @@ const HEALTH_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 type HealthStatus = {
   network: "ok" | "degraded" | "down";
   appsScript: "ok" | "degraded" | "down";
+  worker?: "ok" | "degraded" | "down" | "not_configured";
   lastCheck: number;
 };
 
@@ -54,6 +55,21 @@ async function checkNetworkConnectivity(): Promise<boolean> {
 }
 
 /**
+ * Check if the Worker is alive (only if NEXT_PUBLIC_WORKER_URL is set).
+ * Non-blocking, 3s timeout. Updates the `worker` field of status.
+ */
+async function checkWorkerHealth(): Promise<"ok" | "degraded" | "down" | "not_configured"> {
+  try {
+    const { fetchWorkerHealth, isWorkerConfigured } = await import("./worker-client");
+    if (!isWorkerConfigured()) return "not_configured";
+    const h = await fetchWorkerHealth();
+    return h.ok ? "ok" : "degraded";
+  } catch {
+    return "down";
+  }
+}
+
+/**
  * Run a health check. Updates the internal status.
  * Safe to call — never throws.
  */
@@ -67,21 +83,31 @@ export async function runHealthCheck(): Promise<HealthStatus> {
   lastHealthCheck = now;
 
   try {
-    const networkOk = await checkNetworkConnectivity();
+    const [networkOk, workerStatus] = await Promise.all([
+      checkNetworkConnectivity(),
+      checkWorkerHealth(),
+    ]);
 
     currentStatus = {
       network: networkOk ? "ok" : "down",
       appsScript: networkOk ? "ok" : "degraded",
+      worker: workerStatus,
       lastCheck: now,
     };
 
     if (!networkOk) {
       console.warn("[Health] Network appears to be down — site will use cached data");
     }
+    if (workerStatus === "down") {
+      console.warn("[Health] Worker is down — falling back to static JSON");
+    } else if (workerStatus === "degraded") {
+      console.info("[Health] Worker is degraded — using cached data");
+    }
   } catch (err) {
     currentStatus = {
       network: "degraded",
       appsScript: "degraded",
+      worker: "degraded",
       lastCheck: now,
     };
   }
