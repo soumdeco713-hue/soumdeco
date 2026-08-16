@@ -1,32 +1,39 @@
 // ============================================================
-//  SOUM DECO — Centralized Data Sync Worker (Bulletproof Edition)
+//  SOUM DECO — Centralized Data Sync Worker (BULLETPROOF Edition v2)
 // ============================================================
-//  STANDALONE Cloudflare Worker — not part of Next.js.
+//  STANDALONE Cloudflare Worker. Never throws. Never crashes.
+//  Self-heals on every cron cycle.
 //
 //  THREE ENTRY POINTS:
 //
 //  1. CRON TRIGGER (every 5 minutes):
-//     Fetches products + stock from Google Apps Script
-//     Writes to Cloudflare KV only IF data changed (hash-skip)
-//     → Saves ~90% of KV write quota
+//     Calls syncData() which:
+//       - Retries Apps Script fetch 3 times with backoff
+//       - Always writes meta (so we know cron is firing)
+//       - Only writes data on success
+//     Even if syncData fails entirely, cron fires again in 5 min.
+//     Cron NEVER throws — guarantees next cycle runs.
 //
 //  2. HTTP GET (visitors fetch from here):
-//     ?action=catalog  → returns {products, stock} in one response
-//                       (halves quota vs separate endpoints)
-//     ?action=products → legacy single-endpoint (backwards compat)
-//     ?action=stock    → legacy single-endpoint (backwards compat)
-//     ?action=health   → returns {ok, lastSync, kvAge, productCount}
+//     ?action=catalog  → {products, stock} in one response
+//     ?action=products → legacy single-endpoint
+//     ?action=stock    → legacy single-endpoint
+//     ?action=health   → {ok, lastSync, lastSyncAttempt, productCount, kvHits}
+//     On KV miss → tries to sync immediately (self-heal)
+//     On total failure → returns empty (visitor falls back to static JSON)
 //
 //  3. HTTP POST /refresh?secret=XXX:
-//     Triggers an immediate sync (used by admin "Refresh now" button)
-//     Wrong secret → 401
-//     Correct secret → {ok: true, synced: true}
+//     Admin manual sync trigger (rarely needed — cron is reliable)
+//     Wrong secret → 401. Correct secret → 200 with sync result.
 //
-//  NEVER-ERROR PRINCIPLE:
-//  - Every code path has try/catch
-//  - On any failure: return last-known KV data (stale but available)
-//  - On total failure: return empty/cached (visitor falls back to static JSON)
-//  - Apps Script URL + admin secret come from env (wrangler secret put)
+//  RESILIENCE FEATURES:
+//  - KV TTL = 3600s (1 hour) — survives 12 missed cron cycles
+//  - Cron retries 3x with backoff before giving up
+//  - All code paths wrapped in try/catch
+//  - KV writes are best-effort (if write fails, reads still work)
+//  - Meta is always written (proves cron is firing)
+//  - Health endpoint distinguishes lastSync vs lastSyncAttempt
+//  - Apps Script URL + admin secret from env (never in code)
 //  - CORS locked to exact Pages domains (no wildcards)
 // ============================================================
 
@@ -41,7 +48,6 @@ const ALLOWED_ORIGINS = new Set([
 
 function corsHeaders(request) {
   const origin = request.headers.get("Origin") || "";
-  // Only allow known origins. Unknown origins get no ACAO header (browser blocks).
   const allowed = ALLOWED_ORIGINS.has(origin) ? origin : "";
   return {
     "Access-Control-Allow-Origin": allowed,
@@ -73,10 +79,24 @@ function hashString(s) {
   return String(h >>> 0); // unsigned
 }
 
+// === KV TTL — 1 hour (survives 12 missed cron cycles of 5 min each) ===
+const KV_TTL_SECONDS = 3600;
+
 export default {
-  // === CRON TRIGGER ===
+  // === CRON TRIGGER — fires every 5 minutes, NEVER throws ===
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(syncData(env));
+    // Wrap in try/catch — even if syncData throws, cron returns cleanly
+    // so the next 5-min cycle fires normally.
+    ctx.waitUntil(
+      (async () => {
+        try {
+          await syncData(env);
+        } catch (err) {
+          // Log but don't throw — cron must complete cleanly
+          console.error("[Worker CRON] syncData threw (caught):", err?.message || err);
+        }
+      })(),
+    );
   },
 
   // === HTTP ENDPOINT ===
@@ -101,24 +121,19 @@ export default {
         "";
       const expectedSecret = env.ADMIN_SECRET || "";
       if (!expectedSecret) {
-        // Secret never configured → fail closed (admin gets clear error)
         return json({ ok: false, error: "no_secret_configured" }, 503, cors);
       }
       if (providedSecret !== expectedSecret) {
         return json({ ok: false, error: "unauthorized" }, 401, cors);
       }
-      // Run sync immediately, return result
       try {
         const result = await syncData(env);
-        return json(
-          { ok: true, synced: true, ...result },
-          200,
-          cors,
-        );
+        return json({ ok: true, synced: true, ...result }, 200, cors);
       } catch (err) {
+        // Even on failure, return 200 with error info (admin sees friendly msg)
         return json(
           { ok: false, synced: false, error: String(err?.message || err) },
-          200, // 200 so admin UI shows the message instead of network error
+          200,
           cors,
         );
       }
@@ -134,20 +149,32 @@ export default {
           const arr = JSON.parse(productsRaw || "[]");
           if (Array.isArray(arr)) productCount = arr.length;
         } catch {}
+        const now = Date.now();
+        const lastSync = meta?.lastSync || null;
+        const lastSyncAttempt = meta?.lastSyncAttempt || lastSync;
+        // Healthy = sync succeeded within last 15 min (3 cron cycles)
+        const isHealthy = lastSync && now - lastSync < 15 * 60 * 1000;
         return json(
           {
-            ok: true,
-            lastSync: meta?.lastSync || null,
+            ok: !!isHealthy,
+            lastSync,
+            lastSyncAttempt,
             lastChange: meta?.lastChange || null,
-            kvAge: meta?.lastSync ? Date.now() - meta.lastSync : null,
+            kvAge: lastSync ? now - lastSync : null,
             productCount,
             kvHits: meta?.kvHits || 0,
+            consecutiveFailures: meta?.consecutiveFailures || 0,
           },
           200,
           cors,
         );
-      } catch {
-        return json({ ok: false, error: "kv_unavailable" }, 503, cors);
+      } catch (err) {
+        // KV might be down — return degraded health
+        return json(
+          { ok: false, error: "kv_unavailable", detail: String(err?.message || err) },
+          200, // 200 so frontend doesn't throw — it can still serve static
+          cors,
+        );
       }
     }
 
@@ -156,8 +183,8 @@ export default {
       try {
         // Read both products + stock from KV in parallel
         const [productsRaw, stockRaw] = await Promise.all([
-          env.CATALOG_KV.get("products", "text"),
-          env.CATALOG_KV.get("stock", "text"),
+          env.CATALOG_KV.get("products", "text").catch(() => null),
+          env.CATALOG_KV.get("stock", "text").catch(() => null),
         ]);
 
         // Bump hit counter (best-effort, non-blocking)
@@ -181,10 +208,14 @@ export default {
           );
         }
 
-        // KV miss — populate synchronously (first run only)
-        const result = await syncData(env);
-        const freshProducts = await env.CATALOG_KV.get("products", "text");
-        const freshStock = await env.CATALOG_KV.get("stock", "text");
+        // KV miss — populate synchronously (self-heal on first visit)
+        try {
+          await syncData(env);
+        } catch (err) {
+          console.error("[Worker] self-heal sync failed:", err?.message || err);
+        }
+        const freshProducts = await env.CATALOG_KV.get("products", "text").catch(() => null);
+        const freshStock = await env.CATALOG_KV.get("stock", "text").catch(() => null);
         if (freshProducts) {
           return new Response(
             JSON.stringify({
@@ -192,7 +223,6 @@ export default {
               stock: freshStock || "",
               ts: Date.now(),
               justSynced: true,
-              syncResult: result,
             }),
             {
               status: 200,
@@ -212,7 +242,7 @@ export default {
           cors,
         );
       } catch (err) {
-        console.error("[Worker] catalog endpoint error:", err);
+        console.error("[Worker] catalog endpoint error:", err?.message || err);
         return json(
           { products: "[]", stock: "", ts: Date.now(), error: "internal" },
           200,
@@ -224,7 +254,7 @@ export default {
     // === Legacy: products-only endpoint ===
     if (action === "products") {
       try {
-        const cached = await env.CATALOG_KV.get("products", "text");
+        const cached = await env.CATALOG_KV.get("products", "text").catch(() => null);
         if (cached) {
           ctx.waitUntil(bumpHitCounter(env).catch(() => {}));
           return new Response(cached, {
@@ -237,8 +267,8 @@ export default {
           });
         }
         // Miss → sync then return
-        await syncData(env);
-        const fresh = await env.CATALOG_KV.get("products", "text");
+        try { await syncData(env); } catch {}
+        const fresh = await env.CATALOG_KV.get("products", "text").catch(() => null);
         return new Response(fresh || "[]", {
           status: 200,
           headers: {
@@ -248,7 +278,7 @@ export default {
           },
         });
       } catch (err) {
-        console.error("[Worker] products endpoint error:", err);
+        console.error("[Worker] products endpoint error:", err?.message || err);
         return new Response("[]", {
           status: 200,
           headers: { "Content-Type": "application/json; charset=utf-8", ...cors },
@@ -259,7 +289,7 @@ export default {
     // === Legacy: stock-only endpoint ===
     if (action === "stock") {
       try {
-        const cached = await env.CATALOG_KV.get("stock", "text");
+        const cached = await env.CATALOG_KV.get("stock", "text").catch(() => null);
         if (cached) {
           ctx.waitUntil(bumpHitCounter(env).catch(() => {}));
           return new Response(cached, {
@@ -271,8 +301,8 @@ export default {
             },
           });
         }
-        await syncData(env);
-        const fresh = await env.CATALOG_KV.get("stock", "text");
+        try { await syncData(env); } catch {}
+        const fresh = await env.CATALOG_KV.get("stock", "text").catch(() => null);
         return new Response(fresh || "", {
           status: 200,
           headers: {
@@ -282,7 +312,7 @@ export default {
           },
         });
       } catch (err) {
-        console.error("[Worker] stock endpoint error:", err);
+        console.error("[Worker] stock endpoint error:", err?.message || err);
         return new Response("", {
           status: 200,
           headers: { "Content-Type": "text/csv; charset=utf-8", ...cors },
@@ -295,7 +325,9 @@ export default {
   },
 };
 
-// === Helper: sync data from Apps Script → KV (with hash-skip) ===
+// === Helper: sync data from Apps Script → KV ===
+// NEVER throws — wraps everything in try/catch, returns result object.
+// Always writes meta (so we can track "cron is firing" vs "data is fresh").
 async function syncData(env) {
   const result = {
     productsUpdated: false,
@@ -303,6 +335,7 @@ async function syncData(env) {
     productsChanged: false,
     stockChanged: false,
     error: null,
+    attemptCount: 0,
   };
 
   try {
@@ -310,10 +343,17 @@ async function syncData(env) {
     if (!APPS_SCRIPT_URL) {
       result.error = "no_apps_script_url";
       console.error("[Worker] APPS_SCRIPT_URL not configured");
+      await updateMetaOnFailure(env, "no_apps_script_url").catch(() => {});
       return result;
     }
 
-    // Fetch products + stock in parallel
+    // Read existing hashes + meta (for change detection + failure tracking)
+    const [existingHashes, existingMeta] = await Promise.all([
+      env.CATALOG_KV.get("__hashes", "json").catch(() => null),
+      env.CATALOG_KV.get("__meta", "json").catch(() => null),
+    ]);
+
+    // Fetch products + stock in parallel (each retried 3 times internally)
     const [productsRes, stockRes] = await Promise.allSettled([
       fetchFromAppsScript(APPS_SCRIPT_URL, "products"),
       fetchFromAppsScript(APPS_SCRIPT_URL, "stock"),
@@ -322,12 +362,15 @@ async function syncData(env) {
     const productsData = productsRes.status === "fulfilled" ? productsRes.value : null;
     const stockData = stockRes.status === "fulfilled" ? stockRes.value : null;
 
-    // Read existing hashes from KV (to detect change)
-    const [existingHashes, existingMeta] = await Promise.all([
-      env.CATALOG_KV.get("__hashes", "json").catch(() => null),
-      env.CATALOG_KV.get("__meta", "json").catch(() => null),
-    ]);
+    // If BOTH fetches failed, mark failure and bail (but still write meta)
+    if (!productsData && !stockData) {
+      result.error = "both_fetches_failed";
+      console.error("[Worker] Both Apps Script fetches failed");
+      await updateMetaOnFailure(env, "both_fetches_failed", existingMeta).catch(() => {});
+      return result;
+    }
 
+    // Compute hashes for change detection
     const newProductsHash = hashString(productsData || "");
     const newStockHash = hashString(stockData || "");
     const oldProductsHash = existingHashes?.products || "";
@@ -336,18 +379,17 @@ async function syncData(env) {
     const productsChanged = productsData && newProductsHash !== oldProductsHash;
     const stockChanged = stockData && newStockHash !== oldStockHash;
 
-    // Always write products/stock (even if unchanged) to refresh TTL.
-    // Hash-skip is only used for the __hashes key (which has no TTL).
+    // Always write data (refreshes TTL even if unchanged)
     const writes = [];
     if (productsData) {
-      writes.push(env.CATALOG_KV.put("products", productsData, { expirationTtl: 600 }));
+      writes.push(env.CATALOG_KV.put("products", productsData, { expirationTtl: KV_TTL_SECONDS }));
       result.productsUpdated = true;
-      result.productsChanged = productsChanged;
+      result.productsChanged = !!productsChanged;
     }
     if (stockData) {
-      writes.push(env.CATALOG_KV.put("stock", stockData, { expirationTtl: 600 }));
+      writes.push(env.CATALOG_KV.put("stock", stockData, { expirationTtl: KV_TTL_SECONDS }));
       result.stockUpdated = true;
-      result.stockChanged = stockChanged;
+      result.stockChanged = !!stockChanged;
     }
     // Update hashes (no TTL — persists forever, only changes when data changes)
     if (productsChanged || stockChanged || !existingHashes) {
@@ -358,29 +400,54 @@ async function syncData(env) {
         })),
       );
     }
-    // Always update lastSync (even if no data changed — proves cron ran)
+    // Update meta — track BOTH lastSync (success) AND lastSyncAttempt (any try)
     const newMeta = {
-      lastSync: Date.now(),
+      lastSync: Date.now(), // success!
+      lastSyncAttempt: Date.now(),
       lastChange: productsChanged || stockChanged ? Date.now() : (existingMeta?.lastChange || Date.now()),
       kvHits: existingMeta?.kvHits || 0,
+      consecutiveFailures: 0, // reset on success
     };
     writes.push(env.CATALOG_KV.put("__meta", JSON.stringify(newMeta)));
 
-    await Promise.all(writes);
+    // Run all writes in parallel — best-effort (if some fail, others still succeed)
+    await Promise.allSettled(writes);
     return result;
   } catch (err) {
-    console.error("[Worker] syncData failed:", err);
+    // Catch-all — syncData NEVER throws
+    console.error("[Worker] syncData caught error:", err?.message || err);
     result.error = String(err?.message || err);
+    await updateMetaOnFailure(env, result.error).catch(() => {});
     return result;
   }
 }
 
-// === Helper: fetch from Apps Script with timeout + retry ===
+// === Helper: update meta on failure (so we can track consecutiveFailures) ===
+async function updateMetaOnFailure(env, error, existingMeta) {
+  try {
+    const meta = existingMeta || await env.CATALOG_KV.get("__meta", "json").catch(() => null);
+    const newMeta = {
+      lastSync: meta?.lastSync || null, // keep last successful sync
+      lastSyncAttempt: Date.now(), // mark this attempt
+      lastChange: meta?.lastChange || null,
+      kvHits: meta?.kvHits || 0,
+      consecutiveFailures: (meta?.consecutiveFailures || 0) + 1,
+      lastError: error,
+      lastErrorAt: Date.now(),
+    };
+    await env.CATALOG_KV.put("__meta", JSON.stringify(newMeta));
+  } catch {
+    // KV might be down — nothing we can do, but syncData must not throw
+  }
+}
+
+// === Helper: fetch from Apps Script with timeout + 3 retries ===
 async function fetchFromAppsScript(baseUrl, action) {
   const url = `${baseUrl}?action=${action}`;
   let lastErr = null;
 
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // 3 attempts with exponential backoff (1s, 2s, 4s)
+  for (let attempt = 0; attempt < 3; attempt++) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
@@ -393,22 +460,28 @@ async function fetchFromAppsScript(baseUrl, action) {
       clearTimeout(timeoutId);
 
       if (!res.ok) {
-        console.warn(`[Worker] Apps Script ${action} returned ${res.status}`);
-        // Don't retry on 4xx (sheet misconfigured), retry on 5xx
+        console.warn(`[Worker] Apps Script ${action} attempt ${attempt + 1} returned ${res.status}`);
+        // Don't retry on 4xx (sheet misconfigured) — retry on 5xx + network errors
         if (res.status >= 400 && res.status < 500) return null;
         lastErr = new Error(`HTTP ${res.status}`);
-        continue;
+      } else {
+        // Success
+        return await res.text();
       }
-      return await res.text();
     } catch (err) {
       clearTimeout(timeoutId);
       lastErr = err;
-      console.warn(`[Worker] Apps Script ${action} attempt ${attempt + 1} failed:`, err?.message || err);
-      // Wait 1s before retry (exponential would be overkill for 2 attempts)
-      if (attempt === 0) await new Promise((r) => setTimeout(r, 1000));
+      console.warn(`[Worker] Apps Script ${action} attempt ${attempt + 1} failed: ${err?.name || ""} ${err?.message || err}`);
+    }
+
+    // Wait before retry (exponential backoff) — but only if we have attempts left
+    if (attempt < 2) {
+      const delayMs = Math.pow(2, attempt) * 1000; // 1s, 2s
+      await new Promise((r) => setTimeout(r, delayMs));
     }
   }
 
+  console.error(`[Worker] Apps Script ${action} all 3 attempts failed. Last error: ${lastErr?.message || lastErr}`);
   return null;
 }
 
@@ -418,8 +491,10 @@ async function bumpHitCounter(env) {
     const meta = await env.CATALOG_KV.get("__meta", "json");
     const next = {
       lastSync: meta?.lastSync || Date.now(),
+      lastSyncAttempt: meta?.lastSyncAttempt || Date.now(),
       lastChange: meta?.lastChange || Date.now(),
       kvHits: (meta?.kvHits || 0) + 1,
+      consecutiveFailures: meta?.consecutiveFailures || 0,
     };
     await env.CATALOG_KV.put("__meta", JSON.stringify(next));
   } catch {

@@ -1463,16 +1463,17 @@ export function AdminPanel({
 }
 
 // ============================================================
-//  DataSyncBadge — Admin's "Refresh now" button + status indicator
+//  DataSyncBadge — Admin's informational status indicator
 // ============================================================
 //  Shows admin whether the live-sync service is:
 //  - Healthy (green dot) + when data was last updated
-//  - Unhealthy (amber dot) + retry button
+//  - Unhealthy (red dot)
 //  - Not configured (gray dot) — site still works (static fallback)
 //
-//  NO URLs are ever shown to admin. The "Refresh now" button silently
-//  calls the worker's /refresh endpoint with the admin secret.
-//  Admin never needs to know about the worker, KV, or any URLs.
+//  PURELY INFORMATIONAL — no clicks, no buttons, no refresh trigger.
+//  The Worker cron auto-refreshes every 5 minutes; admin does nothing.
+//  Admin just glances at the dot to know the system is alive.
+//  NO URLs are ever shown to admin.
 // ============================================================
 
 function DataSyncBadge() {
@@ -1480,12 +1481,10 @@ function DataSyncBadge() {
     ok: boolean;
     lastSync?: number | null;
     productCount?: number;
-    error?: string;
   } | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const [configured, setConfigured] = useState(true);
 
-  // Poll worker health every 60 seconds
+  // Poll worker health every 60 seconds (silent, non-blocking)
   useEffect(() => {
     let mounted = true;
     let interval: ReturnType<typeof setInterval> | null = null;
@@ -1516,38 +1515,14 @@ function DataSyncBadge() {
     };
   }, []);
 
-  const handleRefresh = async () => {
-    if (refreshing) return;
-    setRefreshing(true);
-    try {
-      const { triggerWorkerRefresh } = await import("@/lib/worker-client");
-      const result = await triggerWorkerRefresh();
-      if (result.ok) {
-        toast.success(result.message);
-        // Re-check health after 2s (sync takes a moment)
-        setTimeout(() => {
-          import("@/lib/worker-client").then(({ fetchWorkerHealth }) =>
-            fetchWorkerHealth().then((h) => setHealth(h)),
-          );
-        }, 2000);
-      } else {
-        toast.error(result.message);
-      }
-    } catch {
-      toast.error("Échec de la synchronisation");
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
   // Not configured — show subtle "static mode" badge (no error)
   if (!configured) {
     return (
       <div
-        className="flex items-center gap-1.5 rounded-full border border-gray/20 bg-night-soft/40 px-3 py-1.5 text-xs text-gray-light"
+        className="flex h-9 items-center gap-1.5 rounded-full border border-gray/20 bg-night-soft/40 px-3 text-xs text-gray-light"
         title="البيانات تُحدّث يومياً تلقائياً"
       >
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-gray" />
+        <span className="inline-block h-2 w-2 rounded-full bg-gray" />
         وضع ثابت
       </div>
     );
@@ -1560,34 +1535,32 @@ function DataSyncBadge() {
     : "—";
   const productCount = health?.productCount || 0;
 
+  // Purely informational — NO onClick, NO button, just a status indicator
   return (
-    <button
-      type="button"
-      onClick={handleRefresh}
-      disabled={refreshing}
+    <div
+      role="status"
+      aria-live="polite"
       title={
         ok
-          ? `آخر تحديث: ${lastSyncLabel}\n${productCount} منتج\nاضغط للتحديث الآن`
-          : "الخدمة غير متاحة — اضغط لإعادة المحاولة"
+          ? `النظام يعمل بشكل صحيح\nآخر تحديث: ${lastSyncLabel}\n${productCount} منتج`
+          : "الخدمة غير متاحة — النظام سيعيد المحاولة تلقائياً"
       }
-      className="flex items-center gap-1.5 rounded-full border border-emerald/30 bg-night-soft/60 px-3 py-1.5 text-xs text-charcoal hover:bg-emerald/10 disabled:opacity-50"
+      className="flex h-9 cursor-default items-center gap-1.5 rounded-full border border-emerald/30 bg-night-soft/60 px-3 text-xs text-charcoal"
     >
       <span
-        className={`inline-block h-1.5 w-1.5 rounded-full ${
-          refreshing
-            ? "animate-pulse bg-amber"
-            : ok
-              ? "bg-emerald"
-              : "bg-terracotta"
+        className={`inline-block h-2.5 w-2.5 rounded-full ${
+          ok ? "bg-emerald" : "bg-terracotta"
         }`}
         style={{
           boxShadow: ok
-            ? "0 0 6px rgba(42, 125, 91, 0.5)"
-            : "0 0 6px rgba(196, 87, 67, 0.5)",
+            ? "0 0 8px rgba(42, 125, 91, 0.6)"
+            : "0 0 8px rgba(196, 87, 67, 0.6)",
         }}
       />
-      {refreshing ? "..." : ok ? lastSyncLabel : "غير متصل"}
-    </button>
+      <span className="font-medium">
+        {ok ? lastSyncLabel : "غير متصل"}
+      </span>
+    </div>
   );
 }
 

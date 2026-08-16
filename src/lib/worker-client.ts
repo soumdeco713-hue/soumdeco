@@ -77,7 +77,29 @@ export type WorkerHealth = {
 
 // === Catalog fetcher (combined products + stock in one call) ===
 // Tries Worker first, falls back to static JSON, never throws.
-export async function fetchCatalog(): Promise<CatalogResponse> {
+// CACHED: Multiple callers (use-catalog + use-stock) share one fetch.
+// Cache TTL = 30s (prevents duplicate fetches during page load, but
+// still allows refresh on subsequent user actions).
+let catalogCache: { promise: Promise<CatalogResponse>; ts: number } | null = null;
+const CATALOG_CACHE_TTL_MS = 30_000; // 30 seconds
+
+export async function fetchCatalog(forceRefresh = false): Promise<CatalogResponse> {
+  const now = Date.now();
+  // Return in-flight or recent cache (unless forceRefresh)
+  if (!forceRefresh && catalogCache && now - catalogCache.ts < CATALOG_CACHE_TTL_MS) {
+    return catalogCache.promise;
+  }
+
+  const promise = doFetchCatalog();
+  catalogCache = { promise, ts: now };
+
+  // If fetch fails, clear cache so next call retries
+  promise.catch(() => { catalogCache = null; });
+
+  return promise;
+}
+
+async function doFetchCatalog(): Promise<CatalogResponse> {
   const workerUrl = getWorkerUrl();
 
   // 1. Try Worker (if configured)
