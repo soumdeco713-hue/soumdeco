@@ -1,0 +1,12 @@
+name = "soumdeco-data-sync"
+main = "data-sync.js"
+compatibility_date = "2024-09-01"
+
+# KV namespace binding (created in temp account — will need to be updated when claimed)
+[[kv_namespaces]]
+binding = "CATALOG_KV"
+id = "d98e32ce3761483cbf6660366b3a27d0"
+
+# Cron trigger: every 5 minutes
+[triggers]
+crons = ["*/5 * * * *"]

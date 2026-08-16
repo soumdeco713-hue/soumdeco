@@ -55,67 +55,20 @@ export function useCatalog() {
     productsRef.current = products;
   }, [products]);
 
-  // ---- HYBRID STATIC-FIRST FETCH ----
+  // ---- STATIC-FIRST FETCH (no per-visitor Apps Script calls) ----
   // 1. Static JSON from Cloudflare CDN (50ms, NEVER crashes)
-  // 2. Background Apps Script refresh (non-blocking, 10-min TTL, retry on fail)
-  // 3. Fallback: localStorage → IndexedDB → SEED_PRODUCTS
+  // 2. Fallback: localStorage → IndexedDB → SEED_PRODUCTS
   //
-  // This eliminates the "connection timed out" crash caused by Apps Script
-  // being in the critical loading path. Visitors now get instant content
-  // from Cloudflare's CDN, and Apps Script updates happen silently in
-  // the background.
-  const BACKGROUND_REFRESH_TTL_MS = 10 * 60 * 1000; // 10 minutes
-  const BG_REFRESH_KEY = "soumdeco_bg_refresh_ts";
+  // CRITICAL: No per-visitor Apps Script calls. This ensures the site
+  // can handle 50K+ visits/day without hitting Apps Script's 20K/day limit.
+  // Admin's changes appear after the daily GitHub Actions sync (max 24h).
+  //
+  // For 5-minute updates, a standalone Cloudflare Worker is available
+  // (see worker/data-sync.js). Deploy it to enable real-time KV updates.
+  // The frontend will automatically use the Worker URL if configured.
 
-  // Background refresh from Apps Script — non-blocking, silent, with retry
-  const backgroundRefresh = useCallback(async () => {
-    // Check TTL — only refresh if last refresh was > 10 minutes ago
-    try {
-      const lastRefresh = parseInt(
-        window.localStorage.getItem(BG_REFRESH_KEY) || "0", 10
-      );
-      if (Date.now() - lastRefresh < BACKGROUND_REFRESH_TTL_MS) return;
-    } catch { return; }
-
-    const doFetch = async (): Promise<boolean> => {
-      try {
-        const fetched = await clientListProducts();
-        if (fetched.length === 0) return false;
-
-        const seen = new Set<string>();
-        const unique: SheetProduct[] = [];
-        for (const p of fetched) {
-          const id = String(p.id || "").trim();
-          if (!id || seen.has(id)) continue;
-          seen.add(id);
-          unique.push(p);
-        }
-
-        let next: Product[] = unique.map(normalizeProduct);
-        next = next.map(fixCategoryTypos);
-        next = next.map(optimizeCloudinaryUrls);
-        next.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
-
-        saveCatalog(next);
-        saveCatalogAsync(next).catch(() => {});
-        setProducts(next);
-        setLoading(false);
-
-        try {
-          window.localStorage.setItem(BG_REFRESH_KEY, String(Date.now()));
-        } catch {}
-        return true;
-      } catch {
-        return false;
-      }
-    };
-
-    const success = await doFetch();
-    if (!success) {
-      // Retry after 2 minutes
-      setTimeout(() => { doFetch().catch(() => {}); }, 2 * 60 * 1000);
-    }
-  }, []);
+  const WORKER_URL = "https://soumdeco-data-sync.iridescent-clematis.workers.dev";
+  const USE_WORKER = false; // Set to true after claiming the Worker account
 
   const refresh = useCallback(async () => {
     try {
@@ -128,12 +81,15 @@ export function useCatalog() {
         setLoading(false);
       }
 
-      // 1. Fetch static JSON from Cloudflare CDN (50ms, NEVER crashes)
+      // 1. Fetch from Worker (if deployed) or static JSON (fallback)
       let fetched: SheetProduct[] = [];
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
-        const res = await fetch("/data/products.json", {
+        const url = USE_WORKER
+          ? `${WORKER_URL}/?action=products`
+          : "/data/products.json";
+        const res = await fetch(url, {
           cache: "no-cache",
           signal: controller.signal,
         });
@@ -145,12 +101,7 @@ export function useCatalog() {
           }
         }
       } catch {
-        // Static file fetch failed — will fall through to Apps Script
-      }
-
-      // 2. If static JSON failed, fall back to Apps Script (blocking)
-      if (fetched.length === 0) {
-        fetched = await clientListProducts();
+        // Fetch failed — will fall through to cache/seed
       }
 
       if (fetched.length > 0) {
@@ -172,13 +123,10 @@ export function useCatalog() {
         saveCatalogAsync(next).catch(() => {});
         setProducts(next);
         setLoading(false);
-
-        // 3. Schedule background Apps Script refresh (non-blocking)
-        backgroundRefresh();
         return;
       }
 
-      // 3. Static + Apps Script both failed — use cache, then seed
+      // 2. Static JSON failed — use cache, then seed
       const cached = await loadCatalogAsync();
       if (cached.length > 0) {
         let sorted = cached.map(optimizeCloudinaryUrls).map(fixCategoryTypos);
