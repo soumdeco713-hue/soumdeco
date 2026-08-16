@@ -19,29 +19,22 @@ import type { SheetProduct } from "./sheet";
 
 // === Worker URL (optional — if not set, site uses static JSON only) ===
 // Set via Cloudflare Pages env var: NEXT_PUBLIC_WORKER_URL
+// NOTE: Use direct `process.env.NEXT_PUBLIC_*` access so Next.js inlines
+// the value at build time (no `typeof process` check — that breaks inlining).
+const WORKER_URL: string | null =
+  (process.env.NEXT_PUBLIC_WORKER_URL as string | undefined) || null;
+
+const WORKER_ADMIN_SECRET: string | null =
+  (process.env.NEXT_PUBLIC_WORKER_ADMIN_SECRET as string | undefined) ||
+  null;
+
 function getWorkerUrl(): string | null {
-  try {
-    const url =
-      (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_WORKER_URL) ||
-      "";
-    if (!url) return null;
-    // Normalize: remove trailing slash
-    return url.endsWith("/") ? url.slice(0, -1) : url;
-  } catch {
-    return null;
-  }
+  if (!WORKER_URL) return null;
+  return WORKER_URL.endsWith("/") ? WORKER_URL.slice(0, -1) : WORKER_URL;
 }
 
 function getAdminSecret(): string | null {
-  try {
-    return (
-      (typeof process !== "undefined" &&
-        process.env?.NEXT_PUBLIC_WORKER_ADMIN_SECRET) ||
-      null
-    );
-  } catch {
-    return null;
-  }
+  return WORKER_ADMIN_SECRET;
 }
 
 // === Fetch with timeout (never throws, returns null on failure) ===

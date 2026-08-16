@@ -16,8 +16,8 @@ pages_build_output_dir = ".vercel/output/static"
 # ============================================================
 [[kv_namespaces]]
 binding = "CATALOG_KV"
-id = "ec54ba6bef24403cb9082e6472fb851b"
-preview_id = "ec54ba6bef24403cb9082e6472fb851b"
+id = "d16fd51d1d54497d8ff02b570e63e4e2"
+preview_id = "d16fd51d1d54497d8ff02b570e63e4e2"
 
 # ============================================================
 #  R2 BUCKET — Image storage (DISABLED — needs credit card)

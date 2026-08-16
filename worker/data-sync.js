@@ -336,19 +336,20 @@ async function syncData(env) {
     const productsChanged = productsData && newProductsHash !== oldProductsHash;
     const stockChanged = stockData && newStockHash !== oldStockHash;
 
-    // Only write to KV if data actually changed (saves ~90% of writes)
+    // Always write products/stock (even if unchanged) to refresh TTL.
+    // Hash-skip is only used for the __hashes key (which has no TTL).
     const writes = [];
-    if (productsData && productsChanged) {
+    if (productsData) {
       writes.push(env.CATALOG_KV.put("products", productsData, { expirationTtl: 600 }));
       result.productsUpdated = true;
-      result.productsChanged = true;
+      result.productsChanged = productsChanged;
     }
-    if (stockData && stockChanged) {
+    if (stockData) {
       writes.push(env.CATALOG_KV.put("stock", stockData, { expirationTtl: 600 }));
       result.stockUpdated = true;
-      result.stockChanged = true;
+      result.stockChanged = stockChanged;
     }
-    // Always update hashes + meta (tiny writes, but only if changed)
+    // Update hashes (no TTL — persists forever, only changes when data changes)
     if (productsChanged || stockChanged || !existingHashes) {
       writes.push(
         env.CATALOG_KV.put("__hashes", JSON.stringify({

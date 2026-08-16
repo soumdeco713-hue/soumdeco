@@ -7,7 +7,7 @@ compatibility_date = "2024-09-01"
 #   wrangler kv:namespace create CATALOG_KV
 [[kv_namespaces]]
 binding = "CATALOG_KV"
-id = "REPLACE_WITH_REAL_KV_ID"
+id = "d16fd51d1d54497d8ff02b570e63e4e2"
 
 # Cron trigger: every 5 minutes
 # This pulls fresh data from Google Apps Script into KV
