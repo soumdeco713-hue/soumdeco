@@ -1210,11 +1210,31 @@ export function AdminPanel({
 
   const [saving, setSaving] = useState(false);
 
+  // CRITICAL: Reverse optimize URLs before saving to sheet.
+  // Converts local paths (/images/products/X.jpg) back to Cloudinary URLs
+  // (https://res.cloudinary.com/anhvhy4j/image/upload/X.jpg) before POSTing.
+  // This prevents the image corruption bug where local paths leak into the sheet.
+  const reverseOptimizeUrl = (url: string): string => {
+    if (!url || typeof url !== "string") return url;
+    if (!url.startsWith("/images/products/")) return url;
+    const filename = url.replace("/images/products/", "");
+    return `https://res.cloudinary.com/anhvhy4j/image/upload/${filename}`;
+  };
+
   const handleSave = async (p: Product) => {
     if (saving) return; // prevent double-click
     setSaving(true);
     try {
-      await onUpsert(p);
+      // Reverse optimize: convert local paths back to Cloudinary URLs
+      // This prevents corruption — sheet ALWAYS gets Cloudinary URLs
+      const cleanProduct: Product = {
+        ...p,
+        image: reverseOptimizeUrl(p.image),
+        images: Array.isArray(p.images)
+          ? p.images.map(reverseOptimizeUrl)
+          : p.images,
+      };
+      await onUpsert(cleanProduct);
       setEditing(null);
       toast.success("تم حفظ المنتج");
     } catch (err) {

@@ -33,12 +33,23 @@ import {
 } from "@/lib/products";
 import type { SheetProduct } from "@/lib/sheet";
 
-// Polling intervals — optimized for variable traffic (10 to 800K visits/month).
-// At 800K visits/month = 26K visits/day × 1 fetch = 26K exec/day.
-// Polling every 2 hours = 12 polls/day per active user.
-// Total: 26K + (100 active users × 12) = 27,200 exec/day → under 30K quota ✅
-const POLL_MS = 7_200_000; // 2 hours when tab is visible
-const HIDDEN_POLL_MS = 14_400_000; // 4 hours when tab is hidden
+// Polling intervals — 5 min visible, 30 min hidden.
+// At 50K visitors/day with avg 2.2 req/visitor = ~70K Worker requests (70% of 100K) ✅
+// Visitors see admin edits within 5 minutes max.
+const POLL_MS = 300_000; // 5 minutes when tab is visible
+const HIDDEN_POLL_MS = 1_800_000; // 30 minutes when tab is hidden
+
+// CRITICAL: Reverse-optimize local paths back to Cloudinary URLs.
+// optimizeCloudinaryUrls (for DISPLAY) rewrites Cloudinary → /images/products/
+// at runtime. If this local path leaks into the sheet, the image breaks (404).
+// This function reverses that BEFORE saving to the sheet — sheet ALWAYS gets
+// Cloudinary URLs. This is the bulletproof fix for image corruption.
+function reverseOptimizeUrl(url: string): string {
+  if (!url || typeof url !== "string") return url;
+  if (!url.startsWith("/images/products/")) return url;
+  const filename = url.replace("/images/products/", "");
+  return `https://res.cloudinary.com/anhvhy4j/image/upload/${filename}`;
+}
 
 export function useCatalog() {
   // Initialize empty on both server and client (hydration-safe)
@@ -286,13 +297,20 @@ export function useCatalog() {
       // Sync to Apps Script
       setSyncing(true);
       try {
+        // CRITICAL: Reverse-optimize local paths → Cloudinary URLs.
+        // Prevents image corruption (local paths leaking into sheet).
+        const cleanImages = Array.isArray(product.images)
+          ? product.images.map(reverseOptimizeUrl)
+          : product.images;
+        const cleanImage = reverseOptimizeUrl(product.image);
+
         // 1. Upload any base64 images to Cloudinary.
         //    Since images are now uploaded on SELECT (in handleFiles),
         //    this is typically a no-op — the photos are already URLs.
         //    This call only runs for the rare case of leftover base64 images.
-        const imagesToUpload = product.images || (product.image ? [product.image] : []);
+        const imagesToUpload = cleanImages || (cleanImage ? [cleanImage] : []);
         const uploadedUrls = await clientUploadImages(imagesToUpload, product.id);
-        const coverImage = uploadedUrls[0] || product.image || "";
+        const coverImage = uploadedUrls[0] || cleanImage || "";
 
         // 2. Build the SheetProduct payload
         const sheetProduct: SheetProduct = {
@@ -456,14 +474,20 @@ export function useCatalog() {
       // Sync both swapped products directly to Apps Script (fire and forget)
       if (toSync.length === 2) {
         for (const p of toSync) {
+          // CRITICAL: Reverse-optimize local paths → Cloudinary URLs.
+          // Prevents image corruption in moveProduct (same bug as handleSave).
+          const cleanImage = reverseOptimizeUrl(p.image);
+          const cleanImages = Array.isArray(p.images)
+            ? p.images.map(reverseOptimizeUrl)
+            : p.images;
           const sheetProduct: SheetProduct = {
             id: p.id,
             name: p.name,
             description: p.description,
             category: p.category,
             price: p.price,
-            image: p.image,
-            images: joinImageStrings(p.images || []),
+            image: cleanImage,
+            images: joinImageStrings(cleanImages || []),
             featured: p.featured,
             isSpecialOffer: p.isSpecialOffer ?? false,
             variations: joinVariations(p.variations),

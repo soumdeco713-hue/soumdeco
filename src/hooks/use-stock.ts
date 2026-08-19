@@ -215,11 +215,9 @@ async function loadStockSeed(): Promise<StockMap> {
   return stockSeedPromise;
 }
 
-// Polling intervals — optimized for variable traffic (10 to 800K visits/month).
-// Stock data changes less frequently than catalog, so 2-hour polling is fine.
-// Total with 100 active users: 26K + 1,200 = 27,200 exec/day → under 30K quota ✅
-const POLL_MS = 7_200_000; // 2 hours when tab is visible
-const HIDDEN_POLL_MS = 14_400_000; // 4 hours when tab is hidden
+// Polling intervals — 5 min visible, 30 min hidden (matches catalog).
+const POLL_MS = 300_000; // 5 minutes when tab is visible
+const HIDDEN_POLL_MS = 1_800_000; // 30 minutes when tab is hidden
 
 export function useStock() {
   // Initialize from localStorage cache (INSTANT — no network wait)
