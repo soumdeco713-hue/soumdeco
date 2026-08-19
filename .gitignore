@@ -1,14 +1,32 @@
-# .gitignore for Cloudflare deployment
-node_modules/
-.next/
-.vercel/
-*.log
-dev.log
-db/*.db
+# Environment files (NEVER commit secrets)
+.env
 .env.local
 .env.production
-.DS_Store
-.wrangler/
+.env.development
+
+# Build artifacts
+.next/
+.vercel/
 node_modules/
-tool-results/
+
+# Backup files (should never be in public/)
+public/data/*.backup-*
+*.backup-*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
 dev.log
+
+# Python cache
+__pycache__/
+*.pyc
