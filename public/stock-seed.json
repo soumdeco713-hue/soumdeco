@@ -53,11 +53,12 @@
     "Service a table 24p Vert": 10,
     "Service a table 24p bleu": 10,
     "Service a table 24p Vert fleurie": 1,
-    "Service a table 24p beige a fleurie": 0,
+    "Service a table 24p beige a fleurie": 10,
     "Tasses et souss tasse (thé)": 0,
     "Service a table Olea Vert": 0,
-    "Service a table 24p Blue": 0
+    "Service a table 24p Blue": 0,
+    "Sevice a table Gris motifs": 0
   },
-  "builtAt": "2026-08-19T12:16:21.374274+00:00",
-  "count": 57
+  "builtAt": "2026-08-19T19:41:21.570043+00:00",
+  "count": 58
 }
