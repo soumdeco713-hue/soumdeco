@@ -126,6 +126,24 @@ export default {
       if (providedSecret !== expectedSecret) {
         return json({ ok: false, error: "unauthorized" }, 401, cors);
       }
+
+      // RATE LIMITING: max 1 refresh per 3 seconds.
+      // Prevents quota abuse (each /refresh = 4 KV writes).
+      try {
+        const meta = await env.CATALOG_KV.get("__meta", "json").catch(() => null);
+        const lastRefreshAttempt = meta?.lastSyncAttempt || 0;
+        const now = Date.now();
+        const COOLDOWN_MS = 3_000;
+        if (now - lastRefreshAttempt < COOLDOWN_MS) {
+          const waitMs = COOLDOWN_MS - (now - lastRefreshAttempt);
+          return json(
+            { ok: false, synced: false, error: "rate_limited", retryAfterMs: waitMs },
+            200,
+            cors,
+          );
+        }
+      } catch {}
+
       try {
         const result = await syncData(env);
         return json({ ok: true, synced: true, ...result }, 200, cors);
@@ -486,14 +504,22 @@ async function fetchFromAppsScript(baseUrl, action) {
 }
 
 // === Helper: bump KV hit counter (non-blocking, best-effort) ===
+// === Helper: bump KV hit counter (SAMPLED — 1-in-50) ===
+// CRITICAL: Sampling prevents KV write quota exhaustion.
+// At 50K visitors/day, unsampled = 50K writes/day (50× the 1K/day quota).
+// Sampled at 1-in-50 = ~1K writes/day (at the limit, safe).
 async function bumpHitCounter(env) {
   try {
-    const meta = await env.CATALOG_KV.get("__meta", "json");
+    // Sample: only bump ~2% of requests (1 in 50)
+    if (Math.random() > 0.02) return; // skip 98% of the time
+
+    const meta = await env.CATALOG_KV.get("__meta", "json").catch(() => null);
     const next = {
       lastSync: meta?.lastSync || Date.now(),
       lastSyncAttempt: meta?.lastSyncAttempt || Date.now(),
       lastChange: meta?.lastChange || Date.now(),
-      kvHits: (meta?.kvHits || 0) + 1,
+      // Scale up by 50× to approximate the real hit count
+      kvHits: (meta?.kvHits || 0) + 50,
       consecutiveFailures: meta?.consecutiveFailures || 0,
     };
     await env.CATALOG_KV.put("__meta", JSON.stringify(next));

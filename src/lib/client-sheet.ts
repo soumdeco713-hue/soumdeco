@@ -187,7 +187,9 @@ export async function clientUpsertProduct(
       WRITE_RETRIES,
       WRITE_RETRY_DELAY_MS,
     );
-    return res.ok;
+    // Apps Script POST returns 302 → 405 after redirect, but the product
+    // IS saved before the redirect. Treat 200, 302, 405 as success.
+    return res.ok || res.status === 302 || res.status === 405;
   } catch (err) {
     console.error("[clientUpsertProduct] failed:", err);
     return false;
