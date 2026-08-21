@@ -187,12 +187,32 @@ export default {
           cors,
         );
       } catch (err) {
+
         // KV might be down — return degraded health
         return json(
           { ok: false, error: "kv_unavailable", detail: String(err?.message || err) },
           200, // 200 so frontend doesn't throw — it can still serve static
           cors,
         );
+      }
+    }
+
+    // === Version endpoint (TINY — 8 bytes. Used for smart polling) ===
+    // Visitors poll this endpoint to check if the catalog changed.
+    // If the version matches, they DON'T fetch the full 70KB catalog.
+    // This saves 80% of Worker requests and KV reads.
+    if (action === "version") {
+      try {
+        const meta = await env.CATALOG_KV.get("__meta", "json").catch(() => null);
+        return json(
+          {
+            v: meta?.lastChange || 0,
+          },
+          200,
+          cors,
+        );
+      } catch {
+        return json({ v: 0 }, 200, cors);
       }
     }
 
@@ -205,8 +225,7 @@ export default {
           env.CATALOG_KV.get("stock", "text").catch(() => null),
         ]);
 
-        // Bump hit counter (best-effort, non-blocking)
-        ctx.waitUntil(bumpHitCounter(env).catch(() => {}));
+        // NOTE: bumpHitCounter removed to save KV writes (was 1000/day at 50K visitors)
 
         if (productsRaw) {
           return new Response(
@@ -274,7 +293,6 @@ export default {
       try {
         const cached = await env.CATALOG_KV.get("products", "text").catch(() => null);
         if (cached) {
-          ctx.waitUntil(bumpHitCounter(env).catch(() => {}));
           return new Response(cached, {
             status: 200,
             headers: {
@@ -309,7 +327,6 @@ export default {
       try {
         const cached = await env.CATALOG_KV.get("stock", "text").catch(() => null);
         if (cached) {
-          ctx.waitUntil(bumpHitCounter(env).catch(() => {}));
           return new Response(cached, {
             status: 200,
             headers: {

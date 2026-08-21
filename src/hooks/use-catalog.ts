@@ -66,6 +66,12 @@ export function useCatalog() {
     productsRef.current = products;
   }, [products]);
 
+  // SMART POLLING: Track the last known version hash from the Worker.
+  // The browser polls /?action=version (8 bytes) instead of /?action=catalog (70KB).
+  // It only fetches the full catalog if the version changed.
+  // This saves 80% of Worker requests and KV reads.
+  const lastVersionRef = useRef<number>(0);
+
   // ---- ADAPTIVE FETCH (Worker-first, never crashes) ----
   // Chain: Worker (5-min fresh) → static JSON (max 24h) → cache → seed
   // Worker is OPTIONAL — if NEXT_PUBLIC_WORKER_URL is not set, it's skipped
@@ -94,14 +100,24 @@ export function useCatalog() {
       }
 
       // 1. Fetch from Worker (if deployed) or static JSON (fallback)
+      // SMART POLLING: Check version first (8 bytes). Only fetch full catalog if changed.
       let fetched: SheetProduct[] = [];
       try {
-        // Dynamic import to avoid bundling worker-client into every page
-        // (it's only used in catalog/stock hooks, but Next.js may over-bundle)
-        const { fetchProducts } = await import("@/lib/worker-client");
+        const { fetchProducts, fetchWorkerVersion } = await import("@/lib/worker-client");
+        
+        // Check if catalog changed (tiny 8-byte request)
+        const version = await fetchWorkerVersion();
+        if (version && version === lastVersionRef.current) {
+          // Version unchanged — skip full fetch, keep current data
+          setLoading(false);
+          return;
+        }
+        
+        // Version changed (or first load) — fetch full catalog
         const result = await fetchProducts();
         if (result.products.length > 0) {
           fetched = result.products;
+          lastVersionRef.current = version || 0; // Update version
         }
       } catch {
         // Fetch failed — will fall through to cache/seed

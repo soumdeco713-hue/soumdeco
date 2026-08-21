@@ -280,6 +280,29 @@ export function isWorkerConfigured(): boolean {
   return getWorkerUrl() !== null;
 }
 
+// === Version check (used for smart polling) ===
+// Returns the lastChange timestamp from the Worker (8 bytes).
+// If this matches the previous value, the catalog hasn't changed.
+// NEVER throws — returns 0 on failure.
+export async function fetchWorkerVersion(): Promise<number> {
+  const workerUrl = getWorkerUrl();
+  if (!workerUrl) return 0;
+  try {
+    const res = await fetchWithTimeout(
+      `${workerUrl}/?action=version&_t=${Date.now()}`,
+      { cache: "no-store" },
+      2000, // 2s timeout — version is tiny, should be instant
+    );
+    if (res && res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return data?.v || 0;
+    }
+    return 0;
+  } catch {
+    return 0;
+  }
+}
+
 // === Internal: normalize sheet product (defensive) ===
 function normalizeSheetProduct(p: any): SheetProduct {
   return {
