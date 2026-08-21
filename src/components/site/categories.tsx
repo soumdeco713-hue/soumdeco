@@ -33,8 +33,8 @@ export function Categories({ products, active, onSelect }: CategoriesProps) {
 
   // Scroll state for arrows
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(false);
+  const [showLeftArrow, setShowLeftArrow] = useState(false);
+  const [showRightArrow, setShowRightArrow] = useState(false);
 
   // Check if we need to show arrows (content overflows)
   useEffect(() => {
@@ -42,24 +42,24 @@ export function Categories({ products, active, onSelect }: CategoriesProps) {
     if (!el) return;
 
     const checkScroll = () => {
-      // RTL scroll: scrollLeft is 0 at the right edge, negative as you scroll left
-      // We use scrollWidth vs clientWidth to determine if there's overflow
-      const hasOverflow = el.scrollWidth > el.clientWidth + 5; // 5px tolerance
+      const hasOverflow = el.scrollWidth > el.clientWidth + 5;
       if (!hasOverflow) {
-        setCanScrollLeft(false);
-        setCanScrollRight(false);
+        setShowLeftArrow(false);
+        setShowRightArrow(false);
         return;
       }
 
-      // For RTL, scrollLeft is typically 0 when scrolled to the "right" (start)
-      // and negative when scrolled to the "left" (end)
+      // In RTL: scrollLeft = 0 at start (right side), negative at end (left side)
       const scrollLeft = el.scrollLeft;
       const maxScroll = el.scrollWidth - el.clientWidth;
 
-      // In RTL: scrollLeft 0 = at start (right side)
-      // scrollLeft = -maxScroll = at end (left side)
-      setCanScrollRight(scrollLeft > -maxScroll + 5); // can scroll more to the left
-      setCanScrollLeft(scrollLeft < -5); // can scroll back to the right
+      // Left arrow shows when we can scroll toward the END (visually left in RTL)
+      // Not at end yet → scrollLeft > -maxScroll
+      setShowLeftArrow(scrollLeft > -maxScroll + 5);
+
+      // Right arrow shows when we can scroll toward the START (visually right in RTL)
+      // Not at start yet → scrollLeft < 0
+      setShowRightArrow(scrollLeft < -5);
     };
 
     checkScroll();
@@ -72,17 +72,16 @@ export function Categories({ products, active, onSelect }: CategoriesProps) {
     };
   }, [categories]);
 
-  const scroll = (direction: "left" | "right") => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const scrollAmount = 200; // pixels to scroll
-    // In RTL, scrolling "left" (visually) means decreasing scrollLeft
-    // and scrolling "right" means increasing scrollLeft
-    if (direction === "left") {
-      el.scrollBy({ left: -scrollAmount, behavior: "smooth" });
-    } else {
-      el.scrollBy({ left: scrollAmount, behavior: "smooth" });
-    }
+  const scrollLeft = () => {
+    // Scroll toward END (visually left in RTL)
+    // In RTL, positive scrollBy goes toward end
+    scrollRef.current?.scrollBy({ left: 200, behavior: "smooth" });
+  };
+
+  const scrollRight = () => {
+    // Scroll toward START (visually right in RTL)
+    // In RTL, negative scrollBy goes toward start
+    scrollRef.current?.scrollBy({ left: -200, behavior: "smooth" });
   };
 
   if (categories.length === 0) return null;
@@ -108,16 +107,17 @@ export function Categories({ products, active, onSelect }: CategoriesProps) {
 
         {/* Horizontal scrollable category buttons with arrows */}
         <div className="relative">
-          {/* Left Arrow (points right in RTL = scroll backward) */}
-          {canScrollLeft && (
+          {/* Left Arrow — points LEFT, scrolls content left (toward end in RTL) */}
+          {showLeftArrow && (
             <button
               type="button"
-              onClick={() => scroll("right")}
+              onClick={scrollLeft}
               className="absolute left-0 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 shadow-md backdrop-blur-sm transition-all hover:bg-white"
               aria-label="السابق"
             >
+              {/* Left chevron: ← */}
               <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="9 18 15 12 9 6" />
+                <polyline points="15 18 9 12 15 6" />
               </svg>
             </button>
           )}
@@ -177,16 +177,17 @@ export function Categories({ products, active, onSelect }: CategoriesProps) {
             })}
           </div>
 
-          {/* Right Arrow (points left in RTL = scroll forward) */}
-          {canScrollRight && (
+          {/* Right Arrow — points RIGHT, scrolls content right (toward start in RTL) */}
+          {showRightArrow && (
             <button
               type="button"
-              onClick={() => scroll("left")}
+              onClick={scrollRight}
               className="absolute right-0 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 shadow-md backdrop-blur-sm transition-all hover:bg-white"
               aria-label="التالي"
             >
+              {/* Right chevron: → */}
               <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="15 18 9 12 15 6" />
+                <polyline points="9 18 15 12 9 6" />
               </svg>
             </button>
           )}
