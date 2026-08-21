@@ -49,16 +49,16 @@ export function Categories({ products, active, onSelect }: CategoriesProps) {
         return;
       }
 
-      // In RTL: scrollLeft = 0 at start (right side), negative at end (left side)
       const scrollLeft = el.scrollLeft;
       const maxScroll = el.scrollWidth - el.clientWidth;
 
-      // Left arrow shows when we can scroll toward the END (visually left in RTL)
-      // Not at end yet → scrollLeft > -maxScroll
+      // Using el.scrollLeft universally:
+      // scrollLeft < 0 means we have scrolled toward the end (left visually in RTL)
+      // scrollLeft > -maxScroll means we haven't reached the end yet
+      // So, show left arrow if we can still scroll left (scrollLeft > -maxScroll)
       setShowLeftArrow(scrollLeft > -maxScroll + 5);
 
-      // Right arrow shows when we can scroll toward the START (visually right in RTL)
-      // Not at start yet → scrollLeft < 0
+      // Show right arrow if we have scrolled away from the start (scrollLeft < 0)
       setShowRightArrow(scrollLeft < -5);
     };
 
@@ -73,15 +73,15 @@ export function Categories({ products, active, onSelect }: CategoriesProps) {
   }, [categories]);
 
   const scrollLeft = () => {
-    // Scroll toward END (visually left in RTL)
-    // In RTL, positive scrollBy goes toward end
-    scrollRef.current?.scrollBy({ left: 200, behavior: "smooth" });
+    // Scroll visually LEFT
+    // In RTL, scrollLeft is negative. To go further left (toward end), we subtract.
+    scrollRef.current?.scrollBy({ left: -200, behavior: "smooth" });
   };
 
   const scrollRight = () => {
-    // Scroll toward START (visually right in RTL)
-    // In RTL, negative scrollBy goes toward start
-    scrollRef.current?.scrollBy({ left: -200, behavior: "smooth" });
+    // Scroll visually RIGHT
+    // In RTL, to go right (toward start), we add.
+    scrollRef.current?.scrollBy({ left: 200, behavior: "smooth" });
   };
 
   if (categories.length === 0) return null;
@@ -107,7 +107,7 @@ export function Categories({ products, active, onSelect }: CategoriesProps) {
 
         {/* Horizontal scrollable category buttons with arrows */}
         <div className="relative">
-          {/* Left Arrow — points LEFT, scrolls content left (toward end in RTL) */}
+          {/* Left Arrow — points LEFT, scrolls content left */}
           {showLeftArrow && (
             <button
               type="button"
@@ -177,7 +177,7 @@ export function Categories({ products, active, onSelect }: CategoriesProps) {
             })}
           </div>
 
-          {/* Right Arrow — points RIGHT, scrolls content right (toward start in RTL) */}
+          {/* Right Arrow — points RIGHT, scrolls content right */}
           {showRightArrow && (
             <button
               type="button"
