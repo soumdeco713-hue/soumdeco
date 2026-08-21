@@ -397,17 +397,33 @@ async function syncData(env) {
     const productsChanged = productsData && newProductsHash !== oldProductsHash;
     const stockChanged = stockData && newStockHash !== oldStockHash;
 
-    // Always write data (refreshes TTL even if unchanged)
+    // CRITICAL QUOTA FIX: Only write data when it actually changed OR if TTL needs refresh.
+    // Writing on every sync burns 874 KV writes/day (over the 1K limit).
+    // Hash-skip: if data is the same, skip the write (TTL is 1 hour, so data stays alive).
+    // TTL Refresh: if data hasn't changed for >30 min, write it anyway to refresh the 1h TTL.
+    // This prevents the KV key from expiring while keeping daily writes under 200.
+    const now = Date.now();
+    const TTL_REFRESH_THRESHOLD = 30 * 60 * 1000; // 30 minutes
+    const needsTtlRefresh = !existingMeta?.lastSync || (now - existingMeta.lastSync > TTL_REFRESH_THRESHOLD);
+
     const writes = [];
-    if (productsData) {
+    if (productsData && (productsChanged || needsTtlRefresh)) {
       writes.push(env.CATALOG_KV.put("products", productsData, { expirationTtl: KV_TTL_SECONDS }));
       result.productsUpdated = true;
       result.productsChanged = !!productsChanged;
+    } else if (productsData) {
+      // Data unchanged and TTL is fresh — skip write to save quota
+      result.productsUpdated = false;
+      result.productsChanged = false;
     }
-    if (stockData) {
+    if (stockData && (stockChanged || needsTtlRefresh)) {
       writes.push(env.CATALOG_KV.put("stock", stockData, { expirationTtl: KV_TTL_SECONDS }));
       result.stockUpdated = true;
       result.stockChanged = !!stockChanged;
+    } else if (stockData) {
+      // Data unchanged and TTL is fresh — skip write to save quota
+      result.stockUpdated = false;
+      result.stockChanged = false;
     }
     // Update hashes (no TTL — persists forever, only changes when data changes)
     if (productsChanged || stockChanged || !existingHashes) {
@@ -419,10 +435,11 @@ async function syncData(env) {
       );
     }
     // Update meta — track BOTH lastSync (success) AND lastSyncAttempt (any try)
+    // We ALWAYS write meta because it's tiny and needed for health checks + rate limiting.
     const newMeta = {
-      lastSync: Date.now(), // success!
-      lastSyncAttempt: Date.now(),
-      lastChange: productsChanged || stockChanged ? Date.now() : (existingMeta?.lastChange || Date.now()),
+      lastSync: now, // success!
+      lastSyncAttempt: now,
+      lastChange: productsChanged || stockChanged ? now : (existingMeta?.lastChange || now),
       kvHits: existingMeta?.kvHits || 0,
       consecutiveFailures: 0, // reset on success
     };
