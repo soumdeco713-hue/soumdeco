@@ -72,6 +72,45 @@ export function useCatalog() {
   // This saves 80% of Worker requests and KV reads.
   const lastVersionRef = useRef<number>(0);
 
+  // ADMIN REVERT PROTECTION: Track the last admin operation timestamp.
+  // Persisted to localStorage so it survives page refresh.
+  // When admin does an op, we skip background polling for 10 minutes
+  // to prevent stale KV data from reverting the optimistic update.
+  const ADMIN_OP_TS_KEY = "soumdeco_last_admin_op_ts";
+  const lastAdminOpTsRef = useRef<number>(0);
+
+  // Restore timestamp from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(ADMIN_OP_TS_KEY);
+      if (saved) {
+        const ts = parseInt(saved, 10);
+        if (!isNaN(ts) && ts > 0) {
+          lastAdminOpTsRef.current = ts;
+        }
+      }
+    } catch {}
+  }, []);
+
+  // Helper to update the timestamp (persists to localStorage)
+  const updateLastAdminOpTs = useCallback((ts: number) => {
+    lastAdminOpTsRef.current = ts;
+    try {
+      window.localStorage.setItem(ADMIN_OP_TS_KEY, String(ts));
+    } catch {}
+  }, []);
+
+  // Helper to trigger Worker /refresh after admin ops (updates KV for visitors)
+  // Does NOT overwrite admin's React state — only updates KV for other visitors.
+  const triggerWorkerRefresh = useCallback(async () => {
+    try {
+      const { triggerWorkerRefresh: refresh } = await import("@/lib/worker-client");
+      await refresh();
+    } catch {
+      // Silent — Worker cron will sync within 5 min
+    }
+  }, []);
+
   // ---- ADAPTIVE FETCH (Worker-first, never crashes) ----
   // Chain: Worker (5-min fresh) → static JSON (max 24h) → cache → seed
   // Worker is OPTIONAL — if NEXT_PUBLIC_WORKER_URL is not set, it's skipped
@@ -90,6 +129,34 @@ export function useCatalog() {
 
   const refresh = useCallback(async () => {
     try {
+      // ════════════════════════════════════════════════════════════
+      //  ADMIN MODE PROTECTION — BULLETPROOF REVERT FIX
+      // ════════════════════════════════════════════════════════════
+      //  When the admin panel is open (URL hash = #admin), SKIP ALL
+      //  background fetching. The admin's optimistic updates are the
+      //  ONLY source of truth. Any background fetch could return STALE
+      //  data and REVERT the admin's changes.
+      if (typeof window !== "undefined") {
+        const hash = window.location.hash.toLowerCase();
+        if (hash === "#admin" || hash.startsWith("#admin/")) {
+          setLoading(false);
+          return;
+        }
+      }
+
+      // ADMIN GRACE PERIOD: If admin did an operation within 10 minutes,
+      // SKIP fetching fresh data. The admin's optimistic update is correct.
+      const ADMIN_GRACE_PERIOD_MS = 600_000; // 10 minutes
+      const timeSinceLastAdminOp = Date.now() - lastAdminOpTsRef.current;
+      const withinAdminGracePeriod =
+        lastAdminOpTsRef.current > 0 &&
+        timeSinceLastAdminOp < ADMIN_GRACE_PERIOD_MS;
+
+      if (withinAdminGracePeriod) {
+        setLoading(false);
+        return;
+      }
+
       // 0. INSTANTLY show cached data (for returning visitors — 0ms)
       const instantCached = loadCatalog();
       if (instantCached.length > 0) {
@@ -296,6 +363,8 @@ export function useCatalog() {
     async (product: Product) => {
       // Save the previous state for rollback
       const previousProducts = productsRef.current;
+      // Stamp this op for admin revert protection
+      updateLastAdminOpTs(Date.now());
 
       // Optimistic local update (INSTANT — UI shows the change immediately)
       const idx = previousProducts.findIndex((p) => p.id === product.id);
@@ -363,10 +432,9 @@ export function useCatalog() {
           throw new Error("Apps Script POST failed — product not saved to sheet");
         }
         // 4. DO NOT await refresh() — that would re-fetch all 83 products (2-5s).
-        //    The optimistic update already shows the change. Schedule a background
-        //    refresh (non-blocking) so the catalog stays in sync with the sheet.
-        //    This makes Save feel instant to the admin.
-        setTimeout(() => { refresh().catch(() => {}); }, 100);
+        // After successful save, trigger Worker /refresh (updates KV for visitors).
+        // Does NOT overwrite admin's React state — only updates KV.
+        setTimeout(() => { triggerWorkerRefresh(); }, 100);
       } catch (e) {
         // If error happened AFTER the optimistic update, rollback
         console.error("[upsertProduct] error:", e);
@@ -377,7 +445,7 @@ export function useCatalog() {
         setSyncing(false);
       }
     },
-    [refresh],
+    [updateLastAdminOpTs, triggerWorkerRefresh],
   );
 
   // ---- DELETE (admin) ----
@@ -387,6 +455,8 @@ export function useCatalog() {
     async (id: string) => {
       const previousProducts = productsRef.current;
       const deletedProduct = previousProducts.find((p) => p.id === id);
+      // Stamp this op for admin revert protection
+      updateLastAdminOpTs(Date.now());
 
       // Optimistic: remove from state + localStorage
       const next = previousProducts.filter((p) => p.id !== id);
@@ -406,9 +476,8 @@ export function useCatalog() {
           }
           throw new Error("Apps Script delete failed — product not removed from sheet");
         }
-        // Don't await refresh() — the optimistic update already removed
-        // the product from the UI. Background refresh syncs the catalog.
-        setTimeout(() => { refresh().catch(() => {}); }, 100);
+        // After successful delete, trigger Worker /refresh (updates KV for visitors).
+        setTimeout(() => { triggerWorkerRefresh(); }, 100);
       } catch (e) {
         console.error("[deleteProduct] error:", e);
         // Rollback if not already done
@@ -423,7 +492,7 @@ export function useCatalog() {
         setSyncing(false);
       }
     },
-    [refresh],
+    [updateLastAdminOpTs, triggerWorkerRefresh],
   );
 
   // ---- ADD BLANK (admin) ----
@@ -529,6 +598,7 @@ export function useCatalog() {
 
   // ---- RESET (admin) ----
   const resetCatalog = useCallback(async () => {
+    updateLastAdminOpTs(Date.now()); // Admin revert protection
     setSyncing(true);
     try {
       // Reset localStorage to SEED_PRODUCTS FIRST (so the UI updates immediately)
@@ -538,11 +608,14 @@ export function useCatalog() {
       );
       setProducts(sorted);
       // Then reset the sheet directly via Apps Script
-      await clientResetProducts();
+      const ok = await clientResetProducts();
+      if (ok) {
+        setTimeout(() => { triggerWorkerRefresh(); }, 100);
+      }
     } finally {
       setSyncing(false);
     }
-  }, []);
+  }, [updateLastAdminOpTs, triggerWorkerRefresh]);
 
   return {
     products,

@@ -382,10 +382,12 @@ async function syncData(env) {
       return result;
     }
 
-    // Read existing hashes + meta (for change detection + failure tracking)
-    const [existingHashes, existingMeta] = await Promise.all([
+    // Read existing hashes + meta + actual data (for change detection + TTL check)
+    const [existingHashes, existingMeta, existingProducts, existingStock] = await Promise.all([
       env.CATALOG_KV.get("__hashes", "json").catch(() => null),
       env.CATALOG_KV.get("__meta", "json").catch(() => null),
+      env.CATALOG_KV.get("products", "text").catch(() => null),
+      env.CATALOG_KV.get("stock", "text").catch(() => null),
     ]);
 
     // Fetch products + stock in parallel (each retried 3 times internally)
@@ -415,25 +417,25 @@ async function syncData(env) {
     const stockChanged = stockData && newStockHash !== oldStockHash;
 
     // CRITICAL QUOTA FIX: Only write data when it actually changed OR if TTL needs refresh.
-    // Writing on every sync burns 874 KV writes/day (over the 1K limit).
-    // Hash-skip: if data is the same, skip the write (TTL is 1 hour, so data stays alive).
-    // TTL Refresh: if data hasn't changed for >30 min, write it anyway to refresh the 1h TTL.
-    // This prevents the KV key from expiring while keeping daily writes under 200.
+    // CRITICAL BUG FIX: Also write if the KV key is MISSING (expired/wiped) even if hash matches.
+    // Hash-skip alone is not enough — the key can expire (TTL) while __hashes persists (no TTL).
     const now = Date.now();
     const TTL_REFRESH_THRESHOLD = 30 * 60 * 1000; // 30 minutes
     const needsTtlRefresh = !existingMeta?.lastSync || (now - existingMeta.lastSync > TTL_REFRESH_THRESHOLD);
+    // If the key is MISSING (expired/wiped), we MUST write it regardless of hash
+    const productsMissing = !existingProducts;
+    const stockMissing = !existingStock;
 
     const writes = [];
-    if (productsData && (productsChanged || needsTtlRefresh)) {
+    if (productsData && (productsChanged || needsTtlRefresh || productsMissing)) {
       writes.push(env.CATALOG_KV.put("products", productsData, { expirationTtl: KV_TTL_SECONDS }));
       result.productsUpdated = true;
       result.productsChanged = !!productsChanged;
     } else if (productsData) {
-      // Data unchanged and TTL is fresh — skip write to save quota
       result.productsUpdated = false;
       result.productsChanged = false;
     }
-    if (stockData && (stockChanged || needsTtlRefresh)) {
+    if (stockData && (stockChanged || needsTtlRefresh || stockMissing)) {
       writes.push(env.CATALOG_KV.put("stock", stockData, { expirationTtl: KV_TTL_SECONDS }));
       result.stockUpdated = true;
       result.stockChanged = !!stockChanged;
