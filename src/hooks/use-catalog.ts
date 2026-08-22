@@ -174,17 +174,22 @@ export function useCatalog() {
         
         // Check if catalog changed (tiny 8-byte request)
         const version = await fetchWorkerVersion();
-        if (version && version === lastVersionRef.current) {
-          // Version unchanged — skip full fetch, keep current data
+        // CRITICAL BUG FIX: If version is 0, the Worker is BLOCKED (DNS/firewall).
+        // We must NOT skip the fetch — we need to fall through to static JSON.
+        // Only skip if version is > 0 AND matches lastVersionRef.
+        if (version > 0 && version === lastVersionRef.current) {
+          // Version unchanged and valid — skip full fetch, keep current data
           setLoading(false);
           return;
         }
         
-        // Version changed (or first load) — fetch full catalog
+        // Version changed OR Worker blocked (version=0) — fetch full catalog
         const result = await fetchProducts();
         if (result.products.length > 0) {
           fetched = result.products;
-          lastVersionRef.current = version || 0; // Update version
+          if (version > 0) {
+            lastVersionRef.current = version; // Update version only if valid
+          }
         }
       } catch {
         // Fetch failed — will fall through to cache/seed
