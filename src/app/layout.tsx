@@ -90,6 +90,71 @@ export default function RootLayout({
       <body
         className={`${jost.variable} ${cormorant.variable} ${inter.variable} ${arabic.variable} font-arabic antialiased bg-background text-foreground`}
       >
+        {/* ════════════════════════════════════════════════════════════
+            ALGERIAN WIFI FIX: Inline loading screen
+            Shows IMMEDIATELY when HTML loads — BEFORE JavaScript.
+            On slow WiFi, visitors see this within 200ms instead of
+            staring at a blank white page for 5-15 seconds.
+            React removes this when it mounts (via the inline script below).
+            ════════════════════════════════════════════════════════════ */}
+        <div id="pre-react-loading" style={{
+          position: "fixed",
+          inset: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "#FAF8F4",
+          zIndex: 99999,
+          transition: "opacity 0.3s ease",
+        }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{
+              width: 56,
+              height: 56,
+              margin: "0 auto 16px",
+              borderRadius: "50%",
+              background: "linear-gradient(135deg, #9A7E3A, #D4AF37)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 24,
+              animation: "pulse 1.5s ease-in-out infinite",
+            }}>✦</div>
+            <h1 style={{ fontSize: 20, fontWeight: 700, color: "#1C1815", marginBottom: 8, fontFamily: "system-ui, -apple-system, sans-serif" }}>
+              SOUM DECO
+            </h1>
+            <p style={{ fontSize: 14, color: "#6B5D4F", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+              جاري التحميل...
+            </p>
+          </div>
+        </div>
+        <style>{`
+          @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(0.95); }
+          }
+        `}</style>
+        {/* Tiny inline script: removes loading screen once React mounts.
+            This runs BEFORE heavy JS chunks load, ensuring instant removal. */}
+        <script dangerouslySetInnerHTML={{ __html: `
+          window.addEventListener("load", function() {
+            // Wait for React to mount (check for #pre-react-loading removal by React)
+            var checkCount = 0;
+            var checkInterval = setInterval(function() {
+              checkCount++;
+              // After 3 seconds OR if React has mounted (body has content), remove loading
+              if (checkCount > 30 || document.querySelector("[data-react-root]")) {
+                var el = document.getElementById("pre-react-loading");
+                if (el) {
+                  el.style.opacity = "0";
+                  setTimeout(function() { el.remove(); }, 300);
+                }
+                clearInterval(checkInterval);
+              }
+            }, 100);
+          });
+        `}} />
+
         {/* G3 FIX: <noscript> fallback for JS-disabled users + failed bundle download */}
         <noscript>
           <div

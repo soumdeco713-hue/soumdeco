@@ -103,12 +103,13 @@ async function doFetchCatalog(): Promise<CatalogResponse> {
   const workerUrl = getWorkerUrl();
 
   // 1. Try Worker (if configured)
+  // ALGERIAN WIFI FIX: 2s timeout (was 5s) — fail fast, fall back to static JSON
   if (workerUrl) {
     try {
       const res = await fetchWithTimeout(
         `${workerUrl}/?action=catalog`,
         { cache: "no-cache" },
-        5000,
+        2000, // 2s — fail fast on slow/blocked WiFi
       );
       if (res && res.ok) {
         const data = await res.json().catch(() => null);
@@ -138,9 +139,10 @@ async function doFetchCatalog(): Promise<CatalogResponse> {
   }
 
   // 2. Fallback: static JSON + static CSV (parallel)
+  // ALGERIAN WIFI FIX: 3s timeout (was 5s) — static JSON is same-domain, should be fast
   const [productsRes, stockRes] = await Promise.all([
-    fetchWithTimeout("/data/products.json", { cache: "no-cache" }, 5000),
-    fetchWithTimeout("/data/stock.csv", { cache: "no-cache" }, 5000),
+    fetchWithTimeout("/data/products.json", { cache: "no-cache" }, 3000),
+    fetchWithTimeout("/data/stock.csv", { cache: "no-cache" }, 3000),
   ]);
 
   let products: SheetProduct[] = [];
