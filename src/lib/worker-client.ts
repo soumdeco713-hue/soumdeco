@@ -100,46 +100,43 @@ export async function fetchCatalog(forceRefresh = false): Promise<CatalogRespons
 }
 
 async function doFetchCatalog(): Promise<CatalogResponse> {
-  const workerUrl = getWorkerUrl();
-
-  // 1. Try Worker (if configured)
-  // ALGERIAN WIFI FIX: 2s timeout (was 5s) — fail fast, fall back to static JSON
-  if (workerUrl) {
-    try {
-      const res = await fetchWithTimeout(
-        `${workerUrl}/?action=catalog`,
-        { cache: "no-cache" },
-        2000, // 2s — fail fast on slow/blocked WiFi
-      );
-      if (res && res.ok) {
-        const data = await res.json().catch(() => null);
-        if (data && typeof data.products === "string") {
-          let products: SheetProduct[] = [];
-          try {
-            const parsed = JSON.parse(data.products);
-            if (Array.isArray(parsed)) {
-              products = parsed.map(normalizeSheetProduct);
-            }
-          } catch {}
-
-          if (products.length > 0) {
-            return {
-              products,
-              stockCsv: typeof data.stock === "string" ? data.stock : "",
-              source: "worker",
-              workerHealthy: true,
-              ts: data.ts || Date.now(),
-            };
+  // 1. Try Pages API route (SAME DOMAIN — never blocked by WiFi DNS)
+  // This reads from the SAME KV as the standalone Worker.
+  // Algerian WiFi networks block *.workers.dev, so we use /api/catalog
+  // which runs on soumdeco.pages.dev (same domain as the site).
+  try {
+    const res = await fetchWithTimeout(
+      `/api/catalog&_t=${Date.now()}`,
+      { cache: "no-store" },
+      3000, // 3s timeout — same domain, should be fast
+    );
+    if (res && res.ok) {
+      const data = await res.json().catch(() => null);
+      if (data && typeof data.products === "string") {
+        let products: SheetProduct[] = [];
+        try {
+          const parsed = JSON.parse(data.products);
+          if (Array.isArray(parsed)) {
+            products = parsed.map(normalizeSheetProduct);
           }
+        } catch {}
+
+        if (products.length > 0) {
+          return {
+            products,
+            stockCsv: typeof data.stock === "string" ? data.stock : "",
+            source: "worker",
+            workerHealthy: true,
+            ts: data.ts || Date.now(),
+          };
         }
       }
-    } catch {
-      // Fall through to static
     }
+  } catch {
+    // Fall through to static
   }
 
-  // 2. Fallback: static JSON + static CSV (parallel)
-  // ALGERIAN WIFI FIX: 3s timeout (was 5s) — static JSON is same-domain, should be fast
+  // 2. Fallback: static JSON + static CSV (same domain, parallel)
   const [productsRes, stockRes] = await Promise.all([
     fetchWithTimeout("/data/products.json", { cache: "no-cache" }, 3000),
     fetchWithTimeout("/data/stock.csv", { cache: "no-cache" }, 3000),
@@ -283,17 +280,15 @@ export function isWorkerConfigured(): boolean {
 }
 
 // === Version check (used for smart polling) ===
-// Returns the lastChange timestamp from the Worker (8 bytes).
-// If this matches the previous value, the catalog hasn't changed.
+// Returns the lastChange timestamp from the Pages API (same domain).
+// This NEVER gets blocked by WiFi DNS (same domain as the site).
 // NEVER throws — returns 0 on failure.
 export async function fetchWorkerVersion(): Promise<number> {
-  const workerUrl = getWorkerUrl();
-  if (!workerUrl) return 0;
   try {
     const res = await fetchWithTimeout(
-      `${workerUrl}/?action=version&_t=${Date.now()}`,
+      `/api/version&_t=${Date.now()}`,
       { cache: "no-store" },
-      2000, // 2s timeout — version is tiny, should be instant
+      3000, // 3s timeout
     );
     if (res && res.ok) {
       const data = await res.json().catch(() => ({}));
