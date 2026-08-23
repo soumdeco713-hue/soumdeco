@@ -1,6 +1,13 @@
 name = "soumdeco"
 compatibility_date = "2024-09-01"
-compatibility_flags = ["nodejs_compat"]
+# CRITICAL: nodejs_compat_v2 is REQUIRED for Next.js API routes to work.
+# Without it, the bundle's `import "async_hooks"` (without `node:` prefix)
+# cannot be resolved → ALL /api/* routes return HTTP 500 at runtime.
+# This was the ROOT CAUSE of the "items never update" bug — every previous
+# deployment silently failed because the site root loaded (static HTML)
+# but all Pages Functions (API routes) threw the async_hooks error.
+# NOTE: Cannot use both nodejs_compat and nodejs_compat_v2 — pick one.
+compatibility_flags = ["nodejs_compat_v2"]
 
 # Required by Cloudflare Pages
 pages_build_output_dir = ".vercel/output/static"

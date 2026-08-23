@@ -30,3 +30,4 @@ dev.log
 # Python cache
 __pycache__/
 *.pyc
+.wrangler/
