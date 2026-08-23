@@ -285,7 +285,6 @@ export function CodOrderForm({
           ? it.price
           : null, // null = price-on-request (prevents NaN in sheet)
       name: it.name || "منتج بدون اسم", // prevent empty names
-      image: it.image || "", // prevent undefined image
     }));
 
     // P0 FIX #3: Filter out items with no name (orphan/invalid cart items)

@@ -24,17 +24,15 @@ import type { SheetProduct } from "./sheet";
 const WORKER_URL: string | null =
   (process.env.NEXT_PUBLIC_WORKER_URL as string | undefined) || null;
 
-const WORKER_ADMIN_SECRET: string | null =
-  (process.env.NEXT_PUBLIC_WORKER_ADMIN_SECRET as string | undefined) ||
-  null;
+// SECURITY: Do NOT read NEXT_PUBLIC_WORKER_ADMIN_SECRET here.
+// worker-client.ts is imported by use-catalog.ts → ends up in client bundle.
+// The admin secret is read SERVER-SIDE in src/app/api/refresh/route.ts via
+// worker-server.ts (which is server-only, never imported by client code).
+// The /api/refresh Pages Function adds the secret when forwarding to the Worker.
 
 function getWorkerUrl(): string | null {
   if (!WORKER_URL) return null;
   return WORKER_URL.endsWith("/") ? WORKER_URL.slice(0, -1) : WORKER_URL;
-}
-
-function getAdminSecret(): string | null {
-  return WORKER_ADMIN_SECRET;
 }
 
 // === Fetch with timeout (never throws, returns null on failure) ===

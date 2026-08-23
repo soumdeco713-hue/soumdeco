@@ -539,27 +539,3 @@ async function fetchFromAppsScript(baseUrl, action) {
   return null;
 }
 
-// === Helper: bump KV hit counter (non-blocking, best-effort) ===
-// === Helper: bump KV hit counter (SAMPLED — 1-in-50) ===
-// CRITICAL: Sampling prevents KV write quota exhaustion.
-// At 50K visitors/day, unsampled = 50K writes/day (50× the 1K/day quota).
-// Sampled at 1-in-50 = ~1K writes/day (at the limit, safe).
-async function bumpHitCounter(env) {
-  try {
-    // Sample: only bump ~2% of requests (1 in 50)
-    if (Math.random() > 0.02) return; // skip 98% of the time
-
-    const meta = await env.CATALOG_KV.get("__meta", "json").catch(() => null);
-    const next = {
-      lastSync: meta?.lastSync || Date.now(),
-      lastSyncAttempt: meta?.lastSyncAttempt || Date.now(),
-      lastChange: meta?.lastChange || Date.now(),
-      // Scale up by 50× to approximate the real hit count
-      kvHits: (meta?.kvHits || 0) + 50,
-      consecutiveFailures: meta?.consecutiveFailures || 0,
-    };
-    await env.CATALOG_KV.put("__meta", JSON.stringify(next));
-  } catch {
-    // Best-effort — don't fail the request
-  }
-}

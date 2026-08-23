@@ -1,0 +1,1114 @@
+     1→// Product type, seed data, localStorage helpers
+     2→// Supports multi-image (up to ~8 images), variations, and Arabic descriptions.
+     3→
+     4→import { BRAND } from "./brand-config";
+     5→
+     6→export type Variation = {
+     7→  /** Variation name — e.g. "اللون", "الحجم", "السعة" */
+     8→  name: string;
+     9→  /** Options — e.g. ["أبيض", "أسود", "ذهبي"] */
+    10→  options: string[];
+    11→};
+    12→
+    13→/** Simpler per-variant model — a single color, size, or custom variable
+    14→ * entry with optional price adjustment. */
+    15→export type ProductVariant = {
+    16→  /** Variant type: "color", "size", or any custom string (e.g. "weight", "material") */
+    17→  type: string;
+    18→  name: string;
+    19→  /** Added to the base price (can be 0 or negative). Optional. */
+    20→  priceAdjustment?: number;
+    21→};
+    22→
+    23→/** Quantity tier — a special offer triggered by the customer's order quantity.
+    24→ * A tier can combine a free-shipping benefit AND a discount amount (or just one, or both).
+    25→ *
+    26→ * Two modes:
+    27→ *  - `mode: "exact"`   → triggers ONLY at exactly `qty` (e.g. "buy exactly 2 → free desk shipping")
+    28→ *  - `mode: "min"`     → triggers at `qty` OR MORE (e.g. "buy 2+ → free shipping")
+    29→ *
+    30→ * The `mode` field is optional — if absent, the tier is treated as "exact" (backward compat).
+    31→ * Sheet encoding: `qty:freeShipping:discountAmount:mode`
+    32→ *   e.g. `2:both:0:min` = buy 2 or more → free shipping (both) + no discount
+    33→ *        `3:none:500:exact` = buy exactly 3 → 500 DA discount, no free shipping
+    34→ *        `2:desk:0` = buy exactly 2 → free desk shipping (legacy format, no mode = "exact")
+    35→ */
+    36→export type QuantityTier = {
+    37→  /** The quantity that triggers this tier (e.g. 2, 3, 4) */
+    38→  qty: number;
+    39→  /** Whether the tier triggers at exactly `qty` ("exact") or `qty` and above ("min"). */
+    40→  mode?: "exact" | "min";
+    41→  /** Free-shipping benefit. "none" = no free shipping, just discount. */
+    42→  freeShipping: "none" | "desk" | "home" | "both";
+    43→  /** Optional discount amount in DA (0 / undefined = no discount) */
+    44→  discountAmount?: number;
+    45→};
+    46→
+    47→/** Old benefit values used by the previous tier format. Kept for backward-compat parsing. */
+    48→type LegacyTierBenefit = "free_desk" | "free_home" | "free_both" | "discount";
+    49→
+    50→/** Map an old-format tier benefit to the new {freeShipping, discountAmount} shape. */
+    51→function migrateLegacyBenefit(
+    52→  benefit: LegacyTierBenefit,
+    53→  discountAmount?: number,
+    54→): { freeShipping: QuantityTier["freeShipping"]; discountAmount?: number } {
+    55→  switch (benefit) {
+    56→    case "free_desk":
+    57→      return { freeShipping: "desk" };
+    58→    case "free_home":
+    59→      return { freeShipping: "home" };
+    60→    case "free_both":
+    61→      return { freeShipping: "both" };
+    62→    case "discount":
+    63→    default:
+    64→      return { freeShipping: "none", discountAmount };
+    65→  }
+    66→}
+    67→
+    68→export type Product = {
+    69→  id: string;
+    70→  name: string;
+    71→  description: string;
+    72→  category: string;
+    73→  price: number | null;
+    74→  /** Optional old price (shown with strikethrough, smaller, to show a discount). */
+    75→  oldPrice?: number | null;
+    76→  image: string;
+    77→  images?: string[];
+    78→  featured: boolean;
+    79→  inStock: boolean;
+    80→  /** Whether this product is shown in the "Special Offers" section on the home page. */
+    81→  isSpecialOffer?: boolean;
+    82→  /** Optional variations (color, size, etc.) — empty array if none. Kept for backward-compat. */
+    83→  variations?: Variation[];
+    84→  /** Simpler per-variant list (colors + sizes with optional price adjustments).
+    85→   * Replaces `variations` in the admin UI. */
+    86→  variants?: ProductVariant[];
+    87→  /** Optional stock count — null = unlimited/unknown, 0 = out of stock. */
+    88→  stock?: number | null;
+    89→  /** Optional bullet highlights (key selling points) shown on the product page. */
+    90→  highlights?: string[];
+    91→  /** Sort order — lower = appears first in catalog. Default 999 (bottom). */
+    92→  sortOrder?: number;
+    93→  /** Optional badge text (e.g. "عرض خاص") displayed on cards and product page. */
+    94→  badge?: string;
+    95→  /** Optional quantity tiers — special offers at specific quantities */
+    96→  quantityTiers?: QuantityTier[];
+    97→};
+    98→
+    99→export const CATALOG_STORAGE_KEY = BRAND.storage.catalog; // e.g. "rokn_catalog_v2"
+   100→export const CART_STORAGE_KEY = BRAND.storage.cart;
+   101→
+   102→/** Hard cap on the total images string length, to fit Google Sheets' 50K cell limit. */
+   103→export const IMAGES_TOTAL_CHAR_CAP = 47000;
+   104→
+   105→/** Separator for multiple images in the sheet cell (triple tilde) */
+   106→export const IMAGE_SEPARATOR = "~~~";
+   107→
+   108→/** Separator for variations in the sheet cell (double semicolon) */
+   109→export const VARIATIONS_SEPARATOR = ";;";
+   110→
+   111→/** Separator between variation name and options (double colon) */
+   112→export const VARIATION_NAME_SEP = "::";
+   113→
+   114→/** Separator between options within a variation (double comma) */
+   115→export const VARIATION_OPT_SEP = ",,";
+   116→
+   117→/** Separator between variants in the sheet cell (single comma — names can't
+   118→ * contain commas in practice; if they do, swap for a different token). */
+   119→export const VARIANT_SEP = ",";
+   120→
+   121→export const SEED_PRODUCTS: Product[] = [
+   122→  {
+   123→    id: "nouveau-5bzz3",
+   124→    name: "Service a table Blanc Luxe",
+   125→    description: "Service a table 24p \nModel: Blanc luxe \nMatière: Porcelaine \nProduit : Importation ",
+   126→    category: "arts de la table",
+   127→    price: 16600,
+   128→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1783035210/nouveau-5bzz3-1.jpg",
+   129→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1783035210/nouveau-5bzz3-1.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1783035210/nouveau-5bzz3-2.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1783035211/nouveau-5bzz3-3.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1783035211/nouveau-5bzz3-4.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1783035212/nouveau-5bzz3-5.jpg"],
+   130→    featured: true,
+   131→    inStock: true,
+   132→    isSpecialOffer: false,
+   133→    variations: [],
+   134→    variants: [],
+   135→    highlights: [],
+   136→    sortOrder: 1,
+   137→    badge: "",
+   138→    stock: null,
+   139→  },
+   140→  {
+   141→    id: "nouveau-8a9wk",
+   142→    name: "Service a table Blanc luxe doré",
+   143→    description: "Service a table 24p \nModel: Blanc luxe doré \nMatière: Porcelaine \nProduit importation ",
+   144→    category: "arts de la table",
+   145→    price: 15000,
+   146→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1783035768/nouveau-8a9wk-1.jpg",
+   147→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1783035768/nouveau-8a9wk-1.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1783036606/nouveau-8a9wk-2.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1783036607/nouveau-8a9wk-3.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1783036607/nouveau-8a9wk-4.jpg"],
+   148→    featured: false,
+   149→    inStock: true,
+   150→    isSpecialOffer: false,
+   151→    variations: [],
+   152→    variants: [],
+   153→    highlights: [],
+   154→    sortOrder: 2,
+   155→    badge: "",
+   156→    stock: null,
+   157→  },
+   158→  {
+   159→    id: "nouveau-ee3tk",
+   160→    name: "Service a table Blanc luxe avec reliefs",
+   161→    description: "Service a table 24p \nModel: Blanc Luxe avec reliefs \nMatière: porcelaine \nProduit importation ",
+   162→    category: "arts de la table",
+   163→    price: 15500,
+   164→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1783035898/nouveau-ee3tk-1.jpg",
+   165→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1783035898/nouveau-ee3tk-1.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1783036645/nouveau-ee3tk-2.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1783036646/nouveau-ee3tk-3.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1783036646/nouveau-ee3tk-4.jpg"],
+   166→    featured: true,
+   167→    inStock: true,
+   168→    isSpecialOffer: false,
+   169→    variations: [],
+   170→    variants: [],
+   171→    highlights: [],
+   172→    sortOrder: 3,
+   173→    badge: "",
+   174→    stock: null,
+   175→  },
+   176→  {
+   177→    id: "nouveau-q7hs2",
+   178→    name: "Service a table Blanc cassé gris",
+   179→    description: "Service a table 24p \nModel: Blanc cassé gris \nMatière: Porcelaine \nProduit importation ",
+   180→    category: "arts de la table",
+   181→    price: 14500,
+   182→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1783036231/nouveau-q7hs2-1.jpg",
+   183→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1783036231/nouveau-q7hs2-1.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1783036671/nouveau-q7hs2-2.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1783036672/nouveau-q7hs2-3.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1783036672/nouveau-q7hs2-4.jpg"],
+   184→    featured: false,
+   185→    inStock: true,
+   186→    isSpecialOffer: false,
+   187→    variations: [],
+   188→    variants: [],
+   189→    highlights: [],
+   190→    sortOrder: 4,
+   191→    badge: "",
+   192→    stock: null,
+   193→  },
+   194→  {
+   195→    id: "nouveau-c8e66",
+   196→    name: "Service a table beige luxe",
+   197→    description: "Service a table 24p \nModel: Beige luxe \nMatière: Céramique \nProduit importation ",
+   198→    category: "arts de la table",
+   199→    price: 16000,
+   200→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1783036302/nouveau-c8e66-1.jpg",
+   201→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1783036302/nouveau-c8e66-1.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1783036694/nouveau-c8e66-2.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1783036695/nouveau-c8e66-3.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1783036695/nouveau-c8e66-4.jpg"],
+   202→    featured: false,
+   203→    inStock: true,
+   204→    isSpecialOffer: false,
+   205→    variations: [],
+   206→    variants: [],
+   207→    highlights: [],
+   208→    sortOrder: 5,
+   209→    badge: "",
+   210→    stock: null,
+   211→  },
+   212→  {
+   213→    id: "nouveau-7tdxy",
+   214→    name: "Service a café au lait A",
+   215→    description: "Service a café au lait 15P \nModel: A\nMatière: Porcelaine \nProduit importation ",
+   216→    category: "arts de la table",
+   217→    price: 10000,
+   218→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1783037715/nouveau-7tdxy-1.jpg",
+   219→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1783037715/nouveau-7tdxy-1.jpg"],
+   220→    featured: false,
+   221→    inStock: true,
+   222→    isSpecialOffer: false,
+   223→    variations: [],
+   224→    variants: [],
+   225→    highlights: [],
+   226→    sortOrder: 6,
+   227→    badge: "",
+   228→    stock: null,
+   229→  },
+   230→  {
+   231→    id: "nouveau-ve70v",
+   232→    name: "Service a table avec motifs",
+   233→    description: "Service a table de 24 pièces \nMatière porcelaine \nProduit importation ",
+   234→    category: "arts de la table",
+   235→    price: 11400,
+   236→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1783130816/nouveau-ve70v-1.jpg",
+   237→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1783130816/nouveau-ve70v-1.jpg"],
+   238→    featured: false,
+   239→    inStock: true,
+   240→    isSpecialOffer: false,
+   241→    variations: [],
+   242→    variants: [],
+   243→    highlights: [],
+   244→    sortOrder: 7,
+   245→    badge: "",
+   246→    stock: null,
+   247→  },
+   248→  {
+   249→    id: "nouveau-fudxe",
+   250→    name: "Service a table motif gris",
+   251→    description: "Service a table de 24 pièces \nMatière porcelaine \nProduit importation ",
+   252→    category: "arts de la table",
+   253→    price: 11400,
+   254→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1783131054/nouveau-fudxe-1.jpg",
+   255→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1783131054/nouveau-fudxe-1.jpg"],
+   256→    featured: false,
+   257→    inStock: true,
+   258→    isSpecialOffer: false,
+   259→    variations: [],
+   260→    variants: [],
+   261→    highlights: [],
+   262→    sortOrder: 8,
+   263→    badge: "",
+   264→    stock: null,
+   265→  },
+   266→  {
+   267→    id: "nouveau-lbzkm",
+   268→    name: "Service a table Blue",
+   269→    description: "Service a table 24p \nModel: Blue\nMatière: Porcelaine \nProduit importation ",
+   270→    category: "arts de la table",
+   271→    price: 15000,
+   272→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1783589977/nouveau-lbzkm-1.jpg",
+   273→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1783589977/nouveau-lbzkm-1.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1783589978/nouveau-lbzkm-2.jpg"],
+   274→    featured: false,
+   275→    inStock: true,
+   276→    isSpecialOffer: false,
+   277→    variations: [],
+   278→    variants: [],
+   279→    highlights: [],
+   280→    sortOrder: 9,
+   281→    badge: "",
+   282→    stock: null,
+   283→  },
+   284→  {
+   285→    id: "nouveau-qy4gc",
+   286→    name: "Service a table Blanc luxe doré ref02",
+   287→    description: "Service a table 24p \nModel: Blanc luxe doré \nMatière: Porcelaine \nProduit importation ",
+   288→    category: "arts de la table",
+   289→    price: 11400,
+   290→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1784566494/nouveau-qy4gc-1.jpg",
+   291→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1784566494/nouveau-qy4gc-1.jpg"],
+   292→    featured: false,
+   293→    inStock: true,
+   294→    isSpecialOffer: false,
+   295→    variations: [],
+   296→    variants: [],
+   297→    highlights: [],
+   298→    sortOrder: 10,
+   299→    badge: "",
+   300→    stock: null,
+   301→  },
+   302→  {
+   303→    id: "nouveau-n9bpq",
+   304→    name: "Service a table 24p vert",
+   305→    description: "Apportez une touche d'élégance et de modernité à votre table avec ce magnifique service à table de 24 pièces en céramique de haute qualité. Son design raffiné, sa finition brillante et ses différentes couleurs s'intègrent parfaitement à tous les styles de décoration, du classique au contemporain.\nFabriqué en céramique résistante, ce service est conçu pour un usage quotidien tout en conservant son éclat et sa solidité au fil du temps. Grâce à sa finition soignée et à sa qualité supérieure, il est idéal aussi bien pour les repas en famille que pour recevoir vos invités.\nCaractéristiques :\n✔️ Service à table complet de 24 pièces\n✔️ Matière : Céramique premium\n✔️ Produit d'importation\n✔️ Disponible en différentes couleurs\n✔️ Finition brillante et élégante\n✔️ Très bonne résistance aux rayures et à l'usage quotidien\n✔️ Facile à nettoyer\n✔️ Convient à un usage quotidien et aux occasions spéciales\n✔️ Design moderne et intemporel\n✔️ Excellente qualité de fabrication\n✨ Disponible en stock.\n🚚 Livraison disponible dans toutes les wilayas.",
+   306→    category: "arts de la table",
+   307→    price: 16500,
+   308→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1784840229/nouveau-n9bpq-1.jpg",
+   309→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1784840229/nouveau-n9bpq-1.jpg"],
+   310→    featured: false,
+   311→    inStock: true,
+   312→    isSpecialOffer: false,
+   313→    variations: [],
+   314→    variants: [],
+   315→    highlights: [],
+   316→    sortOrder: 11,
+   317→    badge: "",
+   318→    stock: null,
+   319→  },
+   320→  {
+   321→    id: "nouveau-wlcgv",
+   322→    name: "Coussin de voyage (Rose)",
+   323→    description: "Matière : silicone en fibre \nProduit local de très bonne qualité très souple ",
+   324→    category: "Coussins",
+   325→    price: 1200,
+   326→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1783103366/nouveau-wlcgv-1.jpg",
+   327→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1783103366/nouveau-wlcgv-1.jpg"],
+   328→    featured: false,
+   329→    inStock: true,
+   330→    isSpecialOffer: false,
+   331→    variations: [],
+   332→    variants: [],
+   333→    highlights: [],
+   334→    sortOrder: 12,
+   335→    badge: "",
+   336→    stock: null,
+   337→  },
+   338→  {
+   339→    id: "nouveau-662bx",
+   340→    name: "Coussin de voyage (Marron)",
+   341→    description: "Matière : silicone en fibre \nProduit local de très bonne qualité très souple ",
+   342→    category: "Coussins",
+   343→    price: 1200,
+   344→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1783103424/nouveau-662bx-1.jpg",
+   345→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1783103424/nouveau-662bx-1.jpg"],
+   346→    featured: true,
+   347→    inStock: true,
+   348→    isSpecialOffer: false,
+   349→    variations: [],
+   350→    variants: [],
+   351→    highlights: [],
+   352→    sortOrder: 13,
+   353→    badge: "",
+   354→    stock: null,
+   355→  },
+   356→  {
+   357→    id: "nouveau-jo3g2",
+   358→    name: "Mixeur plongeant Cristor HB- K55GN",
+   359→    description: "Vous rêvez d'une cuisine plus simple, rapide et efficace ? Ne cherchez plus ! Découvrez le compagnon idéal de toutes vos préparations culinaires : le Mixeur Plongeant 3-en-1 de Cristor. \n🥣✨\nQue ce soit pour de délicieux soupes, des smoothies vitaminés ou des pâtisseries réussies, il sait TOUT faire !\n\n💡 Pourquoi vous allez l'adorer ? (Ses caractéristiques)\nModèle performant : Référence HB-K55GN, conçu pour durer.\nMultifonction 3-en-1 : Un seul appareil pour trois actions indispensables :\n\nMélanger (pour vos veloutés, sauces et smoothies lisses).\n\nCouper / Hacher (grâce à son mini-hachoir inclus, parfait pour les oignons, herbes et viandes).\n\nFouetter (avec son fouet ballon pour des blancs en neige et des crèmes bien fermes).\n\nAccessoires inclus : Livré avec son verre doseur pratique pour mesurer et mixer directement dedans.\n\nDesign ergonomique : Une prise en main confortable et un look moderne gris/inox qui sublime votre cuisine.\n\nGarantie Sérénité : Profitez d'une garantie de 12 mois (1 an) pour cuisiner l'esprit tranquille ! 🛡️\n\n📦 Contenu de la boîte :\nLe bloc moteur du mixeur plongeant (Cristor)\nLe pied mixeur en inox\nLe bol hachoir avec ses lames performantes\nLe fouet adaptable\nLe verre doseur transparent\n\n📲 Commandez dès maintenant !\n📩 Prix et commande en DM (Message Privé) ou laissez un commentaire sous ce post !\n\n🚚 Livraison disponible (préciser vos conditions de livraison, ex: Livraison 58 wilayas disponible / Paiement à la livraison).\n\n#Cristor #MixeurPlongeant #CuisineFacile #RobotCuisine Electromenager Mixeur3en1 AstuceCuisine CuisineAlgérie EquipementMaison SmoothieTime Garantie1An RobotMultifonction",
+   360→    category: "Électroménager",
+   361→    price: 6000,
+   362→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1784652947/nouveau-jo3g2-1.jpg",
+   363→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1784652947/nouveau-jo3g2-1.jpg"],
+   364→    featured: true,
+   365→    inStock: true,
+   366→    isSpecialOffer: false,
+   367→    variations: [],
+   368→    variants: [],
+   369→    highlights: [],
+   370→    sortOrder: 14,
+   371→    badge: "",
+   372→    stock: null,
+   373→  },
+   374→  {
+   375→    id: "nouveau-0brgt",
+   376→    name: "🍹 CRISTOR BLEND-IT : Noir",
+   377→    description: "Votre nouvel allié fraîcheur & cuisine ! 🌟\nVous rêvez de smoothies parfaits, de jus vitaminés ou d'épices fraîchement moulues en un clin d'œil ? Le mixeur Cristor Blend-it est fait pour vous !\n\nDisponible en deux coloris élégants (Noir chic 🖤 ou Blanc épuré 🤍) pour s'adapter parfaitement à votre cuisine.\n\nPourquoi vous allez l'adorer ?\n\n💪 Puissance optimale : 600W pour mixer sans effort tous vos ingrédients.\n\n🍹 Grande capacité : Un bol de 1.5 Litres, idéal pour toute la famille.\n\n⚙️ Multi-vitesses : 2 niveaux de vitesse pour un contrôle total de vos textures.\n\n🔪 Haute qualité : Lames en acier inoxydable ultra-résistantes.\n\n🔒 Sécurité garantie : Équipé d'un système de verrouillage de sécurité.\n\n☕ Le petit + : Livré avec son moulin à épices/café intégré !\n\n🛡️ Sérénité : Garantie de 12 mois (1 an).\n\n👉 Commandez le vôtre dès maintenant ! Les stocks sont limités.\n",
+   378→    category: "Électroménager",
+   379→    price: 6500,
+   380→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1784653111/nouveau-0brgt-1.jpg",
+   381→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1784653111/nouveau-0brgt-1.jpg"],
+   382→    featured: true,
+   383→    inStock: true,
+   384→    isSpecialOffer: false,
+   385→    variations: [],
+   386→    variants: [],
+   387→    highlights: [],
+   388→    sortOrder: 15,
+   389→    badge: "",
+   390→    stock: null,
+   391→  },
+   392→  {
+   393→    id: "nouveau-emw96",
+   394→    name: "🍹 CRISTOR BLEND-IT : Blanc",
+   395→    description: "🍹 CRISTOR BLEND-IT : \nVotre nouvel allié fraîcheur & cuisine ! 🌟\nVous rêvez de smoothies parfaits, de jus vitaminés ou d'épices fraîchement moulues en un clin d'œil ? Le mixeur Cristor Blend-it est fait pour vous !\n\nDisponible en deux coloris élégants (Noir chic 🖤 ou Blanc épuré 🤍) pour s'adapter parfaitement à votre cuisine.\n\nPourquoi vous allez l'adorer ?\n\n💪 Puissance optimale : 600W pour mixer sans effort tous vos ingrédients.\n\n🍹 Grande capacité : Un bol de 1.5 Litres, idéal pour toute la famille.\n\n⚙️ Multi-vitesses : 2 niveaux de vitesse pour un contrôle total de vos textures.\n\n🔪 Haute qualité : Lames en acier inoxydable ultra-résistantes.\n\n🔒 Sécurité garantie : Équipé d'un système de verrouillage de sécurité.\n\n☕ Le petit + : Livré avec son moulin à épices/café intégré !\n\n🛡️ Sérénité : Garantie de 12 mois (1 an).\n\n👉 Commandez le vôtre dès maintenant ! Les stocks sont limités.\n",
+   396→    category: "Électroménager",
+   397→    price: 6500,
+   398→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1784653167/nouveau-emw96-1.jpg",
+   399→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1784653167/nouveau-emw96-1.jpg"],
+   400→    featured: true,
+   401→    inStock: true,
+   402→    isSpecialOffer: false,
+   403→    variations: [],
+   404→    variants: [],
+   405→    highlights: [],
+   406→    sortOrder: 16,
+   407→    badge: "",
+   408→    stock: null,
+   409→  },
+   410→  {
+   411→    id: "nouveau-9h0mz",
+   412→    name: "Cocotte minute 06 litres Ref 01",
+   413→    description: "Cocotte-Minute NARDI – Qualité Italienne 🇮🇹\n\nDécouvrez la cocotte-minute NARDI, conçue en acier inoxydable de haute qualité pour une cuisson rapide, sûre et économique. Disponible en 6 L, 8 L, 10 L et 12 L, avec panier vapeur ou couscoussier selon le modèle. Compatible avec tous les types de feux, y compris l'induction, elle est dotée d'un système de sécurité renforcé et de poignées ergonomiques. \n\nUn choix idéal pour préparer facilement couscous, viandes, légumes, soupes et bien plus encore.\n\n✔️ Marque italienne\n✔️ Acier inoxydable de haute qualité\n✔️ 6L, 8L, 10L et 12L\n✔️ Avec panier vapeur ou couscoussier\n✔️ Compatible tous feux, y compris induction\n✔️ Garantie 12 mois",
+   414→    category: "Cuisine",
+   415→    price: 15000,
+   416→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1783965686/nouveau-9h0mz-1.jpg",
+   417→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1783965686/nouveau-9h0mz-1.jpg"],
+   418→    featured: true,
+   419→    inStock: true,
+   420→    isSpecialOffer: false,
+   421→    variations: [],
+   422→    variants: [],
+   423→    highlights: [],
+   424→    sortOrder: 17,
+   425→    badge: "",
+   426→    stock: null,
+   427→  },
+   428→  {
+   429→    id: "nouveau-cxtbh",
+   430→    name: "Cocotte minute 06 Litres Ref 01",
+   431→    description: "Cocotte-Minute NARDI – Qualité Italienne 🇮🇹\n\nDécouvrez la cocotte-minute NARDI, conçue en acier inoxydable de haute qualité pour une cuisson rapide, sûre et économique. Disponible en 6 L, 8 L, 10 L et 12 L, avec panier vapeur ou couscoussier selon le modèle. Compatible avec tous les types de feux, y compris l'induction, elle est dotée d'un système de sécurité renforcé et de poignées ergonomiques.\n Un choix idéal pour préparer facilement couscous, viandes, légumes, soupes et bien plus encore.\n\n✔️ Marque italienne\n✔️ Acier inoxydable de haute qualité\n✔️ 6L, 8L, 10L et 12L\n✔️ Avec panier vapeur ou couscoussier\n✔️ Compatible tous feux, y compris induction\n✔️ Garantie 12 mois",
+   432→    category: "Cuisine",
+   433→    price: 15000,
+   434→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1784032383/nouveau-cxtbh-1.jpg",
+   435→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1784032383/nouveau-cxtbh-1.jpg"],
+   436→    featured: true,
+   437→    inStock: true,
+   438→    isSpecialOffer: false,
+   439→    variations: [],
+   440→    variants: [],
+   441→    highlights: [],
+   442→    sortOrder: 18,
+   443→    badge: "",
+   444→    stock: null,
+   445→  },
+   446→  {
+   447→    id: "nouveau-a7qtb",
+   448→    name: "Cocotte minute 06 Litres Ref 03",
+   449→    description: "Cocotte-Minute NARDI – Qualité Italienne 🇮🇹\n\nDécouvrez la cocotte-minute NARDI, conçue en acier inoxydable de haute qualité pour une cuisson rapide, sûre et économique. Disponible en 6 L, 8 L, 10 L et 12 L, avec panier vapeur ou couscoussier selon le modèle. Compatible avec tous les types de feux, y compris l'induction, elle est dotée d'un système de sécurité renforcé et de poignées ergonomiques. \nUn choix idéal pour préparer facilement couscous, viandes, légumes, soupes et bien plus encore.\n\n✔️ Marque italienne\n✔️ Acier inoxydable de haute qualité\n✔️ 6L, 8L, 10L et 12L\n✔️ Avec panier vapeur ou couscoussier\n✔️ Compatible tous feux, y compris induction\n✔️ Garantie 12 mois",
+   450→    category: "Cuisine",
+   451→    price: 15000,
+   452→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1784033455/nouveau-a7qtb-1.jpg",
+   453→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1784033455/nouveau-a7qtb-1.jpg"],
+   454→    featured: true,
+   455→    inStock: true,
+   456→    isSpecialOffer: false,
+   457→    variations: [],
+   458→    variants: [],
+   459→    highlights: [],
+   460→    sortOrder: 19,
+   461→    badge: "",
+   462→    stock: null,
+   463→  },
+   464→  {
+   465→    id: "nouveau-bxauf",
+   466→    name: "Cocotte minute 06 Litres Ref 04",
+   467→    description: "Cocotte-Minute NARDI – Qualité Italienne 🇮🇹\n\nDécouvrez la cocotte-minute NARDI, conçue en acier inoxydable de haute qualité pour une cuisson rapide, sûre et économique. Disponible en 6 L, 8 L, 10 L et 12 L, avec panier vapeur ou couscoussier selon le modèle. Compatible avec tous les types de feux, y compris l'induction, elle est dotée d'un système de sécurité renforcé et de poignées ergonomiques. \n\nUn choix idéal pour préparer facilement couscous, viandes, légumes, soupes et bien plus encore.\n\n✔️ Marque italienne\n✔️ Acier inoxydable de haute qualité\n✔️ 6L, 8L, 10L et 12L\n✔️ Avec panier vapeur ou couscoussier\n✔️ Compatible tous feux, y compris induction\n✔️ Garantie 12 mois",
+   468→    category: "Cuisine",
+   469→    price: 15000,
+   470→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1784034124/nouveau-bxauf-1.jpg",
+   471→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1784034124/nouveau-bxauf-1.jpg"],
+   472→    featured: true,
+   473→    inStock: true,
+   474→    isSpecialOffer: false,
+   475→    variations: [],
+   476→    variants: [],
+   477→    highlights: [],
+   478→    sortOrder: 20,
+   479→    badge: "",
+   480→    stock: null,
+   481→  },
+   482→  {
+   483→    id: "nouveau-44rrv",
+   484→    name: "Miroir Noir",
+   485→    description: "MIROIR\nÉlégance et Simplicité\n\nCe miroir allie simplicité et élégance grâce à son cadre en résine de haute qualité avec une finition noire. Son design moderne et intemporel s'intègre parfaitement à tous les styles de décoration. Idéal pour agrandir visuellement votre espace tout en apportant une touche d'élégance à votre intérieur.\n\nDimensions :\n30 × 90 cm\nCadre : Résine, finition noire\nStyle : Moderne & intemporel\n\n\nUtilisation : Chambre, entrée, salon, dressing, couloir, bureau.\n",
+   486→    category: "Miroirs",
+   487→    price: 3750,
+   488→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1784811313/nouveau-44rrv-1.jpg",
+   489→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1784811313/nouveau-44rrv-1.jpg"],
+   490→    featured: true,
+   491→    inStock: true,
+   492→    isSpecialOffer: false,
+   493→    variations: [],
+   494→    variants: [],
+   495→    highlights: [],
+   496→    sortOrder: 21,
+   497→    badge: "",
+   498→    stock: null,
+   499→  },
+   500→  {
+   501→    id: "nouveau-pmr6e",
+   502→    name: "Jarr Terracotta",
+   503→    description: "Jarre décorative en poterie – Terre cuite\n\nApportez une touche authentique et chaleureuse à votre intérieur avec cette magnifique jarre décorative en terre cuite. \n\nSon style artisanal, sa finition texturée effet vieilli et sa teinte terracotta en font une pièce de décoration idéale pour les salons, les entrées, les terrasses couvertes ou les espaces bohèmes et méditerranéens.\n\nElle est parfaite pour accueillir des fleurs séchées, des épis de blé, des pampas ou être exposée seule comme objet décoratif.\n\nCaractéristiques :\nMatière : Poterie en terre cuite\nHauteur : 50 cm\nCouleur : Terracotta effet vieilli\nStyle : Rustique, bohème, méditerranéen\nUtilisation : Décoration intérieure et extérieure abritée\nIdéale pour : Fleurs séchées, pampas, épis de blé ou décoration seule\nUne pièce élégante et intemporelle qui apportera du charme et du caractère à votre décoration.",
+   504→    category: "Décoration",
+   505→    price: 4250,
+   506→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1784803055/nouveau-pmr6e-1.jpg",
+   507→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1784803055/nouveau-pmr6e-1.jpg"],
+   508→    featured: true,
+   509→    inStock: true,
+   510→    isSpecialOffer: false,
+   511→    variations: [],
+   512→    variants: [],
+   513→    highlights: [],
+   514→    sortOrder: 22,
+   515→    badge: "",
+   516→    stock: null,
+   517→  },
+   518→  {
+   519→    id: "nouveau-lzuvt",
+   520→    name: "Vase décoratif en poterie texturée – Blanc –",
+   521→    description: "\nApportez une touche de pureté et d'élégance à votre décoration intérieure avec ce magnifique vase décoratif en poterie. Sa couleur blanche intemporelle et sa finition texturée en relief en font une pièce raffinée qui s'intègre parfaitement dans tous les styles d'intérieur.\n\nHauteur : 50 cm (sans les fleurs ni les tiges décoratives)\nMatière : Poterie de haute qualité\nCouleur : Blanc\nFinition : Effet texturé en relief\nStyle : Moderne, minimaliste et contemporain\n\nUtilisation : Idéal pour accueillir des fleurs séchées, des branches décoratives ou comme objet de décoration à lui seul.\n\nEntretien : Se nettoie facilement avec un chiffon doux et sec.\n\nAvec son design sobre et élégant, ce vase est parfait pour embellir un salon, une chambre, une entrée ou un bureau. Associé à des fleurs séchées ou des tiges décoratives, il apporte une ambiance chic, chaleureuse et harmonieuse à votre intérieur.",
+   522→    category: "Décoration",
+   523→    price: 2500,
+   524→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1784835618/nouveau-lzuvt-1.jpg",
+   525→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1784835618/nouveau-lzuvt-1.jpg"],
+   526→    featured: true,
+   527→    inStock: true,
+   528→    isSpecialOffer: false,
+   529→    variations: [],
+   530→    variants: [],
+   531→    highlights: [],
+   532→    sortOrder: 23,
+   533→    badge: "",
+   534→    stock: null,
+   535→  },
+   536→  {
+   537→    id: "nouveau-1scst",
+   538→    name: "Veilleuse cylindrique BB",
+   539→    description: "Veilleuse cylindrique en céramique Abat jour en tissu plessis lavable Model: 16c\nHauteur: 35cm ",
+   540→    category: "Lampe de chevet",
+   541→    price: 4500,
+   542→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1784483906/nouveau-1scst-1.jpg",
+   543→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1784483906/nouveau-1scst-1.jpg"],
+   544→    featured: true,
+   545→    inStock: true,
+   546→    isSpecialOffer: false,
+   547→    variations: [],
+   548→    variants: [],
+   549→    highlights: [],
+   550→    sortOrder: 24,
+   551→    badge: "",
+   552→    stock: null,
+   553→  },
+   554→  {
+   555→    id: "nouveau-jpc5h",
+   556→    name: "Veilleuse OVNI",
+   557→    description: "Veilleuse décorative OVNI en céramique – Blanc neige – 50 cm\n\nApportez une touche de luminosité et d'élégance à votre intérieur avec cette magnifique veilleuse décorative en céramique. Son design en forme d'OVNI, sa finition blanc neige et ses accessoires dorés lui confèrent un style chic et intemporel, parfait pour sublimer tous les espaces de votre maison.\n\nCaractéristiques :\nHauteur totale : 50 cm\nMatière du pied : Céramique de haute qualité\nCouleur : Blanc neige\nDesign : Forme OVNI\nFinition : Accessoires métalliques dorés\nAbat-jour : Cylindrique\nMatière de l'abat-jour : Tissu plissé lavable\nOrigine : Produit d'importation\n\nAvec son design moderne et ses finitions soignées, cette veilleuse apporte une ambiance chaleureuse et raffinée à votre salon, votre chambre ou votre bureau. Élégante aussi bien allumée qu'éteinte, elle constitue un véritable objet de décoration qui s'harmonise parfaitement avec tous les styles d'intérieur.",
+   558→    category: "Lampe de chevet",
+   559→    price: 6200,
+   560→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1784826143/nouveau-jpc5h-1.jpg",
+   561→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1784826143/nouveau-jpc5h-1.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1784826143/nouveau-jpc5h-2.jpg"],
+   562→    featured: true,
+   563→    inStock: true,
+   564→    isSpecialOffer: false,
+   565→    variations: [],
+   566→    variants: [],
+   567→    highlights: [],
+   568→    sortOrder: 25,
+   569→    badge: "",
+   570→    stock: null,
+   571→  },
+   572→  {
+   573→    id: "nouveau-vbva0",
+   574→    name: "Veilleuse BB8",
+   575→    description: "Veilleuse de table BB8 – Petit modèle\n\nApportez une touche d'élégance et de douceur à votre intérieur avec cette magnifique veilleuse BB8 petit modèle. Elle est dotée d'un pied en céramique composé de deux sphères à la finition brillante, sublimé par des détails dorés qui lui donnent un style chic et intemporel.\n\nSon abat-jour conique en tissu plissé, de couleur blanc cassé, diffuse une lumière douce et agréable. Le tissu est lavable, ce qui facilite son entretien tout en conservant son aspect élégant.\n\nCaractéristiques :\n- Modèle : BB8 – Petit modèle\n- Hauteur 45cm \n- Pied : Double céramique de haute qualité\n- Abat-jour : Conique en tissu plissé lavable\n- Couleur de l'abat-jour : Blanc cassé\n- Finition : Dorée\n- Style : Moderne, élégant et raffiné\n\nIdéale pour : Salon, chambre à coucher, table de chevet, bureau ou espace de décoration.\n\nCette veilleuse s'intègre parfaitement à tous les styles d'intérieur et apporte une ambiance chaleureuse et raffinée à votre maison.",
+   576→    category: "Lampe de chevet",
+   577→    price: 5800,
+   578→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1784826250/nouveau-vbva0-1.jpg",
+   579→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1784826250/nouveau-vbva0-1.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1784826251/nouveau-vbva0-2.jpg"],
+   580→    featured: true,
+   581→    inStock: true,
+   582→    isSpecialOffer: false,
+   583→    variations: [],
+   584→    variants: [],
+   585→    highlights: [],
+   586→    sortOrder: 26,
+   587→    badge: "",
+   588→    stock: null,
+   589→  },
+   590→  {
+   591→    id: "nouveau-t6wy8",
+   592→    name: "Porte manteaux (Rose)",
+   593→    description: "Matière bois rouge de très bonne qualité \nDimensions 52*11cm \nCouleur : Blanc Rose ",
+   594→    category: "Meubes",
+   595→    price: 2200,
+   596→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1783103521/nouveau-t6wy8-1.jpg",
+   597→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1783103521/nouveau-t6wy8-1.jpg"],
+   598→    featured: false,
+   599→    inStock: true,
+   600→    isSpecialOffer: false,
+   601→    variations: [],
+   602→    variants: [],
+   603→    highlights: [],
+   604→    sortOrder: 27,
+   605→    badge: "",
+   606→    stock: null,
+   607→  },
+   608→  {
+   609→    id: "nouveau-c3bjf",
+   610→    name: "Meuble de salle de bain et cuisine en bois – Élégance & praticité",
+   611→    description: "\nApportez une touche chaleureuse et naturelle à votre salle de bain avec ce magnifique meuble de rangement au design moderne et épuré. Conçu pour allier esthétique et fonctionnalité, il offre une grande capacité de rangement tout en sublimant votre espace.\n\nCaractéristiques :\n\n📏 Dimensions : 110 × 110 cm (hauteur × largeur)\n\n🌳 Structure et portes : Bois de hêtre robuste et résistant\n\n🪵 Étagères : MDF de très haute qualité, solide et durable\n\n🚪 2 portes pour un rangement discret et organisé\n\n🧺 2 paniers de rangement en tissu inclus\n\n📚 Étagères ouvertes pour un rangement pratique\n\n🎨 Style : Scandinave, moderne et naturel\n\n🏡 Idéal pour : Salle de bain, buanderie ou espace de rangement.\n\n🚚 Livraison disponible dans les 58 wilayas.\n\n✨ SOUM DÉCO – L'élégance au cœur de votre maison.",
+   612→    category: "Meubes",
+   613→    price: 17250,
+   614→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1784832581/nouveau-c3bjf-1.jpg",
+   615→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1784832581/nouveau-c3bjf-1.jpg", "https://res.cloudinary.com/anhvhy4j/image/upload/v1784832581/nouveau-c3bjf-2.jpg"],
+   616→    featured: true,
+   617→    inStock: true,
+   618→    isSpecialOffer: false,
+   619→    variations: [],
+   620→    variants: [],
+   621→    highlights: [],
+   622→    sortOrder: 28,
+   623→    badge: "",
+   624→    stock: null,
+   625→  },
+   626→  {
+   627→    id: "nouveau-nbcsa",
+   628→    name: "Meuble de rangements Ref01",
+   629→    description: "Meuble de rangements de trois étages \nMatière : Mdf \nHauteur : 1m03cm \nLargeur: 35cm \nProfondeur: 35 \nPoids: 22 kilos \nÉtagères: 31*30*30cm ",
+   630→    category: "Meubes",
+   631→    price: 15500,
+   632→    image: "https://res.cloudinary.com/anhvhy4j/image/upload/v1784832741/nouveau-nbcsa-1.jpg",
+   633→    images: ["https://res.cloudinary.com/anhvhy4j/image/upload/v1784832741/nouveau-nbcsa-1.jpg"],
+   634→    featured: true,
+   635→    inStock: true,
+   636→    isSpecialOffer: false,
+   637→    variations: [],
+   638→    variants: [],
+   639→    highlights: [],
+   640→    sortOrder: 29,
+   641→    badge: "",
+   642→    stock: null,
+   643→  },
+   644→];
+   645→
+   646→export function formatPrice(price: number | null): string {
+   647→  if (price === null || price === undefined) return "السعر عند الطلب";
+   648→  // Guard against NaN (from Number("abc") or malformed sheet data)
+   649→  if (typeof price !== "number" || isNaN(price)) return "السعر عند الطلب";
+   650→  return `${price.toLocaleString("fr-FR")} دج`;
+   651→}
+   652→
+   653→/**
+   654→ * Get all images for a product (always returns at least one entry,
+   655→ * or an empty array if the product has no image at all).
+   656→ */
+   657→export function getProductImages(p: Product): string[] {
+   658→  if (Array.isArray(p.images) && p.images.length > 0) {
+   659→    return p.images.filter((i) => i && i.trim() !== "");
+   660→  }
+   661→  if (p.image && p.image.trim() !== "") return [p.image];
+   662→  return [];
+   663→}
+   664→
+   665→/**
+   666→ * Split the `images` string from the sheet into an array of image URLs.
+   667→ * Handles triple-tilde (new), triple-pipe (legacy), and comma-separated formats.
+   668→ */
+   669→function splitImageStrings(s: string): string[] {
+   670→  if (!s) return [];
+   671→  const trimmed = s.trim();
+   672→  if (!trimmed) return [];
+   673→
+   674→  if (trimmed.includes("~~~")) {
+   675→    return trimmed.split("~~~").map((x) => x.trim()).filter((x) => x !== "");
+   676→  }
+   677→  if (trimmed.includes("|||")) {
+   678→    return trimmed.split("|||").map((x) => x.trim()).filter((x) => x !== "");
+   679→  }
+   680→  if (trimmed.includes("|")) {
+   681→    return trimmed.split("|").map((x) => x.trim()).filter((x) => x !== "");
+   682→  }
+   683→  if (trimmed.includes("data:")) {
+   684→    return trimmed.split(/,(?=data:)/).map((x) => x.trim()).filter((x) => x !== "");
+   685→  }
+   686→  if (trimmed.includes(",")) {
+   687→    return trimmed.split(",").map((x) => x.trim()).filter((x) => x !== "");
+   688→  }
+   689→  return [trimmed];
+   690→}
+   691→
+   692→/**
+   693→ * Join an array of image URLs into a single string for sheet storage.
+   694→ * Uses ~~~ (triple tilde) — safe in base64 content and URLs.
+   695→ */
+   696→export function joinImageStrings(images: string[]): string {
+   697→  return images.filter((s) => s && s.trim() !== "").join("~~~");
+   698→}
+   699→
+   700→/** Parse the variations string from the sheet into an array of Variation objects. */
+   701→export function parseVariations(s: string | undefined | null): Variation[] {
+   702→  if (!s || typeof s !== "string") return [];
+   703→  const trimmed = s.trim();
+   704→  if (!trimmed) return [];
+   705→  try {
+   706→    const parts = trimmed.split(VARIATIONS_SEPARATOR).map((x) => x.trim()).filter(Boolean);
+   707→    const out: Variation[] = [];
+   708→    for (const part of parts) {
+   709→      const [name, optsStr] = part.split(VARIATION_NAME_SEP);
+   710→      if (!name || !optsStr) continue;
+   711→      const options = optsStr.split(VARIATION_OPT_SEP).map((o) => o.trim()).filter(Boolean);
+   712→      if (options.length > 0) out.push({ name: name.trim(), options });
+   713→    }
+   714→    return out;
+   715→  } catch {
+   716→    return [];
+   717→  }
+   718→}
+   719→
+   720→/** Join an array of Variation objects into a single string for sheet storage. */
+   721→export function joinVariations(vars: Variation[] | undefined | null): string {
+   722→  if (!Array.isArray(vars) || vars.length === 0) return "";
+   723→  return vars
+   724→    .filter((v) => v && v.name && Array.isArray(v.options) && v.options.length > 0)
+   725→    .map((v) => `${v.name}${VARIATION_NAME_SEP}${v.options.join(VARIATION_OPT_SEP)}`)
+   726→    .join(VARIATIONS_SEPARATOR);
+   727→}
+   728→
+   729→/** Parse the `variants` string from the sheet into a `ProductVariant[]`.
+   730→ * Format: `type:name:priceAdjustment,type:name:priceAdjustment` (comma-separated).
+   731→ * The priceAdjustment is optional (defaults to 0). Type must be "color" or "size".
+   732→ * Names containing commas are NOT supported (would need a different separator). */
+   733→export function parseVariants(s: string | undefined | null): ProductVariant[] {
+   734→  if (!s || typeof s !== "string") return [];
+   735→  const trimmed = s.trim();
+   736→  if (!trimmed) return [];
+   737→  const out: ProductVariant[] = [];
+   738→  for (const part of trimmed.split(VARIANT_SEP)) {
+   739→    const clean = part.trim();
+   740→    if (!clean) continue;
+   741→    // Split from the LEFT into at most 3 parts: type, name, priceAdjustment.
+   742→    // Names CAN contain colons (rare but possible); the priceAdjustment is the
+   743→    // LAST segment.
+   744→    const firstColon = clean.indexOf(":");
+   745→    if (firstColon < 0) continue;
+   746→    const type = clean.slice(0, firstColon).trim();
+   747→    if (!type) continue; // accept any non-empty type (color, size, or custom)
+   748→    const rest = clean.slice(firstColon + 1);
+   749→    const lastColon = rest.lastIndexOf(":");
+   750→    let name: string;
+   751→    let adjustment = 0;
+   752→    if (lastColon < 0) {
+   753→      name = rest.trim();
+   754→    } else {
+   755→      const maybeNum = Number(rest.slice(lastColon + 1));
+   756→      if (isNaN(maybeNum)) {
+   757→        name = rest.trim();
+   758→      } else {
+   759→        name = rest.slice(0, lastColon).trim();
+   760→        adjustment = maybeNum;
+   761→      }
+   762→    }
+   763→    if (!name) continue;
+   764→    out.push({
+   765→      type: type as "color" | "size",
+   766→      name,
+   767→      priceAdjustment: adjustment,
+   768→    });
+   769→  }
+   770→  return out;
+   771→}
+   772→
+   773→/** Join a `ProductVariant[]` into a single string for sheet storage. */
+   774→export function joinVariants(variants: ProductVariant[] | undefined | null): string {
+   775→  if (!Array.isArray(variants) || variants.length === 0) return "";
+   776→  return variants
+   777→    .filter((v) => v && v.type && v.name)
+   778→    .map((v) => `${v.type}:${v.name}:${Number(v.priceAdjustment ?? 0)}`)
+   779→    .join(VARIANT_SEP);
+   780→}
+   781→
+   782→/** Normalize a raw variants value (array from localStorage / sheet JSON or
+   783→ * encoded string) into a clean `ProductVariant[]`. */
+   784→export function normalizeVariants(raw: unknown): ProductVariant[] {
+   785→  if (Array.isArray(raw)) {
+   786→    return (raw as any[])
+   787→      .filter((v) => v && typeof v === "object" && v.name)
+   788→      .map((v) => {
+   789→        // Preserve any type string (color, size, or custom like "weight")
+   790→        const type = String(v.type || "custom");
+   791→        const adj =
+   792→          v.priceAdjustment == null
+   793→            ? undefined
+   794→            : Number(v.priceAdjustment);
+   795→        return {
+   796→          type,
+   797→          name: String(v.name),
+   798→          priceAdjustment: typeof adj === "number" && !isNaN(adj) ? adj : undefined,
+   799→        };
+   800→      })
+   801→      .filter((v) => v.name.trim() !== "");
+   802→  }
+   803→  if (typeof raw === "string") {
+   804→    return parseVariants(raw);
+   805→  }
+   806→  return [];
+   807→}
+   808→
+   809→/** Parse the highlights string from the sheet (newline-separated). */
+   810→export function parseHighlights(s: string | undefined | null): string[] {
+   811→  if (!s || typeof s !== "string") return [];
+   812→  return s
+   813→    .split(/\r?\n/)
+   814→    .map((x) => x.trim())
+   815→    .filter(Boolean);
+   816→}
+   817→
+   818→/** Join an array of highlight strings into a single string for sheet storage. */
+   819→export function joinHighlights(items: string[] | undefined | null): string {
+   820→  if (!Array.isArray(items) || items.length === 0) return "";
+   821→  return items.filter((x) => x && x.trim()).join("\n");
+   822→}
+   823→
+   824→/** Parse the quantityTiers string from the sheet into an array of QuantityTier objects.
+   825→ * New format with mode: "2:both:0:min,3:desk:500:exact" (qty:freeShipping:discountAmount:mode)
+   826→ * New format without mode: "2:both:200,3:desk:0" (mode defaults to "exact")
+   827→ * Legacy format (still supported for back-compat with existing sheet rows):
+   828→ *   "2:free_both:0,3:discount:200" (qty:benefit:discountAmount) */
+   829→export function parseQuantityTiers(s: string | undefined | null): QuantityTier[] {
+   830→  if (!s || typeof s !== "string") return [];
+   831→  const trimmed = s.trim();
+   832→  if (!trimmed) return [];
+   833→  const parts = trimmed.split(",").map((x) => x.trim()).filter(Boolean);
+   834→  const out: QuantityTier[] = [];
+   835→  const newShippingTokens: QuantityTier["freeShipping"][] = ["none", "desk", "home", "both"];
+   836→  const legacyBenefits: LegacyTierBenefit[] = ["free_desk", "free_home", "free_both", "discount"];
+   837→  const modeTokens: QuantityTier["mode"][] = ["exact", "min"];
+   838→  for (const part of parts) {
+   839→    const [qtyStr, middle, discountStr, modeStr] = part.split(":");
+   840→    const qty = Number(qtyStr);
+   841→    if (isNaN(qty) || qty < 1) continue;
+   842→    const discount = Number(discountStr) || 0;
+   843→    const mode: QuantityTier["mode"] =
+   844→      modeStr === "min" ? "min" : modeStr === "exact" ? "exact" : "exact";
+   845→    if (newShippingTokens.includes(middle as QuantityTier["freeShipping"])) {
+   846→      out.push({
+   847→        qty,
+   848→        mode,
+   849→        freeShipping: middle as QuantityTier["freeShipping"],
+   850→        discountAmount: discount > 0 ? discount : undefined,
+   851→      });
+   852→    } else if (legacyBenefits.includes(middle as LegacyTierBenefit)) {
+   853→      const migrated = migrateLegacyBenefit(middle as LegacyTierBenefit, discount > 0 ? discount : undefined);
+   854→      out.push({
+   855→        qty,
+   856→        mode,
+   857→        freeShipping: migrated.freeShipping,
+   858→        discountAmount: migrated.discountAmount,
+   859→      });
+   860→    } else {
+   861→      // Unknown token — default to no benefit so the tier is still preserved.
+   862→      out.push({
+   863→        qty,
+   864→        mode,
+   865→        freeShipping: "none",
+   866→        discountAmount: discount > 0 ? discount : undefined,
+   867→      });
+   868→    }
+   869→  }
+   870→  return out;
+   871→}
+   872→
+   873→/** Normalize a raw quantityTiers value (from localStorage, sheet JSON, or the API)
+   874→ * into the new QuantityTier shape. Handles:
+   875→ *  - arrays already in the new format ({qty, freeShipping, discountAmount?, mode?})
+   876→ *  - arrays in the legacy format ({qty, benefit, discountAmount?}) → migrate
+   877→ *  - string in new or legacy sheet format → parseQuantityTiers
+   878→ */
+   879→export function normalizeTiers(raw: unknown): QuantityTier[] {
+   880→  if (Array.isArray(raw)) {
+   881→    const newShippingTokens: QuantityTier["freeShipping"][] = ["none", "desk", "home", "both"];
+   882→    const legacyBenefits: LegacyTierBenefit[] = ["free_desk", "free_home", "free_both", "discount"];
+   883→    return (raw as any[])
+   884→      .filter((t) => t && typeof t.qty === "number")
+   885→      .map((t) => {
+   886→        const qty = Number(t.qty);
+   887→        const discount = t.discountAmount == null ? undefined : Number(t.discountAmount);
+   888→        const mode: QuantityTier["mode"] =
+   889→          t.mode === "min" ? "min" : t.mode === "exact" ? "exact" : "exact";
+   890→        if (typeof t.freeShipping === "string" && newShippingTokens.includes(t.freeShipping)) {
+   891→          return { qty, mode, freeShipping: t.freeShipping, discountAmount: discount } as QuantityTier;
+   892→        }
+   893→        if (typeof t.benefit === "string" && legacyBenefits.includes(t.benefit)) {
+   894→          const migrated = migrateLegacyBenefit(t.benefit as LegacyTierBenefit, discount);
+   895→          return { qty, mode, ...migrated } as QuantityTier;
+   896→        }
+   897→        // Unknown shape — preserve qty + discount, no shipping benefit.
+   898→        return { qty, mode, freeShipping: "none" as const, discountAmount: discount } as QuantityTier;
+   899→      });
+   900→  }
+   901→  if (typeof raw === "string" && raw.trim()) {
+   902→    return parseQuantityTiers(raw);
+   903→  }
+   904→  return [];
+   905→}
+   906→
+   907→export function loadCatalog(): Product[] {
+   908→  if (typeof window === "undefined") return [];
+   909→  try {
+   910→    const raw = window.localStorage.getItem(CATALOG_STORAGE_KEY);
+   911→    if (!raw) return [];
+   912→    const parsed = JSON.parse(raw);
+   913→    if (!Array.isArray(parsed)) return [];
+   914→    const products = parsed.map(normalizeProduct).filter(Boolean) as Product[];
+   915→    const seen = new Set<string>();
+   916→    return products.filter((p) => {
+   917→      if (seen.has(p.id)) return false;
+   918→      seen.add(p.id);
+   919→      return true;
+   920→    });
+   921→  } catch {
+   922→    return [];
+   923→  }
+   924→}
+   925→
+   926→/**
+   927→ * Async catalog loader — checks localStorage first, then IndexedDB.
+   928→ * Use this for initial load (handles large catalogs that overflow localStorage).
+   929→ * The sync loadCatalog() is kept for backward compat (admin operations).
+   930→ */
+   931→export async function loadCatalogAsync(): Promise<Product[]> {
+   932→  if (typeof window === "undefined") return [];
+   933→  // Import dynamically to avoid circular dependency issues
+   934→  const { adaptiveGet } = await import("./adaptive-storage");
+   935→  try {
+   936→    const raw = await adaptiveGet(CATALOG_STORAGE_KEY);
+   937→    if (!raw) return [];
+   938→    const parsed = JSON.parse(raw);
+   939→    if (!Array.isArray(parsed)) return [];
+   940→    const products = parsed.map(normalizeProduct).filter(Boolean) as Product[];
+   941→    const seen = new Set<string>();
+   942→    return products.filter((p) => {
+   943→      if (seen.has(p.id)) return false;
+   944→      seen.add(p.id);
+   945→      return true;
+   946→    });
+   947→  } catch {
+   948→    return [];
+   949→  }
+   950→}
+   951→
+   952→function normalizeProduct(p: any): Product | null {
+   953→  if (!p || typeof p !== "object") return null;
+   954→  const toStr = (v: any): string => {
+   955→    if (v == null) return "";
+   956→    if (typeof v === "string") return v;
+   957→    if (typeof v === "object" && "fr" in v) return String(v.fr ?? "");
+   958→    if (typeof v === "object" && "ar" in v) return String(v.ar ?? "");
+   959→    return String(v);
+   960→  };
+   961→  const image = toStr(p.image);
+   962→  let images: string[] = [];
+   963→  if (Array.isArray(p.images)) {
+   964→    images = p.images.map(toStr).filter((s) => s.trim() !== "");
+   965→  } else if (typeof p.images === "string" && p.images.trim() !== "") {
+   966→    images = splitImageStrings(p.images);
+   967→  }
+   968→  images = Array.from(new Set(images));
+   969→  if (image && images[0] !== image) {
+   970→    images = [image, ...images.filter((i) => i !== image)];
+   971→  }
+   972→
+   973→  let variations: Variation[] = [];
+   974→  if (Array.isArray(p.variations)) {
+   975→    variations = p.variations
+   976→      .filter((v: any) => v && typeof v === "object" && v.name)
+   977→      .map((v: any) => ({
+   978→        name: String(v.name),
+   979→        options: Array.isArray(v.options)
+   980→          ? v.options.map((o: any) => String(o)).filter(Boolean)
+   981→          : [],
+   982→      }))
+   983→      .filter((v: Variation) => v.options.length > 0);
+   984→  } else if (typeof p.variations === "string" && p.variations.trim()) {
+   985→    variations = parseVariations(p.variations);
+   986→  }
+   987→
+   988→  const variants = normalizeVariants(p.variants);
+   989→
+   990→  let highlights: string[] = [];
+   991→  if (Array.isArray(p.highlights)) {
+   992→    highlights = p.highlights.map((h: any) => String(h)).filter((h) => h.trim() !== "");
+   993→  } else if (typeof p.highlights === "string" && p.highlights.trim()) {
+   994→    highlights = parseHighlights(p.highlights);
+   995→  }
+   996→
+   997→  return {
+   998→    id: String(p.id ?? ""),
+   999→    name: toStr(p.name),
+  1000→    description: toStr(p.description ?? ""),
+  1001→    category: toStr(p.category),
+  1002→    price: (() => {
+  1003→      if (p.price === null || p.price === undefined) return null;
+  1004→      if (typeof p.price === "object" && p.price !== null) return null;
+  1005→      const n = Number(p.price);
+  1006→      // P0 FIX #4: Guard against NaN — treat as null (price-on-request)
+  1007→      return isNaN(n) ? null : n;
+  1008→    })(),
+  1009→    oldPrice: (() => {
+  1010→      if (p.oldPrice === null || p.oldPrice === undefined || p.oldPrice === "") return null;
+  1011→      if (typeof p.oldPrice === "object" && p.oldPrice !== null) return null;
+  1012→      const n = Number(p.oldPrice);
+  1013→      // P0 FIX #4: Guard against NaN
+  1014→      return isNaN(n) ? null : n;
+  1015→    })(),
+  1016→    image,
+  1017→    images,
+  1018→    variations,
+  1019→    variants,
+  1020→    stock: (() => {
+  1021→      if (p.stock === null || p.stock === undefined || p.stock === "") return null;
+  1022→      if (typeof p.stock === "object" && p.stock !== null) return null;
+  1023→      const n = Number(p.stock);
+  1024→      // P0 FIX #4: Guard against NaN
+  1025→      return isNaN(n) ? null : n;
+  1026→    })(),
+  1027→    highlights,
+  1028→    sortOrder:
+  1029→      p.sortOrder === null || p.sortOrder === undefined
+  1030→        ? 999
+  1031→        : Number(p.sortOrder),
+  1032→    badge:
+  1033→      p.badge === null || p.badge === undefined
+  1034→        ? ""
+  1035→        : String(p.badge),
+  1036→    quantityTiers: normalizeTiers(p.quantityTiers),
+  1037→    featured: (p.featured === true ||
+  1038→               p.featured === 1 ||
+  1039→               p.featured === "1" ||
+  1040→               (typeof p.featured === "string" &&
+  1041→                p.featured.toLowerCase() === "true")),
+  1042→    inStock: p.inStock !== false, // default true unless explicitly false
+  1043→    isSpecialOffer: (p.isSpecialOffer === true ||
+  1044→                     p.isSpecialOffer === 1 ||
+  1045→                     p.isSpecialOffer === "1" ||
+  1046→                     (typeof p.isSpecialOffer === "string" &&
+  1047→                      p.isSpecialOffer.toLowerCase() === "true")),
+  1048→  };
+  1049→}
+  1050→
+  1051→export function saveCatalog(products: Product[]): boolean {
+  1052→  if (typeof window === "undefined") return false;
+  1053→  const json = JSON.stringify(products);
+  1054→  try {
+  1055→    window.localStorage.setItem(CATALOG_STORAGE_KEY, json);
+  1056→    // Verify it was actually saved (some browsers silently truncate)
+  1057→    const check = window.localStorage.getItem(CATALOG_STORAGE_KEY);
+  1058→    if (check && check.length === json.length) {
+  1059→      return true;
+  1060→    }
+  1061→    // Verification failed — clear and fall through to IndexedDB
+  1062→    window.localStorage.removeItem(CATALOG_STORAGE_KEY);
+  1063→    console.warn("[saveCatalog] localStorage write verification failed, falling back to IndexedDB");
+  1064→  } catch (e) {
+  1065→    // localStorage quota exceeded — likely a large catalog.
+  1066→    console.warn("[saveCatalog] localStorage quota exceeded, falling back to IndexedDB");
+  1067→    try {
+  1068→      window.localStorage.removeItem(CATALOG_STORAGE_KEY);
+  1069→    } catch {}
+  1070→  }
+  1071→  // Fall back to IndexedDB (async, but we can't await here).
+  1072→  // Fire-and-forget — callers that need guaranteed save should use saveCatalogAsync()
+  1073→  import("./adaptive-storage")
+  1074→    .then(({ adaptiveSet }) => adaptiveSet(CATALOG_STORAGE_KEY, json))
+  1075→    .catch(() => {});
+  1076→  return false; // localStorage failed — return false so callers know
+  1077→}
+  1078→
+  1079→/**
+  1080→ * Async catalog saver — uses adaptive storage (localStorage + IndexedDB).
+  1081→ * Use this for large catalogs that might overflow localStorage.
+  1082→ */
+  1083→export async function saveCatalogAsync(products: Product[]): Promise<boolean> {
+  1084→  if (typeof window === "undefined") return false;
+  1085→  const { adaptiveSet } = await import("./adaptive-storage");
+  1086→  return adaptiveSet(CATALOG_STORAGE_KEY, JSON.stringify(products));
+  1087→}
+  1088→
+  1089→export function resetCatalog(): Product[] {
+  1090→  if (typeof window !== "undefined") {
+  1091→    try {
+  1092→      window.localStorage.setItem(
+  1093→        CATALOG_STORAGE_KEY,
+  1094→        JSON.stringify(SEED_PRODUCTS),
+  1095→      );
+  1096→    } catch {
+  1097→      // ignore
+  1098→    }
+  1099→  }
+  1100→  return SEED_PRODUCTS;
+  1101→}
+  1102→
+  1103→export function generateId(name: string): string {
+  1104→  const slug =
+  1105→    name
+  1106→      .toLowerCase()
+  1107→      .normalize("NFD")
+  1108→      .replace(/[\u0300-\u036f]/g, "")
+  1109→      .replace(/[^a-z0-9]+/g, "-")
+  1110→      .replace(/^-+|-+$/g, "")
+  1111→      .slice(0, 40) || "product";
+  1112→  return `${slug}-${Math.random().toString(36).slice(2, 7)}`;
+  1113→}
+  1114→

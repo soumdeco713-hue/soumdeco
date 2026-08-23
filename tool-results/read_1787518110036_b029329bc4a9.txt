@@ -1,0 +1,645 @@
+     1→"use client";
+     2→
+     3→import { useEffect, useState, useMemo } from "react";
+     4→import { toast } from "sonner";
+     5→import {
+     6→  ArrowRight,
+     7→  Check,
+     8→  ShoppingBag,
+     9→  Sparkles,
+    10→  Truck,
+    11→  ShieldCheck,
+    12→  CreditCard,
+    13→} from "lucide-react";
+    14→import {
+    15→  Product,
+    16→  ProductVariant,
+    17→  QuantityTier,
+    18→  formatPrice,
+    19→  getProductImages,
+    20→} from "@/lib/products";
+    21→import { ProductImage } from "./product-image";
+    22→import { CodOrderForm, OrderItem } from "./cod-order-form";
+    23→import { BRAND } from "@/lib/brand-config";
+    24→
+    25→type ProductPageProps = {
+    26→  product: Product;
+    27→  onAddToCart: (item: {
+    28→    productId: string;
+    29→    name: string;
+    30→    price: number | null;
+    31→    image: string;
+    32→  }) => void;
+    33→  onBack: () => void;
+    34→  rupture?: boolean;
+    35→  relatedProducts?: Product[];
+    36→  onProductClick?: (product: Product) => void;
+    37→  /** Per-variant rupture check: (productName, variantName) → boolean */
+    38→  isVariantRupture?: (productName: string, variantName: string) => boolean;
+    39→};
+    40→
+    41→export function ProductPage({
+    42→  product,
+    43→  onAddToCart,
+    44→  onBack,
+    45→  rupture,
+    46→  relatedProducts = [],
+    47→  onProductClick,
+    48→  isVariantRupture: isVariantRuptureFn,
+    49→}: ProductPageProps) {
+    50→  const images = getProductImages(product);
+    51→  const [activeIdx, setActiveIdx] = useState(0);
+    52→  const [added, setAdded] = useState(false);
+    53→  const [selectedColor, setSelectedColor] = useState<string>("");
+    54→  const [selectedSize, setSelectedSize] = useState<string>("");
+    55→  const [selectedCustom, setSelectedCustom] = useState<Record<string, string>>({});
+    56→  const [selectedQty, setSelectedQty] = useState(1);
+    57→
+    58→  useEffect(() => {
+    59→    setAdded(false);
+    60→    setActiveIdx(0);
+    61→    setSelectedColor("");
+    62→    setSelectedSize("");
+    63→    setSelectedCustom({});
+    64→    setSelectedQty(1);
+    65→    window.scrollTo({ top: 0, behavior: "smooth" });
+    66→  }, [product?.id]);
+    67→
+    68→  useEffect(() => {
+    69→    const onKey = (e: KeyboardEvent) => {
+    70→      if (e.key === "Escape") onBack();
+    71→    };
+    72→    window.addEventListener("keydown", onKey);
+    73→    return () => window.removeEventListener("keydown", onKey);
+    74→  }, [onBack]);
+    75→
+    76→  const currentImage = images[activeIdx] || images[0] || "";
+    77→  const hasMultiple = images.length > 1;
+    78→
+    79→  const go = (dir: number) => {
+    80→    if (!hasMultiple) return;
+    81→    setActiveIdx((i) => (i + dir + images.length) % images.length);
+    82→  };
+    83→
+    84→  // Variants — split into colors, sizes, and custom types.
+    85→  const variants: ProductVariant[] = product.variants ?? [];
+    86→  const colorVariants = variants.filter((v) => v.type === "color");
+    87→  const sizeVariants = variants.filter((v) => v.type === "size");
+    88→  // Custom types (not color and not size) — up to 2
+    89→  const customTypes = Array.from(
+    90→    new Set(
+    91→      variants
+    92→        .map((v) => v.type)
+    93→        .filter((t) => t !== "color" && t !== "size" && t.trim() !== ""),
+    94→    ),
+    95→  );
+    96→  // Whether this product has ANY variants (used for obligatory selection check)
+    97→  const hasVariants = colorVariants.length > 0 || sizeVariants.length > 0 || customTypes.length > 0;
+    98→
+    99→  // OBLIGATORY VARIANT CHECK: compute which variants are missing selection.
+   100→  // This is used to DISABLE the add-to-cart button (not just show a toast).
+   101→  // Same importance as the name field — you can't order without it.
+   102→  const missingVariants = useMemo(() => {
+   103→    if (!hasVariants) return [];
+   104→    const missing: string[] = [];
+   105→    if (colorVariants.length > 0 && !selectedColor) missing.push("اللون");
+   106→    if (sizeVariants.length > 0 && !selectedSize) missing.push("المقاس");
+   107→    for (const ct of customTypes) {
+   108→      if (!selectedCustom[ct]) missing.push(ct);
+   109→    }
+   110→    return missing;
+   111→  }, [hasVariants, colorVariants, sizeVariants, customTypes, selectedColor, selectedSize, selectedCustom]);
+   112→
+   113→  // Whether the add-to-cart button should be disabled due to missing variants
+   114→  const variantsMissing = missingVariants.length > 0;
+   115→
+   116→  // The selected color/size objects (for their price adjustments).
+   117→  const selectedColorVariant = colorVariants.find((v) => v.name === selectedColor);
+   118→  const selectedSizeVariant = sizeVariants.find((v) => v.name === selectedSize);
+   119→
+   120→  // Custom variant selections — for price adjustments
+   121→  const selectedCustomVariants = customTypes.flatMap((ct) => {
+   122→    const sel = selectedCustom[ct];
+   123→    if (!sel) return [];
+   124→    const found = variants.find((v) => v.type === ct && v.name === sel);
+   125→    return found ? [found] : [];
+   126→  });
+   127→
+   128→  // Total price adjustment = color adj + size adj + all custom adj.
+   129→  const variantAdjustment =
+   130→    (selectedColorVariant?.priceAdjustment ?? 0) +
+   131→    (selectedSizeVariant?.priceAdjustment ?? 0) +
+   132→    selectedCustomVariants.reduce((sum, v) => sum + (v.priceAdjustment ?? 0), 0);
+   133→
+   134→  // Per-variant stock check: if the selected variant is out of stock,
+   135→  // show a message and disable add-to-cart.
+   136→  const isVariantRupture = isVariantRuptureFn ?? (() => false);
+   137→  const selectedVariantName =
+   138→    [selectedColor, selectedSize, ...customTypes.map((ct) => selectedCustom[ct])]
+   139→      .filter(Boolean)
+   140→      .join(" - ") || "";
+   141→  const isVariantOutOfStock = selectedVariantName
+   142→    ? isVariantRupture(product.name, selectedVariantName)
+   143→    : false;
+   144→
+   145→  // Adjusted unit price — null stays null (price-on-request).
+   146→  const adjustedPrice =
+   147→    product.price === null ? null : product.price + variantAdjustment;
+   148→
+   149→  // Quantity tiers — find the tier matching the currently-selected qty.
+   150→  const tiers = product.quantityTiers ?? [];
+   151→  const activeTier = useMemo(
+   152→    () => tiers.find((t) => t.qty === selectedQty) ?? null,
+   153→    [tiers, selectedQty],
+   154→  );
+   155→
+   156→  const tierBenefitText = (tier: QuantityTier): string => {
+   157→    const qtyWord = "قطعة";
+   158→    const hasFree = tier.freeShipping && tier.freeShipping !== "none";
+   159→    const discount = tier.discountAmount ?? 0;
+   160→    const hasDiscount = discount > 0;
+   161→    const shippingLabel =
+   162→      tier.freeShipping === "both"
+   163→        ? "كلاهما"
+   164→        : tier.freeShipping === "desk"
+   165→        ? "المكتب"
+   166→        : tier.freeShipping === "home"
+   167→        ? "المنزل"
+   168→        : "";
+   169→    if (hasFree && hasDiscount) {
+   170→      return `🎉 توصيل مجاني (${shippingLabel}) + خصم ${discount} دج عند شراء ${tier.qty} ${qtyWord}!`;
+   171→    }
+   172→    if (hasFree) {
+   173→      return `🎉 توصيل مجاني (${shippingLabel}) عند شراء ${tier.qty} ${qtyWord}!`;
+   174→    }
+   175→    if (hasDiscount) {
+   176→      return `🎉 خصم ${discount} دج عند شراء ${tier.qty} ${qtyWord}!`;
+   177→    }
+   178→    return "";
+   179→  };
+   180→
+   181→  const orderItems: OrderItem[] = [
+   182→    {
+   183→      name: product.name,
+   184→      price: adjustedPrice,
+   185→      quantity: selectedQty,
+   186→    },
+   187→  ];
+   188→
+   189→  const handleAdd = () => {
+   190→    if (isVariantOutOfStock) return;
+   191→    if (rupture) return;
+   192→
+   193→    // OBLIGATORY VARIANT CHECK — same priority as name field.
+   194→    // The button is ALSO disabled (see disabled prop below), so this is a
+   195→    // double safety net. If somehow the button is clicked, we block here too.
+   196→    if (variantsMissing) {
+   197→      if (missingVariants.length === 1) {
+   198→        toast.error(`الرجاء اختيار ${missingVariants[0]}`);
+   199→      } else {
+   200→        toast.error(`الرجاء اختيار: ${missingVariants.join("، ")}`);
+   201→      }
+   202→      return;
+   203→    }
+   204→
+   205→    // Build variantKey so the cart can distinguish items with different
+   206→    // color/size/custom selections (prevents merging different variants into one line item)
+   207→    const allSelections = [
+   208→      selectedColor,
+   209→      selectedSize,
+   210→      ...customTypes.map((ct) => selectedCustom[ct]),
+   211→    ].filter(Boolean);
+   212→    const variantKey = allSelections.join("_") || undefined;
+   213→    onAddToCart({
+   214→      productId: product.id,
+   215→      name: variantSummary ? `${product.name} (${variantSummary})` : product.name,
+   216→      price: adjustedPrice,
+   217→      image: currentImage,
+   218→      variantKey,
+   219→    });
+   220→    setAdded(true);
+   221→    setTimeout(() => setAdded(false), 2000);
+   222→  };
+   223→
+   224→  // Human-readable variant summary, e.g. "اللون: أحمر · المقاس: كبير · الوزن: 1كغ".
+   225→  // Empty when nothing is selected — keeps the order notes clean.
+   226→  const variantSummary = useMemo(() => {
+   227→    const parts: string[] = [];
+   228→    if (selectedColor) parts.push(`اللون: ${selectedColor}`);
+   229→    if (selectedSize) parts.push(`المقاس: ${selectedSize}`);
+   230→    for (const ct of customTypes) {
+   231→      const sel = selectedCustom[ct];
+   232→      if (sel) parts.push(`${ct}: ${sel}`);
+   233→    }
+   234→    return parts.join(" · ");
+   235→  }, [selectedColor, selectedSize, selectedCustom, customTypes]);
+   236→
+   237→  return (
+   238→    <div
+   239→      className="page-enter min-h-screen"
+   240→     
+   241→     
+   242→    >
+   243→      {/* Top bar: back button */}
+   244→      <div className="sticky top-0 z-40 border-b border-clay/30 bg-night-soft/85 backdrop-blur-sm">
+   245→        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+   246→          <button
+   247→            type="button"
+   248→            onClick={onBack}
+   249→            className="flex items-center gap-2 rounded-full border border-emerald/30 bg-night-soft/70 px-4 py-2 font-arabic text-sm font-medium text-charcoal shadow-lg backdrop-blur-sm transition-transform hover:translate-x-1 hover:bg-emerald/10 active:scale-95"
+   250→          >
+   251→            <ArrowRight className="h-4 w-4 text-emerald" />
+   252→            <span>العودة للمتجر</span>
+   253→          </button>
+   254→          <div className="flex items-center gap-2 font-arabic text-xs text-gray">
+   255→            <span>{BRAND.name}</span>
+   256→            <span className="text-emerald">/</span>
+   257→            <span className="text-charcoal">{product.category || "منتج"}</span>
+   258→          </div>
+   259→        </div>
+   260→      </div>
+   261→
+   262→      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-10">
+   263→        <div className="grid gap-8 md:grid-cols-2 md:gap-12">
+   264→          {/* ============= GALLERY COLUMN ============= */}
+   265→          <div
+   266→            className="fade-up flex flex-col gap-3"
+   267→          >
+   268→            {/* Hero image */}
+   269→            <div
+   270→              className="relative aspect-square w-full overflow-hidden rounded-3xl border border-emerald/20 bg-night-soft/60 shadow-2xl backdrop-blur-sm sm:aspect-[4/5]"
+   271→              style={{
+   272→                boxShadow:
+   273→                  "0 20px 60px -20px rgba(107, 100, 87, 0.18), 0 0 0 1px rgba(42, 125, 91, 0.18), 0 0 80px -20px rgba(42, 125, 91, 0.35)",
+   274→              }}
+   275→            >
+   276→              {currentImage ? (
+   277→                <ProductImage
+   278→                  src={currentImage}
+   279→                  alt={product.name}
+   280→                  fit="contain"
+   281→                  priority
+   282→                  size="full"
+   283→                />
+   284→              ) : (
+   285→                <div className="flex h-full w-full items-center justify-center font-arabic text-sm text-gray-light">
+   286→                  لا توجد صورة
+   287→                </div>
+   288→              )}
+   289→
+   290→              {rupture && (
+   291→                <div className="absolute inset-0 flex items-center justify-center bg-white/25 backdrop-blur-[3px]">
+   292→                  <span className="rounded-full bg-terracotta px-5 py-2 font-arabic text-sm font-semibold text-white shadow-md">
+   293→                    نفدت الكمية
+   294→                  </span>
+   295→                </div>
+   296→              )}
+   297→
+   298→              {product.category && (
+   299→                <span className="absolute right-3 top-3 rounded-full border border-emerald/40 bg-night-soft/80 px-3 py-1 font-arabic text-[11px] font-medium text-emerald backdrop-blur-sm">
+   300→                  {product.category}
+   301→                </span>
+   302→              )}
+   303→              {product.badge && (
+   304→                <span
+   305→                  className="absolute left-3 top-3 rounded-full border border-neon-magenta/60 bg-neon-magenta/20 px-3 py-1 font-arabic text-[11px] font-bold text-neon-magenta backdrop-blur-sm"
+   306→                  style={{ boxShadow: "0 0 18px rgba(194, 91, 126, 0.30)" }}
+   307→                >
+   308→                  {product.badge}
+   309→                </span>
+   310→              )}
+   311→
+   312→              {hasMultiple && (
+   313→                <div className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-night/65 px-3 py-1 font-arabic text-[11px] font-medium text-cream backdrop-blur-sm">
+   314→                  {activeIdx + 1} / {images.length}
+   315→                </div>
+   316→              )}
+   317→            </div>
+   318→
+   319→            {/* Thumbnail strip */}
+   320→            {hasMultiple && (
+   321→              <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+   322→                {images.map((img, i) => (
+   323→                  <button
+   324→                    key={i}
+   325→                    type="button"
+   326→                    onClick={() => setActiveIdx(i)}
+   327→                    aria-label={`الصورة ${i + 1}`}
+   328→                    className={`relative h-20 w-20 flex-shrink-0 overflow-hidden rounded-xl border-2 bg-night transition-all ${
+   329→                      i === activeIdx
+   330→                        ? "border-emerald shadow-[0_0_16px_rgba(42, 125, 91,0.6)]"
+   331→                        : "border-clay/40 opacity-60 hover:opacity-100"
+   332→                    }`}
+   333→                  >
+   334→                    <ProductImage
+   335→                      src={img}
+   336→                      alt={`صورة ${i + 1}`}
+   337→                      fit="cover"
+   338→                    />
+   339→                  </button>
+   340→                ))}
+   341→              </div>
+   342→            )}
+   343→
+   344→            {/* Trust badges */}
+   345→            <div className="mt-4 grid grid-cols-3 gap-2 rounded-2xl border border-clay/30 bg-night-soft/50 p-3 text-center backdrop-blur-sm">
+   346→              <div className="flex flex-col items-center gap-1.5">
+   347→                <Truck className="h-5 w-5 text-emerald" />
+   348→                <span className="font-arabic text-[11px] font-medium text-gray">توصيل 58 ولاية</span>
+   349→              </div>
+   350→              <div className="flex flex-col items-center gap-1.5 border-x border-clay/20">
+   351→                <CreditCard className="h-5 w-5 text-emerald" />
+   352→                <span className="font-arabic text-[11px] font-medium text-gray">الدفع عند الاستلام</span>
+   353→              </div>
+   354→              <div className="flex flex-col items-center gap-1.5">
+   355→                <ShieldCheck className="h-5 w-5 text-emerald" />
+   356→                <span className="font-arabic text-[11px] font-medium text-gray">منتج مضمون</span>
+   357→              </div>
+   358→            </div>
+   359→          </div>
+   360→
+   361→          {/* ============= INFO COLUMN ============= */}
+   362→          <div
+   363→            className="fade-up flex flex-col gap-5"
+   364→          >
+   365→            {product.category && (
+   366→              <div className="flex items-center gap-2 font-arabic text-xs uppercase tracking-[0.25em] text-emerald">
+   367→                <Sparkles className="h-3.5 w-3.5" />
+   368→                <span>{product.category}</span>
+   369→              </div>
+   370→            )}
+   371→
+   372→            <h1 className="font-arabic text-3xl font-bold leading-tight sm:text-5xl">
+   373→              <span className="text-blue-black-animated">{product.name}</span>
+   374→            </h1>
+   375→            {product.badge && (
+   376→              <div className="mt-2">
+   377→                <span
+   378→                  className="inline-block rounded-full border border-neon-magenta/60 bg-neon-magenta/15 px-3 py-1 font-arabic text-xs font-bold text-neon-magenta"
+   379→                  style={{ boxShadow: "0 0 12px rgba(194, 91, 126, 0.25)" }}
+   380→                >
+   381→                  ⚡ {product.badge}
+   382→                </span>
+   383→              </div>
+   384→            )}
+   385→
+   386→            <div className="flex items-baseline gap-3">
+   387→              {product.oldPrice != null && (
+   388→                <span className="font-arabic text-lg text-gray-light line-through">
+   389→                  {formatPrice(product.oldPrice)}
+   390→                </span>
+   391→              )}
+   392→              <p className="font-arabic text-4xl font-bold text-emerald neon-text-emerald">
+   393→                {formatPrice(adjustedPrice)}
+   394→              </p>
+   395→              {adjustedPrice === null && (
+   396→                <span className="font-arabic text-xs text-gray-light">
+   397→                  تواصل معنا لمعرفة السعر
+   398→                </span>
+   399→              )}
+   400→              {variantAdjustment !== 0 && adjustedPrice !== null && (
+   401→                <span className="font-arabic text-xs font-medium text-neon-magenta">
+   402→                  ({variantAdjustment > 0 ? "+" : ""}{variantAdjustment} دج)
+   403→                </span>
+   404→              )}
+   405→            </div>
+   406→
+   407→            <div className="h-px w-full bg-gradient-to-l from-transparent via-emerald/40 to-transparent" />
+   408→
+   409→            <div>
+   410→              <h2 className="mb-2 font-arabic text-sm font-semibold uppercase tracking-wide text-emerald">
+   411→                وصف المنتج
+   412→              </h2>
+   413→              <p className="font-arabic text-base leading-loose text-gray">
+   414→                {product.description}
+   415→              </p>
+   416→            </div>
+   417→
+   418→            {/* Variants — colors + sizes (replaces the old generic variations UI).
+   419→                Each button reflects the variant's price adjustment next to its name. */}
+   420→            {(colorVariants.length > 0 || sizeVariants.length > 0 || customTypes.length > 0) && (
+   421→              <div className="space-y-4">
+   422→                <h2 className="font-arabic text-sm font-semibold uppercase tracking-wide text-emerald">
+   423→                  الخيارات المتاحة <span className="text-terracotta">*</span>
+   424→                </h2>
+   425→                {colorVariants.length > 0 && (
+   426→                  <div>
+   427→                    <label className="mb-2 block font-arabic text-sm font-medium text-charcoal">
+   428→                      اللون <span className="text-terracotta">*</span>
+   429→                    </label>
+   430→                    <div className="flex flex-wrap gap-2">
+   431→                      {colorVariants.map((c) => {
+   432→                        const isSelected = selectedColor === c.name;
+   433→                        const adj = c.priceAdjustment ?? 0;
+   434→                        return (
+   435→                          <button
+   436→                            key={c.name}
+   437→                            type="button"
+   438→                            onClick={() => setSelectedColor(isSelected ? "" : c.name)}
+   439→                            className={`rounded-lg border-2 px-4 py-2 font-arabic text-sm font-medium transition-all active:scale-95 ${
+   440→                              isSelected
+   441→                                ? "border-emerald bg-emerald/15 text-emerald"
+   442→                                : "border-clay/40 bg-night-soft/60 text-charcoal hover:border-emerald/40"
+   443→                            }`}
+   444→                          >
+   445→                            {c.name}
+   446→                            {adj !== 0 && (
+   447→                              <span className="ml-1 text-[10px] text-neon-magenta">
+   448→                                ({adj > 0 ? "+" : ""}{adj} دج)
+   449→                              </span>
+   450→                            )}
+   451→                          </button>
+   452→                        );
+   453→                      })}
+   454→                    </div>
+   455→                  </div>
+   456→                )}
+   457→                {sizeVariants.length > 0 && (
+   458→                  <div>
+   459→                    <label className="mb-2 block font-arabic text-sm font-medium text-charcoal">
+   460→                      المقاس <span className="text-terracotta">*</span>
+   461→                    </label>
+   462→                    <div className="flex flex-wrap gap-2">
+   463→                      {sizeVariants.map((s) => {
+   464→                        const isSelected = selectedSize === s.name;
+   465→                        const adj = s.priceAdjustment ?? 0;
+   466→                        return (
+   467→                          <button
+   468→                            key={s.name}
+   469→                            type="button"
+   470→                            onClick={() => setSelectedSize(isSelected ? "" : s.name)}
+   471→                            className={`rounded-lg border-2 px-4 py-2 font-arabic text-sm font-medium transition-all active:scale-95 ${
+   472→                              isSelected
+   473→                                ? "border-emerald bg-emerald/15 text-emerald"
+   474→                                : "border-clay/40 bg-night-soft/60 text-charcoal hover:border-emerald/40"
+   475→                            }`}
+   476→                          >
+   477→                            {s.name}
+   478→                            {adj !== 0 && (
+   479→                              <span className="ml-1 text-[10px] text-neon-magenta">
+   480→                                ({adj > 0 ? "+" : ""}{adj} دج)
+   481→                              </span>
+   482→                            )}
+   483→                          </button>
+   484→                        );
+   485→                      })}
+   486→                    </div>
+   487→                  </div>
+   488→                )}
+   489→                {/* Custom variable dropdowns — up to 2 custom types */}
+   490→                {customTypes.map((ct) => {
+   491→                  const ctVariants = variants.filter((v) => v.type === ct);
+   492→                  if (ctVariants.length === 0) return null;
+   493→                  return (
+   494→                    <div key={ct}>
+   495→                      <label className="mb-2 block font-arabic text-sm font-medium text-charcoal">
+   496→                        {ct} <span className="text-terracotta">*</span>
+   497→                      </label>
+   498→                      <div className="flex flex-wrap gap-2">
+   499→                        {ctVariants.map((c) => {
+   500→                          const isSelected = selectedCustom[ct] === c.name;
+   501→                          const adj = c.priceAdjustment ?? 0;
+   502→                          // Check per-variant stock
+   503→                          const variantStockKey = `${product.name} - ${c.name}`;
+   504→                          const variantRupture = isVariantRupture(product.name, c.name);
+   505→                          return (
+   506→                            <button
+   507→                              key={c.name}
+   508→                              type="button"
+   509→                              onClick={() =>
+   510→                                setSelectedCustom((prev) => ({
+   511→                                  ...prev,
+   512→                                  [ct]: isSelected ? "" : c.name,
+   513→                                }))
+   514→                              }
+   515→                              disabled={variantRupture}
+   516→                              className={`rounded-lg border-2 px-4 py-2 font-arabic text-sm font-medium transition-all active:scale-95 ${
+   517→                                isSelected
+   518→                                  ? "border-emerald bg-emerald/15 text-emerald"
+   519→                                  : "border-clay/40 bg-night-soft/60 text-charcoal hover:border-emerald/40"
+   520→                              } ${variantRupture ? "opacity-40 cursor-not-allowed line-through" : ""}`}
+   521→                            >
+   522→                              {c.name}
+   523→                              {adj !== 0 && (
+   524→                                <span className="ml-1 text-[10px] text-neon-magenta">
+   525→                                  ({adj > 0 ? "+" : ""}{adj} دج)
+   526→                                </span>
+   527→                              )}
+   528→                              {variantRupture && (
+   529→                                <span className="ml-1 text-[10px] text-terracotta">
+   530→                                  (نفدت)
+   531→                                </span>
+   532→                              )}
+   533→                            </button>
+   534→                          );
+   535→                        })}
+   536→                      </div>
+   537→                    </div>
+   538→                  );
+   539→                })}
+   540→                {/* Per-variant out-of-stock message */}
+   541→                {isVariantOutOfStock && (
+   542→                  <p className="font-arabic text-sm text-terracotta">
+   543→                    هذا الخيار غير متوفر حالياً. اختر خياراً آخر.
+   544→                  </p>
+   545→                )}
+   546→              </div>
+   547→            )}
+   548→
+   549→            {/* Quantity selector — 4 buttons (1, 2, 3, 4). ALWAYS visible.
+   550→                The "✨ اخترني!" badge only appears on quantities that have a tier benefit
+   551→                (i.e. when admin has set tiers for this product). */}
+   552→            <button
+   553→              type="button"
+   554→              onClick={handleAdd}
+   555→              disabled={rupture || isVariantOutOfStock || variantsMissing}
+   556→              className={`flex w-full items-center justify-center gap-2 rounded-full px-6 py-4 font-arabic text-base font-bold transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
+   557→                added
+   558→                  ? "bg-emerald-bright text-night"
+   559→                  : "bg-emerald text-night hover:bg-emerald-bright"
+   560→              }`}
+   561→              style={{ boxShadow: added ? "0 0 30px rgba(92, 255, 217, 0.7)" : "0 0 20px rgba(42, 125, 91, 0.30)" }}
+   562→            >
+   563→              {added ? (
+   564→                <>
+   565→                  <Check className="h-5 w-5" strokeWidth={3} />
+   566→                  تمت الإضافة إلى السلة
+   567→                </>
+   568→              ) : variantsMissing ? (
+   569→                <>
+   570→                  <ShoppingBag className="h-5 w-5" />
+   571→                  اختر الخيارات أولاً
+   572→                </>
+   573→              ) : (
+   574→                <>
+   575→                  <ShoppingBag className="h-5 w-5" />
+   576→                  أضف إلى السلة
+   577→                </>
+   578→              )}
+   579→            </button>
+   580→
+   581→            <div className="flex items-center gap-3 py-2">
+   582→              <div className="h-px flex-1 bg-clay/30" />
+   583→              <span className="font-arabic text-xs text-gray-light">
+   584→                أو اطلب مباشرة عبر النموذج
+   585→              </span>
+   586→              <div className="h-px flex-1 bg-clay/30" />
+   587→            </div>
+   588→
+   589→            <CodOrderForm
+   590→              items={orderItems}
+   591→              rupture={rupture}
+   592→              onContinueShopping={onBack}
+   593→              extraNotes={variantSummary}
+   594→              quantityTiers={tiers}
+   595→              variantsMissing={variantsMissing}
+   596→              missingVariantNames={missingVariants}
+   597→            />
+   598→          </div>
+   599→        </div>
+   600→
+   601→        {/* ============= RELATED PRODUCTS ============= */}
+   602→        {relatedProducts.length > 0 && (
+   603→          <section className="mt-20 sm:mt-24">
+   604→            <div className="fade-up mb-8 text-center">
+   605→              <h2 className="font-arabic text-2xl font-bold text-charcoal sm:text-3xl">
+   606→                <span className="text-blue-black-animated">منتجات قد تعجبك</span>
+   607→              </h2>
+   608→              <div className="mx-auto mt-3 h-[2px] w-16 rounded-full" style={{
+   609→                background: "linear-gradient(90deg, transparent, #2A7D5B, transparent)",
+   610→              }} />
+   611→            </div>
+   612→            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
+   613→              {relatedProducts.slice(0, 4).map((p, i) => (
+   614→                <button
+   615→                  key={p.id}
+   616→                  type="button"
+   617→                  onClick={() => onProductClick?.(p)}
+   618→                  className="fade-up group flex flex-col overflow-hidden rounded-2xl border border-clay/40 bg-night-soft/70 text-left backdrop-blur-sm transition-transform duration-300 hover:-translate-y-1 hover:border-emerald/50 active:scale-[0.98]"
+   619→                  style={{ animationDelay: `${i * 80}ms` }}
+   620→                >
+   621→                  <div className="relative aspect-square w-full overflow-hidden bg-night">
+   622→                    <ProductImage src={p.image} alt={p.name} fit="contain" />
+   623→                  </div>
+   624→                  <div className="flex flex-1 flex-col gap-1 p-3">
+   625→                    <h3 className="line-clamp-2 font-arabic text-sm font-medium leading-snug text-charcoal">
+   626→                      {p.name}
+   627→                    </h3>
+   628→                    <p
+   629→                      className={`font-arabic text-sm font-semibold ${
+   630→                        p.price === null ? "italic text-gray-light" : "text-emerald"
+   631→                      }`}
+   632→                    >
+   633→                      {formatPrice(p.price)}
+   634→                    </p>
+   635→                  </div>
+   636→                </button>
+   637→              ))}
+   638→            </div>
+   639→          </section>
+   640→        )}
+   641→      </main>
+   642→    </div>
+   643→  );
+   644→}
+   645→

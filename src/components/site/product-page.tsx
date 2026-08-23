@@ -29,6 +29,8 @@ type ProductPageProps = {
     name: string;
     price: number | null;
     image: string;
+    /** Optional variant key — used by the cart to differentiate product variants */
+    variantKey?: string;
   }) => void;
   onBack: () => void;
   rupture?: boolean;

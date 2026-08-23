@@ -1,0 +1,793 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→import { useCallback, useEffect, useRef, useState } from "react";
+     4→     4→import {
+     5→     5→  Product,
+     6→     6→  Variation,
+     7→     7→  ProductVariant,
+     8→     8→  CATALOG_STORAGE_KEY,
+     9→     9→  saveCatalog,
+    10→    10→  saveCatalogAsync,
+    11→    11→  loadCatalog,
+    12→    12→  loadCatalogAsync,
+    13→    13→  generateId,
+    14→    14→  parseVariations,
+    15→    15→  parseHighlights,
+    16→    16→  normalizeTiers,
+    17→    17→  normalizeVariants,
+    18→    18→  SEED_PRODUCTS,
+    19→    19→} from "@/lib/products";
+    20→    20→import {
+    21→    21→  clientListProducts,
+    22→    22→  clientUpsertProduct,
+    23→    23→  clientDeleteProduct,
+    24→    24→  clientResetProducts,
+    25→    25→  clientUploadImages,
+    26→    26→} from "@/lib/client-sheet";
+    27→    27→import { getLocalPathSync, loadImageManifest } from "@/lib/image-manifest";
+    28→    28→import {
+    29→    29→  joinImageStrings,
+    30→    30→  joinVariations,
+    31→    31→  joinVariants,
+    32→    32→  joinHighlights,
+    33→    33→} from "@/lib/products";
+    34→    34→import type { SheetProduct } from "@/lib/sheet";
+    35→    35→
+    36→    36→// Polling intervals — 5 min visible, 30 min hidden.
+    37→    37→// At 50K visitors/day with avg 2.2 req/visitor = ~70K Worker requests (70% of 100K) ✅
+    38→    38→// Visitors see admin edits within 5 minutes max.
+    39→    39→const POLL_MS = 300_000; // 5 minutes when tab is visible
+    40→    40→const HIDDEN_POLL_MS = 1_800_000; // 30 minutes when tab is hidden
+    41→    41→
+    42→    42→// CRITICAL: Reverse-optimize local paths back to Cloudinary URLs.
+    43→    43→// optimizeCloudinaryUrls (for DISPLAY) rewrites Cloudinary → /images/products/
+    44→    44→// at runtime. If this local path leaks into the sheet, the image breaks (404).
+    45→    45→// This function reverses that BEFORE saving to the sheet — sheet ALWAYS gets
+    46→    46→// Cloudinary URLs. This is the bulletproof fix for image corruption.
+    47→    47→function reverseOptimizeUrl(url: string): string {
+    48→    48→  if (!url || typeof url !== "string") return url;
+    49→    49→  if (!url.startsWith("/images/products/")) return url;
+    50→    50→  const filename = url.replace("/images/products/", "");
+    51→    51→  return `https://res.cloudinary.com/anhvhy4j/image/upload/${filename}`;
+    52→    52→}
+    53→    53→
+    54→    54→export function useCatalog() {
+    55→    55→  // Initialize empty on both server and client (hydration-safe)
+    56→    56→  const [products, setProducts] = useState<Product[]>([]);
+    57→    57→  const [hydrated, setHydrated] = useState(false);
+    58→    58→  const [loading, setLoading] = useState(true);
+    59→    59→  const [syncing, setSyncing] = useState(false);
+    60→    60→  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    61→    61→  const isVisibleRef = useRef(true);
+    62→    62→  // Always-current snapshot of products — used by callbacks that need
+    63→    63→  // the latest products without re-creating the callback (e.g. addBlankProduct).
+    64→    64→  const productsRef = useRef<Product[]>([]);
+    65→    65→  useEffect(() => {
+    66→    66→    productsRef.current = products;
+    67→    67→  }, [products]);
+    68→    68→
+    69→    69→  // SMART POLLING: Track the last known version hash from the Worker.
+    70→    70→  // The browser polls /?action=version (8 bytes) instead of /?action=catalog (70KB).
+    71→    71→  // It only fetches the full catalog if the version changed.
+    72→    72→  // This saves 80% of Worker requests and KV reads.
+    73→    73→  const lastVersionRef = useRef<number>(0);
+    74→    74→
+    75→    75→  // ADMIN REVERT PROTECTION: Track the last admin operation timestamp.
+    76→    76→  // Persisted to localStorage so it survives page refresh.
+    77→    77→  // When admin does an op, we skip background polling for 10 minutes
+    78→    78→  // to prevent stale KV data from reverting the optimistic update.
+    79→    79→  const ADMIN_OP_TS_KEY = "soumdeco_last_admin_op_ts";
+    80→    80→  const lastAdminOpTsRef = useRef<number>(0);
+    81→    81→
+    82→    82→  // Restore timestamp from localStorage on mount
+    83→    83→  useEffect(() => {
+    84→    84→    try {
+    85→    85→      const saved = window.localStorage.getItem(ADMIN_OP_TS_KEY);
+    86→    86→      if (saved) {
+    87→    87→        const ts = parseInt(saved, 10);
+    88→    88→        if (!isNaN(ts) && ts > 0) {
+    89→    89→          lastAdminOpTsRef.current = ts;
+    90→    90→        }
+    91→    91→      }
+    92→    92→    } catch {}
+    93→    93→  }, []);
+    94→    94→
+    95→    95→  // Helper to update the timestamp (persists to localStorage)
+    96→    96→  const updateLastAdminOpTs = useCallback((ts: number) => {
+    97→    97→    lastAdminOpTsRef.current = ts;
+    98→    98→    try {
+    99→    99→      window.localStorage.setItem(ADMIN_OP_TS_KEY, String(ts));
+   100→   100→    } catch {}
+   101→   101→  }, []);
+   102→   102→
+   103→   103→  // Helper to trigger Worker /refresh after admin ops (updates KV for visitors)
+   104→   104→  // Does NOT overwrite admin's React state — only updates KV for other visitors.
+   105→   105→  const triggerWorkerRefresh = useCallback(async () => {
+   106→   106→    try {
+   107→   107→      const { triggerWorkerRefresh: refresh } = await import("@/lib/worker-client");
+   108→   108→      await refresh();
+   109→   109→    } catch {
+   110→   110→      // Silent — Worker cron will sync within 5 min
+   111→   111→    }
+   112→   112→  }, []);
+   113→   113→
+   114→   114→  // ---- ADAPTIVE FETCH (Worker-first, never crashes) ----
+   115→   115→  // Chain: Worker (5-min fresh) → static JSON (max 24h) → cache → seed
+   116→   116→  // Worker is OPTIONAL — if NEXT_PUBLIC_WORKER_URL is not set, it's skipped
+   117→   117→  // and we use static JSON (current behavior). This means deploying the
+   118→   118→  // worker is an OPT-IN upgrade — site works fine without it.
+   119→   119→  //
+   120→   120→  // VISITOR FLOW:
+   121→   121→  //   1. Try Worker (?action=catalog) — 5s timeout, returns products+stock
+   122→   122→  //   2. If Worker fails OR not configured → try static /data/products.json
+   123→   123→  //   3. If static also fails → use localStorage cache
+   124→   124→  //   4. If cache empty → use SEED_PRODUCTS (built-in fallback)
+   125→   125→  //
+   126→   126→  // CRITICAL: No per-visitor Apps Script calls. This ensures the site
+   127→   127→  // can handle 50K+ visits/day without hitting Apps Script's 20K/day limit.
+   128→   128→  // The Worker pulls from Apps Script via cron (288 calls/day = 1.4% quota).
+   129→   129→
+   130→   130→  const refresh = useCallback(async () => {
+   131→   131→    try {
+   132→   132→      // ════════════════════════════════════════════════════════════
+   133→   133→      //  ADMIN MODE PROTECTION — BULLETPROOF REVERT FIX
+   134→   134→      // ════════════════════════════════════════════════════════════
+   135→   135→      //  When the admin panel is open (URL hash = #admin), SKIP ALL
+   136→   136→      //  background fetching. The admin's optimistic updates are the
+   137→   137→      //  ONLY source of truth. Any background fetch could return STALE
+   138→   138→      //  data and REVERT the admin's changes.
+   139→   139→      if (typeof window !== "undefined") {
+   140→   140→        const hash = window.location.hash.toLowerCase();
+   141→   141→        if (hash === "#admin" || hash.startsWith("#admin/")) {
+   142→   142→          setLoading(false);
+   143→   143→          return;
+   144→   144→        }
+   145→   145→      }
+   146→   146→
+   147→   147→      // ADMIN GRACE PERIOD: If admin did an operation within 10 minutes,
+   148→   148→      // SKIP fetching fresh data. The admin's optimistic update is correct.
+   149→   149→      const ADMIN_GRACE_PERIOD_MS = 600_000; // 10 minutes
+   150→   150→      const timeSinceLastAdminOp = Date.now() - lastAdminOpTsRef.current;
+   151→   151→      const withinAdminGracePeriod =
+   152→   152→        lastAdminOpTsRef.current > 0 &&
+   153→   153→        timeSinceLastAdminOp < ADMIN_GRACE_PERIOD_MS;
+   154→   154→
+   155→   155→      if (withinAdminGracePeriod) {
+   156→   156→        setLoading(false);
+   157→   157→        return;
+   158→   158→      }
+   159→   159→
+   160→   160→      // 0. INSTANTLY show cached data (for returning visitors — 0ms)
+   161→   161→      const instantCached = loadCatalog();
+   162→   162→      if (instantCached.length > 0) {
+   163→   163→        let quick = instantCached.map(optimizeCloudinaryUrls).map(fixCategoryTypos);
+   164→   164→        quick.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+   165→   165→        setProducts(quick);
+   166→   166→        setLoading(false);
+   167→   167→      }
+   168→   168→
+   169→   169→      // 1. Fetch from Worker (if deployed) or static JSON (fallback)
+   170→   170→      // SMART POLLING: Check version first (8 bytes). Only fetch full catalog if changed.
+   171→   171→      let fetched: SheetProduct[] = [];
+   172→   172→      try {
+   173→   173→        const { fetchProducts, fetchWorkerVersion } = await import("@/lib/worker-client");
+   174→   174→        
+   175→   175→        // Check if catalog changed (tiny 8-byte request)
+   176→   176→        const version = await fetchWorkerVersion();
+   177→   177→        // CRITICAL BUG FIX: If version is 0, the Worker is BLOCKED (DNS/firewall).
+   178→   178→        // We must NOT skip the fetch — we need to fall through to static JSON.
+   179→   179→        // Only skip if version is > 0 AND matches lastVersionRef.
+   180→   180→        if (version > 0 && version === lastVersionRef.current) {
+   181→   181→          // Version unchanged and valid — skip full fetch, keep current data
+   182→   182→          setLoading(false);
+   183→   183→          return;
+   184→   184→        }
+   185→   185→        
+   186→   186→        // Version changed OR Worker blocked (version=0) — fetch full catalog
+   187→   187→        const result = await fetchProducts();
+   188→   188→        if (result.products.length > 0) {
+   189→   189→          fetched = result.products;
+   190→   190→          if (version > 0) {
+   191→   191→            lastVersionRef.current = version; // Update version only if valid
+   192→   192→          }
+   193→   193→        }
+   194→   194→      } catch {
+   195→   195→        // Fetch failed — will fall through to cache/seed
+   196→   196→      }
+   197→   197→
+   198→   198→      if (fetched.length > 0) {
+   199→   199→        const seen = new Set<string>();
+   200→   200→        const unique: SheetProduct[] = [];
+   201→   201→        for (const p of fetched) {
+   202→   202→          const id = String(p.id || "").trim();
+   203→   203→          if (!id || seen.has(id)) continue;
+   204→   204→          seen.add(id);
+   205→   205→          unique.push(p);
+   206→   206→        }
+   207→   207→
+   208→   208→        let next: Product[] = unique.map(normalizeProduct);
+   209→   209→        next = next.map(fixCategoryTypos);
+   210→   210→        next = next.map(optimizeCloudinaryUrls);
+   211→   211→        next.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+   212→   212→
+   213→   213→        saveCatalog(next);
+   214→   214→        saveCatalogAsync(next).catch(() => {});
+   215→   215→        setProducts(next);
+   216→   216→        setLoading(false);
+   217→   217→        return;
+   218→   218→      }
+   219→   219→
+   220→   220→      // 2. Static JSON failed — use cache, then seed
+   221→   221→      const cached = await loadCatalogAsync();
+   222→   222→      if (cached.length > 0) {
+   223→   223→        let sorted = cached.map(optimizeCloudinaryUrls).map(fixCategoryTypos);
+   224→   224→        sorted.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+   225→   225→        setProducts(sorted);
+   226→   226→        setLoading(false);
+   227→   227→        return;
+   228→   228→      }
+   229→   229→      const seeded = [...SEED_PRODUCTS].sort(
+   230→   230→        (a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999),
+   231→   231→      );
+   232→   232→      saveCatalog(seeded);
+   233→   233→      setProducts(seeded);
+   234→   234→      setLoading(false);
+   235→   235→    } catch {
+   236→   236→      // Network error — keep current state, but if empty, use cache/seed
+   237→   237→      const cachedSync = loadCatalog();
+   238→   238→      if (cachedSync.length > 0) {
+   239→   239→        const sorted = [...cachedSync].map(optimizeCloudinaryUrls).map(fixCategoryTypos);
+   240→   240→        sorted.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+   241→   241→        setProducts(sorted);
+   242→   242→      } else {
+   243→   243→        const seeded = [...SEED_PRODUCTS].sort(
+   244→   244→          (a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999),
+   245→   245→        );
+   246→   246→        saveCatalog(seeded);
+   247→   247→        setProducts(seeded);
+   248→   248→      }
+   249→   249→      setLoading(false);
+   250→   250→    }
+   251→   251→  }, []);
+   252→   252→
+   253→   253→  // Schedule the next poll based on current visibility
+   254→   254→  const scheduleNext = useCallback(() => {
+   255→   255→    if (pollRef.current) clearInterval(pollRef.current);
+   256→   256→    const delay = isVisibleRef.current ? POLL_MS : HIDDEN_POLL_MS;
+   257→   257→    pollRef.current = setInterval(refresh, delay);
+   258→   258→  }, [refresh]);
+   259→   259→
+   260→   260→  // Initial load + polling
+   261→   261→  useEffect(() => {
+   262→   262→    // First load from localStorage cache (instant sync load for fast paint).
+   263→   263→    // Then refresh from sheet (async, uses adaptive storage for large catalogs).
+   264→   264→    let cached: Product[] = loadCatalog();
+   265→   265→    if (cached.length === 0) {
+   266→   266→      // Check if this is the first visit (localStorage key was never set)
+   267→   267→      const raw = typeof window !== "undefined"
+   268→   268→        ? window.localStorage.getItem(CATALOG_STORAGE_KEY)
+   269→   269→        : null;
+   270→   270→      if (raw === null) {
+   271→   271→        cached = SEED_PRODUCTS;
+   272→   272→        saveCatalog(SEED_PRODUCTS);
+   273→   273→      }
+   274→   274→    }
+   275→   275→    // Apply URL rewriting to cached products too — the cache may have
+   276→   276→    // old Cloudinary URLs from before the local-image migration.
+   277→   277→    cached = cached.map(optimizeCloudinaryUrls);
+   278→   278→    cached = cached.map(fixCategoryTypos);
+   279→   279→    // Sort by sortOrder (lower first)
+   280→   280→    const sorted = [...cached];
+   281→   281→    sorted.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+   282→   282→    setProducts(sorted);
+   283→   283→    setHydrated(true);
+   284→   284→    // CRITICAL: Set loading=false IMMEDIATELY if we have any data.
+   285→   285→    // This prevents the "stuck at loading" issue — users see products
+   286→   286→    // right away, even if the background fetch is still in progress.
+   287→   287→    if (sorted.length > 0) {
+   288→   288→      setLoading(false);
+   289→   289→    }
+   290→   290→    // If we have cached data, delay the refresh slightly (300ms) so the
+   291→   291→    // page can paint first. This makes navigation feel instant.
+   292→   292→    // If no cached data, fetch immediately (we need it to show anything).
+   293→   293→    if (cached.length > 0) {
+   294→   294→      setTimeout(() => refresh(), 300);
+   295→   295→    } else {
+   296→   296→      refresh();
+   297→   297→    }
+   298→   298→    scheduleNext();
+   299→   299→
+   300→   300→    // Also try loading from IndexedDB (handles large catalogs that overflow
+   301→   301→    // localStorage — the sync loadCatalog() above may have missed them)
+   302→   302→    // ONLY use IndexedDB data if we DON'T have fresher data already loaded.
+   303→   303→    // The refresh() call above fetches from the sheet (source of truth) —
+   304→   304→    // if it completes before this IndexedDB check, we skip the stale data.
+   305→   305→    loadCatalogAsync().then((asyncCached) => {
+   306→   306→      // Only use IndexedDB data if:
+   307→   307→      // 1. It has more products than the sync cache (localStorage overflow case)
+   308→   308→      // 2. The sheet refresh hasn't already loaded fresher data
+   309→   309→      // We check productsRef.current (latest state) instead of the stale `cached`
+   310→   310→      const currentCount = productsRef.current.length;
+   311→   311→      if (asyncCached.length > currentCount && currentCount <= cached.length) {
+   312→   312→        let sorted = asyncCached.map(optimizeCloudinaryUrls).map(fixCategoryTypos);
+   313→   313→        sorted.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+   314→   314→        setProducts(sorted);
+   315→   315→      }
+   316→   316→    }).catch(() => {});
+   317→   317→
+   318→   318→    // Load the image manifest, then RE-APPLY optimizeCloudinaryUrls.
+   319→   319→    // On initial render, the manifest isn't loaded yet, so URLs stay as
+   320→   320→    // Cloudinary (which works but throttles under load). Once the manifest
+   321→   321→    // loads (~200ms later), we rewrite to local Paths paths (unlimited bandwidth).
+   322→   322→    loadImageManifest()
+   323→   323→      .then(() => {
+   324→   324→        const current = productsRef.current;
+   325→   325→        if (current.length > 0) {
+   326→   326→          const rewritten = current.map(optimizeCloudinaryUrls);
+   327→   327→          setProducts(rewritten);
+   328→   328→        }
+   329→   329→      })
+   330→   330→      .catch(() => {});
+   331→   331→
+   332→   332→    // Retry any failed orders from the retry queue (background, non-blocking).
+   333→   333→    // This runs on every page visit — if the previous order failed to submit,
+   334→   334→    // it gets retried here silently.
+   335→   335→    import("@/lib/failed-orders")
+   336→   336→      .then(({ retryFailedOrders }) => retryFailedOrders())
+   337→   337→      .catch(() => {});
+   338→   338→
+   339→   339→    // Pause/slow polling when tab hidden, refresh immediately when visible again
+   340→   340→    const onVisibility = () => {
+   341→   341→      const wasHidden = !isVisibleRef.current;
+   342→   342→      isVisibleRef.current = !document.hidden;
+   343→   343→      if (!document.hidden && wasHidden) refresh();
+   344→   344→      scheduleNext();
+   345→   345→    };
+   346→   346→    document.addEventListener("visibilitychange", onVisibility);
+   347→   347→
+   348→   348→    return () => {
+   349→   349→      if (pollRef.current) clearInterval(pollRef.current);
+   350→   350→      document.removeEventListener("visibilitychange", onVisibility);
+   351→   351→    };
+   352→   352→  }, [refresh, scheduleNext]);
+   353→   353→
+   354→   354→  // ---- UPSERT (admin) ----
+   355→   355→  // Uploads images to Cloudinary (client-side unsigned upload), then
+   356→   356→  // POSTs the product directly to Google Apps Script.
+   357→   357→  //
+   358→   358→  // BULLETPROOF + FAST:
+   359→   359→  //  - Images are uploaded on SELECT (in admin-panel handleFiles), so by
+   360→   360→  //    the time Save is clicked, photos are already Cloudinary URLs.
+   361→   361→  //  - clientUploadImages skips URLs (not data: URLs), so it's instant.
+   362→   362→  //  - After a successful POST, we DON'T await a full refresh — the
+   363→   363→  //    optimistic update already shows the change. A background refresh
+   364→   364→  //    is scheduled (non-blocking) to sync any sheet-side changes.
+   365→   365→  //  - On failure, rolls back the optimistic update + throws an error
+   366→   366→  //    so the admin panel can show a failure toast.
+   367→   367→  const upsertProduct = useCallback(
+   368→   368→    async (product: Product) => {
+   369→   369→      // Save the previous state for rollback
+   370→   370→      const previousProducts = productsRef.current;
+   371→   371→      // Stamp this op for admin revert protection
+   372→   372→      updateLastAdminOpTs(Date.now());
+   373→   373→
+   374→   374→      // Optimistic local update (INSTANT — UI shows the change immediately)
+   375→   375→      const idx = previousProducts.findIndex((p) => p.id === product.id);
+   376→   376→      let optimisticNext: Product[];
+   377→   377→      if (idx >= 0) {
+   378→   378→        optimisticNext = [...previousProducts];
+   379→   379→        optimisticNext[idx] = product;
+   380→   380→      } else {
+   381→   381→        optimisticNext = [product, ...previousProducts];
+   382→   382→      }
+   383→   383→      optimisticNext.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+   384→   384→      setProducts(optimisticNext);
+   385→   385→      saveCatalog(optimisticNext);
+   386→   386→
+   387→   387→      // Sync to Apps Script
+   388→   388→      setSyncing(true);
+   389→   389→      try {
+   390→   390→        // CRITICAL: Reverse-optimize local paths → Cloudinary URLs.
+   391→   391→        // Prevents image corruption (local paths leaking into sheet).
+   392→   392→        const cleanImages = Array.isArray(product.images)
+   393→   393→          ? product.images.map(reverseOptimizeUrl)
+   394→   394→          : product.images;
+   395→   395→        const cleanImage = reverseOptimizeUrl(product.image);
+   396→   396→
+   397→   397→        // 1. Upload any base64 images to Cloudinary.
+   398→   398→        //    Since images are now uploaded on SELECT (in handleFiles),
+   399→   399→        //    this is typically a no-op — the photos are already URLs.
+   400→   400→        //    This call only runs for the rare case of leftover base64 images.
+   401→   401→        const imagesToUpload = cleanImages || (cleanImage ? [cleanImage] : []);
+   402→   402→        const uploadedUrls = await clientUploadImages(imagesToUpload, product.id);
+   403→   403→        const coverImage = uploadedUrls[0] || cleanImage || "";
+   404→   404→
+   405→   405→        // 2. Build the SheetProduct payload
+   406→   406→        const sheetProduct: SheetProduct = {
+   407→   407→          id: product.id,
+   408→   408→          name: product.name,
+   409→   409→          description: product.description,
+   410→   410→          category: product.category,
+   411→   411→          price: product.price,
+   412→   412→          image: coverImage,
+   413→   413→          images: joinImageStrings(uploadedUrls),
+   414→   414→          featured: product.featured,
+   415→   415→          isSpecialOffer: product.isSpecialOffer ?? false,
+   416→   416→          variations: joinVariations(product.variations),
+   417→   417→          variants: joinVariants(product.variants),
+   418→   418→          stock: product.stock ?? null,
+   419→   419→          highlights: joinHighlights(product.highlights),
+   420→   420→          sortOrder: product.sortOrder ?? 999,
+   421→   421→          badge: product.badge || "",
+   422→   422→          oldPrice: product.oldPrice ?? null,
+   423→   423→          quantityTiers: Array.isArray(product.quantityTiers)
+   424→   424→            ? (product.quantityTiers as any[])
+   425→   425→                .filter((t) => t && typeof t.qty === "number")
+   426→   426→                .map((t) => `${t.qty}:${t.freeShipping || "none"}:${t.discountAmount || 0}:${t.mode || "exact"}`)
+   427→   427→                .join(",")
+   428→   428→            : String((product as any).quantityTiers ?? ""),
+   429→   429→        };
+   430→   430→
+   431→   431→        // 3. POST to Apps Script (the ONLY slow step — 1-3s)
+   432→   432→        const ok = await clientUpsertProduct(sheetProduct);
+   433→   433→        if (!ok) {
+   434→   434→          // ROLLBACK — the product didn't save to the sheet.
+   435→   435→          setProducts(previousProducts);
+   436→   436→          saveCatalog(previousProducts);
+   437→   437→          throw new Error("Apps Script POST failed — product not saved to sheet");
+   438→   438→        }
+   439→   439→        // 4. DO NOT await refresh() — that would re-fetch all 83 products (2-5s).
+   440→   440→        // After successful save, trigger Worker /refresh (updates KV for visitors).
+   441→   441→        // Does NOT overwrite admin's React state — only updates KV.
+   442→   442→        setTimeout(() => { triggerWorkerRefresh(); }, 100);
+   443→   443→      } catch (e) {
+   444→   444→        // If error happened AFTER the optimistic update, rollback
+   445→   445→        console.error("[upsertProduct] error:", e);
+   446→   446→        setProducts(previousProducts);
+   447→   447→        saveCatalog(previousProducts);
+   448→   448→        throw e; // re-throw so admin panel can show error toast
+   449→   449→      } finally {
+   450→   450→        setSyncing(false);
+   451→   451→      }
+   452→   452→    },
+   453→   453→    [updateLastAdminOpTs, triggerWorkerRefresh],
+   454→   454→  );
+   455→   455→
+   456→   456→  // ---- DELETE (admin) ----
+   457→   457→  // BULLETPROOF: On failure, restores the deleted product so the UI
+   458→   458→  // stays consistent with the sheet. Throws on failure.
+   459→   459→  const deleteProduct = useCallback(
+   460→   460→    async (id: string) => {
+   461→   461→      const previousProducts = productsRef.current;
+   462→   462→      const deletedProduct = previousProducts.find((p) => p.id === id);
+   463→   463→      // Stamp this op for admin revert protection
+   464→   464→      updateLastAdminOpTs(Date.now());
+   465→   465→
+   466→   466→      // Optimistic: remove from state + localStorage
+   467→   467→      const next = previousProducts.filter((p) => p.id !== id);
+   468→   468→      setProducts(next);
+   469→   469→      saveCatalog(next);
+   470→   470→
+   471→   471→      setSyncing(true);
+   472→   472→      try {
+   473→   473→        const ok = await clientDeleteProduct(id);
+   474→   474→        if (!ok) {
+   475→   475→          // ROLLBACK — restore the deleted product
+   476→   476→          if (deletedProduct) {
+   477→   477→            const restored = [...previousProducts];
+   478→   478→            restored.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+   479→   479→            setProducts(restored);
+   480→   480→            saveCatalog(restored);
+   481→   481→          }
+   482→   482→          throw new Error("Apps Script delete failed — product not removed from sheet");
+   483→   483→        }
+   484→   484→        // After successful delete, trigger Worker /refresh (updates KV for visitors).
+   485→   485→        setTimeout(() => { triggerWorkerRefresh(); }, 100);
+   486→   486→      } catch (e) {
+   487→   487→        console.error("[deleteProduct] error:", e);
+   488→   488→        // Rollback if not already done
+   489→   489→        if (deletedProduct) {
+   490→   490→          const restored = [...previousProducts];
+   491→   491→          restored.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+   492→   492→          setProducts(restored);
+   493→   493→          saveCatalog(restored);
+   494→   494→        }
+   495→   495→        throw e;
+   496→   496→      } finally {
+   497→   497→        setSyncing(false);
+   498→   498→      }
+   499→   499→    },
+   500→   500→    [updateLastAdminOpTs, triggerWorkerRefresh],
+   501→   501→  );
+   502→   502→
+   503→   503→  // ---- ADD BLANK (admin) ----
+   504→   504→  const addBlankProduct = useCallback(() => {
+   505→   505→    // New products appear at the bottom of the list by default.
+   506→   506→    const maxSort = productsRef.current.reduce(
+   507→   507→      (max, p) => Math.max(max, p.sortOrder ?? 0),
+   508→   508→      0,
+   509→   509→    );
+   510→   510→    const newProduct: Product = {
+   511→   511→      id: generateId("nouveau"),
+   512→   512→      name: "",
+   513→   513→      description: "",
+   514→   514→      category: "",
+   515→   515→      price: null,
+   516→   516→      oldPrice: null,
+   517→   517→      image: "",
+   518→   518→      images: [],
+   519→   519→      featured: false,
+   520→   520→      inStock: true,
+   521→   521→      isSpecialOffer: false,
+   522→   522→      variations: [],
+   523→   523→      variants: [],
+   524→   524→      stock: null,
+   525→   525→      highlights: [],
+   526→   526→      sortOrder: maxSort + 1,
+   527→   527→      badge: "",
+   528→   528→      quantityTiers: [],
+   529→   529→    };
+   530→   530→    return newProduct;
+   531→   531→  }, []);
+   532→   532→
+   533→   533→  // ---- REORDER (admin) ----
+   534→   534→  // Move a product up (toward the front of the list) or down (toward the back).
+   535→   535→  // Swaps its sortOrder with the adjacent product, persists to localStorage,
+   536→   536→  // re-sorts the visible list immediately, and syncs both products to the sheet.
+   537→   537→  const moveProduct = useCallback(
+   538→   538→    (id: string, direction: "up" | "down") => {
+   539→   539→      let toSync: Product[] = [];
+   540→   540→      setProducts((prev) => {
+   541→   541→        if (prev.length < 2) return prev;
+   542→   542→        // Ensure sorted by sortOrder before swap
+   543→   543→        const sorted = [...prev].sort(
+   544→   544→          (a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999),
+   545→   545→        );
+   546→   546→        const idx = sorted.findIndex((p) => p.id === id);
+   547→   547→        if (idx < 0) return prev;
+   548→   548→        const swapWith = direction === "up" ? idx - 1 : idx + 1;
+   549→   549→        if (swapWith < 0 || swapWith >= sorted.length) return prev;
+   550→   550→        // Swap sortOrder values — create NEW objects (don't mutate)
+   551→   551→        const aOrder = sorted[idx].sortOrder ?? 999;
+   552→   552→        const bOrder = sorted[swapWith].sortOrder ?? 999;
+   553→   553→        const newA = { ...sorted[idx], sortOrder: bOrder };
+   554→   554→        const newB = { ...sorted[swapWith], sortOrder: aOrder };
+   555→   555→        sorted[idx] = newA;
+   556→   556→        sorted[swapWith] = newB;
+   557→   557→        // Re-sort
+   558→   558→        sorted.sort((x, y) => (x.sortOrder ?? 999) - (y.sortOrder ?? 999));
+   559→   559→        saveCatalog(sorted);
+   560→   560→        // Collect the 2 products to sync to the sheet
+   561→   561→        toSync = [newA, newB];
+   562→   562→        return sorted;
+   563→   563→      });
+   564→   564→      // Sync both swapped products directly to Apps Script (fire and forget)
+   565→   565→      if (toSync.length === 2) {
+   566→   566→        for (const p of toSync) {
+   567→   567→          // CRITICAL: Reverse-optimize local paths → Cloudinary URLs.
+   568→   568→          // Prevents image corruption in moveProduct (same bug as handleSave).
+   569→   569→          const cleanImage = reverseOptimizeUrl(p.image);
+   570→   570→          const cleanImages = Array.isArray(p.images)
+   571→   571→            ? p.images.map(reverseOptimizeUrl)
+   572→   572→            : p.images;
+   573→   573→          const sheetProduct: SheetProduct = {
+   574→   574→            id: p.id,
+   575→   575→            name: p.name,
+   576→   576→            description: p.description,
+   577→   577→            category: p.category,
+   578→   578→            price: p.price,
+   579→   579→            image: cleanImage,
+   580→   580→            images: joinImageStrings(cleanImages || []),
+   581→   581→            featured: p.featured,
+   582→   582→            isSpecialOffer: p.isSpecialOffer ?? false,
+   583→   583→            variations: joinVariations(p.variations),
+   584→   584→            variants: joinVariants(p.variants),
+   585→   585→            stock: p.stock ?? null,
+   586→   586→            highlights: joinHighlights(p.highlights),
+   587→   587→            sortOrder: p.sortOrder ?? 999,
+   588→   588→            badge: p.badge || "",
+   589→   589→            oldPrice: p.oldPrice ?? null,
+   590→   590→            quantityTiers: Array.isArray(p.quantityTiers)
+   591→   591→              ? (p.quantityTiers as any[])
+   592→   592→                  .filter((t) => t && typeof t.qty === "number")
+   593→   593→                  .map((t) => `${t.qty}:${t.freeShipping || "none"}:${t.discountAmount || 0}:${t.mode || "exact"}`)
+   594→   594→                  .join(",")
+   595→   595→              : "",
+   596→   596→          };
+   597→   597→          clientUpsertProduct(sheetProduct).catch(() => {});
+   598→   598→        }
+   599→   599→      }
+   600→   600→    },
+   601→   601→    [],
+   602→   602→  );
+   603→   603→
+   604→   604→  // ---- RESET (admin) ----
+   605→   605→  const resetCatalog = useCallback(async () => {
+   606→   606→    updateLastAdminOpTs(Date.now()); // Admin revert protection
+   607→   607→    setSyncing(true);
+   608→   608→    try {
+   609→   609→      // Reset localStorage to SEED_PRODUCTS FIRST (so the UI updates immediately)
+   610→   610→      saveCatalog(SEED_PRODUCTS);
+   611→   611→      const sorted = [...SEED_PRODUCTS].sort(
+   612→   612→        (a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999),
+   613→   613→      );
+   614→   614→      setProducts(sorted);
+   615→   615→      // Then reset the sheet directly via Apps Script
+   616→   616→      const ok = await clientResetProducts();
+   617→   617→      if (ok) {
+   618→   618→        setTimeout(() => { triggerWorkerRefresh(); }, 100);
+   619→   619→      }
+   620→   620→    } finally {
+   621→   621→      setSyncing(false);
+   622→   622→    }
+   623→   623→  }, [updateLastAdminOpTs, triggerWorkerRefresh]);
+   624→   624→
+   625→   625→  return {
+   626→   626→    products,
+   627→   627→    hydrated,
+   628→   628→    loading,
+   629→   629→    syncing,
+   630→   630→    upsertProduct,
+   631→   631→    deleteProduct,
+   632→   632→    addBlankProduct,
+   633→   633→    moveProduct,
+   634→   634→    resetCatalog,
+   635→   635→    refresh,
+   636→   636→  };
+   637→   637→}
+   638→   638→
+   639→   639→// ---------- internal ----------
+   640→   640→
+   641→   641→/**
+   642→   642→ * Fix common category name typos that exist in the Google Sheet data.
+   643→   643→ * - "Meubes" → "Meubles" (missing 'l')
+   644→   644→ * - Trim whitespace
+   645→   645→ * - Normalize case for known categories
+   646→   646→ */
+   647→   647→function fixCategoryTypos(p: Product): Product {
+   648→   648→  let cat = (p.category || "").trim();
+   649→   649→  if (cat === "Meubes") cat = "Meubles";
+   650→   650→  if (cat !== p.category) {
+   651→   651→    return { ...p, category: cat };
+   652→   652→  }
+   653→   653→  return p;
+   654→   654→}
+   655→   655→
+   656→   656→/**
+   657→   657→ * Rewrite Cloudinary URLs to LOCAL Cloudflare Pages paths.
+   658→   658→ *
+   659→   659→ * WHY: Cloudinary throttles when 80+ images load simultaneously (causing
+   660→   660→ * the "images don't show" bug). Cloudflare Pages has unlimited bandwidth
+   661→   661→ * AND unlimited requests — zero throttling.
+   662→   662→ *
+   663→   663→ * HOW: The image manifest (/public/image-manifest.json) lists all local
+   664→   664→ * files. We check if a Cloudinary URL's filename is in the manifest.
+   665→   665→ * If yes → rewrite to /images/products/{filename} (served from Pages).
+   666→   666→ * If no  → keep Cloudinary URL (image not yet synced, Cloudinary fallback).
+   667→   667→ *
+   668→   668→ * NEW uploads: Go to Cloudinary first (instant display). After the daily
+   669→   669→ * sync runs (GitHub Actions), they're downloaded to /public/images/products/
+   670→   670→ * and the manifest is rebuilt. On next deploy, they're served from Pages.
+   671→   671→ *
+   672→   672→ * This is the BULLETPROOF strategy:
+   673→   673→ *  - All existing images: served from Pages (unlimited, no throttling)
+   674→   674→ *  - New uploads: served from Cloudinary (instant, until next sync)
+   675→   675→ *  - Cloudinary bandwidth: near zero (only new uploads use it)
+   676→   676→ *  - Pages bandwidth: unlimited (handles 800K visits/month)
+   677→   677→ */
+   678→   678→function optimizeCloudinaryUrls(p: Product): Product {
+   679→   679→  const CLOUDINARY_RE = /^https?:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/(?:[^/]+\/)?(?:v\d+\/)?(.+)$/;
+   680→   680→
+   681→   681→  const rewriteOne = (url: string): string => {
+   682→   682→    if (!url || typeof url !== "string") return url;
+   683→   683→    if (!url.includes("res.cloudinary.com")) return url;
+   684→   684→    const match = url.match(CLOUDINARY_RE);
+   685→   685→    if (!match) return url;
+   686→   686→
+   687→   687→    // Check if this image is in the local manifest (hot tier)
+   688→   688→    const filename = match[1];
+   689→   689→    const localPath = getLocalPathSync(url);
+   690→   690→    if (localPath) {
+   691→   691→      return localPath; // serve from Cloudflare Pages (unlimited bandwidth)
+   692→   692→    }
+   693→   693→    return url; // serve from Cloudinary (not yet synced)
+   694→   694→  };
+   695→   695→
+   696→   696→  const newImage = rewriteOne(p.image);
+   697→   697→  let newImages: string[] | undefined = p.images;
+   698→   698→  if (Array.isArray(p.images)) {
+   699→   699→    newImages = p.images.map(rewriteOne);
+   700→   700→  }
+   701→   701→
+   702→   702→  if (newImage !== p.image || newImages !== p.images) {
+   703→   703→    return { ...p, image: newImage, images: newImages };
+   704→   704→  }
+   705→   705→  return p;
+   706→   706→}
+   707→   707→
+   708→   708→function normalizeProduct(p: any): Product {
+   709→   709→  const toStr = (v: any): string => {
+   710→   710→    if (v == null) return "";
+   711→   711→    if (typeof v === "string") return v;
+   712→   712→    return String(v);
+   713→   713→  };
+   714→   714→  const image = toStr(p.image);
+   715→   715→  let images: string[] = [];
+   716→   716→  if (Array.isArray(p.images)) {
+   717→   717→    images = p.images.map(toStr).filter((s) => s.trim() !== "");
+   718→   718→  } else if (typeof p.images === "string" && p.images.trim() !== "") {
+   719→   719→    const s = p.images.trim();
+   720→   720→    if (s.includes("~~~")) {
+   721→   721→      images = s.split("~~~").map((x) => x.trim()).filter((x) => x !== "");
+   722→   722→    } else if (s.includes("|||")) {
+   723→   723→      images = s.split("|||").map((x) => x.trim()).filter((x) => x !== "");
+   724→   724→    } else if (s.includes("|")) {
+   725→   725→      images = s.split("|").map((x) => x.trim()).filter((x) => x !== "");
+   726→   726→    } else if (s.includes("data:")) {
+   727→   727→      images = s.split(/,(?=data:)/).map((x) => x.trim()).filter((x) => x !== "");
+   728→   728→    } else {
+   729→   729→      images = s.split(",").map((x) => x.trim()).filter((x) => x !== "");
+   730→   730→    }
+   731→   731→  }
+   732→   732→  images = Array.from(new Set(images));
+   733→   733→  if (image && images[0] !== image) {
+   734→   734→    images = [image, ...images.filter((i) => i !== image)];
+   735→   735→  }
+   736→   736→  return {
+   737→   737→    id: String(p.id ?? ""),
+   738→   738→    name: toStr(p.name),
+   739→   739→    description: toStr(p.description ?? ""),
+   740→   740→    category: toStr(p.category),
+   741→   741→    price:
+   742→   742→      p.price === null ||
+   743→   743→      p.price === undefined ||
+   744→   744→      p.price === "" ||
+   745→   745→      (typeof p.price === "object" && p.price !== null)
+   746→   746→        ? null
+   747→   747→        : Number(p.price),
+   748→   748→    oldPrice:
+   749→   749→      p.oldPrice === null ||
+   750→   750→      p.oldPrice === undefined ||
+   751→   751→      p.oldPrice === "" ||
+   752→   752→      (typeof p.oldPrice === "object" && p.oldPrice !== null)
+   753→   753→        ? null
+   754→   754→        : Number(p.oldPrice),
+   755→   755→    image,
+   756→   756→    images,
+   757→   757→    variations: Array.isArray(p.variations)
+   758→   758→      ? (p.variations as Variation[]).filter(
+   759→   759→          (v) => v && v.name && Array.isArray(v.options) && v.options.length > 0,
+   760→   760→        )
+   761→   761→      : parseVariations(typeof p.variations === "string" ? p.variations : ""),
+   762→   762→    variants: normalizeVariants(p.variants) as ProductVariant[],
+   763→   763→    stock:
+   764→   764→      p.stock === null ||
+   765→   765→      p.stock === undefined ||
+   766→   766→      p.stock === "" ||
+   767→   767→      (typeof p.stock === "object" && p.stock !== null)
+   768→   768→        ? null
+   769→   769→        : Number(p.stock),
+   770→   770→    highlights: Array.isArray(p.highlights)
+   771→   771→      ? (p.highlights as string[]).map((h) => String(h)).filter((h) => h.trim() !== "")
+   772→   772→      : parseHighlights(typeof p.highlights === "string" ? p.highlights : ""),
+   773→   773→    sortOrder:
+   774→   774→      p.sortOrder === null || p.sortOrder === undefined
+   775→   775→        ? 999
+   776→   776→        : Number(p.sortOrder),
+   777→   777→    badge:
+   778→   778→      p.badge === null || p.badge === undefined ? "" : String(p.badge),
+   779→   779→    quantityTiers: normalizeTiers(p.quantityTiers),
+   780→   780→    featured: (p.featured === true ||
+   781→   781→               p.featured === 1 ||
+   782→   782→               p.featured === "1" ||
+   783→   783→               (typeof p.featured === "string" &&
+   784→   784→                p.featured.toLowerCase() === "true")),
+   785→   785→    isSpecialOffer: (p.isSpecialOffer === true ||
+   786→   786→                     p.isSpecialOffer === 1 ||
+   787→   787→                     p.isSpecialOffer === "1" ||
+   788→   788→                     (typeof p.isSpecialOffer === "string" &&
+   789→   789→                      p.isSpecialOffer.toLowerCase() === "true")),
+   790→   790→    inStock: p.inStock !== false,
+   791→   791→  };
+   792→   792→}
+   793→   793→
