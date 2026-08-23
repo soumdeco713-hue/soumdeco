@@ -8,10 +8,6 @@ import {
 // Cloudflare edge runtime — must be edge for env var access + fetch
 export const runtime = "edge";
 
-// NEVER cache this response — version must be fresh on every poll
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 /**
  * GET /api/version
  *
@@ -58,22 +54,16 @@ export async function GET() {
         },
       });
     }
-
-    // Worker failed — return v:0 (signals frontend to fetch full catalog)
-    return NextResponse.json(
-      { v: 0, error: "worker_unreachable" },
-      {
-        status: 200,
-        headers: noStoreHeaders(),
-      },
-    );
-  } catch (err) {
-    return NextResponse.json(
-      { v: 0, error: "proxy_exception" },
-      {
-        status: 200,
-        headers: noStoreHeaders(),
-      },
-    );
+  } catch {
+    // Fall through to error response
   }
+
+  // Worker failed — return v:0 (signals frontend to fetch full catalog)
+  return NextResponse.json(
+    { v: 0, error: "worker_unreachable" },
+    {
+      status: 200,
+      headers: noStoreHeaders(),
+    },
+  );
 }

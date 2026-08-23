@@ -8,10 +8,6 @@ import {
 // Cloudflare edge runtime — must be edge for env var access + fetch
 export const runtime = "edge";
 
-// NEVER cache this response — visitors must see fresh data within seconds
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 /**
  * GET /api/catalog
  *
@@ -57,35 +53,22 @@ export async function GET() {
         },
       });
     }
-
-    // Worker failed — return empty catalog so client falls through to
-    // static JSON / localStorage / seed (NEVER throws).
-    return NextResponse.json(
-      {
-        products: "[]",
-        stock: "",
-        ts: Date.now(),
-        error: "worker_unreachable",
-      },
-      {
-        status: 200, // 200 so client doesn't throw — it falls through cleanly
-        headers: noStoreHeaders(),
-      },
-    );
-  } catch (err) {
-    // Total failure — return empty catalog
-    return NextResponse.json(
-      {
-        products: "[]",
-        stock: "",
-        ts: Date.now(),
-        error: "proxy_exception",
-        detail: String((err as Error)?.message || err).substring(0, 200),
-      },
-      {
-        status: 200,
-        headers: noStoreHeaders(),
-      },
-    );
+  } catch {
+    // Fall through to error response
   }
+
+  // Worker failed — return empty catalog so client falls through to
+  // static JSON / localStorage / seed (NEVER throws).
+  return NextResponse.json(
+    {
+      products: "[]",
+      stock: "",
+      ts: Date.now(),
+      error: "worker_unreachable",
+    },
+    {
+      status: 200, // 200 so client doesn't throw — it falls through cleanly
+      headers: noStoreHeaders(),
+    },
+  );
 }

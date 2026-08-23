@@ -9,10 +9,6 @@ import {
 // Cloudflare edge runtime — must be edge for env var access + fetch
 export const runtime = "edge";
 
-// NEVER cache POST responses
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 /**
  * POST /api/refresh
  *
