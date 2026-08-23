@@ -106,7 +106,7 @@ async function doFetchCatalog(): Promise<CatalogResponse> {
   // which runs on soumdeco.pages.dev (same domain as the site).
   try {
     const res = await fetchWithTimeout(
-      `/api/catalog&_t=${Date.now()}`,
+      `/api/catalog?_t=${Date.now()}`,
       { cache: "no-store" },
       3000, // 3s timeout — same domain, should be fast
     );
@@ -267,7 +267,7 @@ export function isWorkerConfigured(): boolean {
 export async function fetchWorkerVersion(): Promise<number> {
   try {
     const res = await fetchWithTimeout(
-      `/api/version&_t=${Date.now()}`,
+      `/api/version?_t=${Date.now()}`,
       { cache: "no-store" },
       3000, // 3s timeout
     );
