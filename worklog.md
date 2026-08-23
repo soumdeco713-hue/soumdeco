@@ -2743,3 +2743,108 @@ Stage Summary:
 - build-image-manifest.py: FIXED (SCRIPT_DIR/REPO_ROOT + fail-loud)
 - All previous fixes intact (admin revert, WiFi, cart, orders, Telegram)
 - Production deployment verified end-to-end
+
+---
+Task ID: CATALOG-NEVER-UPDATES-FINAL-FIX
+Agent: main
+Task: Fix "items never update" bug — admin edits don't appear for visitors
+
+Work Log:
+- Investigated user complaint: "items never appear updated in 5 minutes....they never appear at all!!! I changed a product category....and it never appeared!!"
+- Previous diagnosis ("Cloudflare edge cache") was WRONG — re-investigated from scratch.
+- Read worker-client.ts and found TWO bugs:
+  1. BUG #1 (URL malformation): Lines 109 + 270 used `&` instead of `?`:
+     `/api/catalog&_t=${Date.now()}` and `/api/version&_t=${Date.now()}`
+     → Browser treats `&_t=12345` as part of the path, NOT a query string
+     → URL becomes `/api/catalog&_t=12345` which doesn't match any route → 404
+  2. BUG #2 (MISSING ROUTES): No /api/catalog, /api/version, or /api/refresh
+     Pages Functions or Next.js API routes existed at all!
+     → Frontend was calling endpoints that simply don't exist on soumdeco.pages.dev
+     → Every catalog/version/refresh request returned 404
+     → Frontend silently fell through to /data/products.json (static, 24h stale)
+     → Admin edits reached Google Sheet ✅ but never reached visitors ❌
+
+- Verified Worker is healthy: GET https://soumdeco-data-sync.soumdeco713.workers.dev/?action=health
+  returns {ok:true, productCount:62, kvHits:1485, consecutiveFailures:0}
+- Verified Worker has fresh KV data: GET ?action=catalog returns 62 real products
+- Verified Worker version endpoint: GET ?action=version returns {v:1787515414696}
+
+- ROOT CAUSE CONFIRMED:
+  The frontend's worker-client.ts was calling /api/catalog etc. on the same domain
+  (to bypass Algerian WiFi DNS blocking of *.workers.dev). But the same-domain
+  proxy routes were NEVER CREATED. So:
+  - fetchCatalog() always fell through to static JSON (24h stale)
+  - fetchWorkerVersion() always returned 0 (treated as "Worker blocked")
+  - triggerWorkerRefresh() always failed silently (admin couldn't push to KV)
+  → Catalog NEVER updated for visitors.
+
+- FIX APPLIED:
+  1. Created src/lib/worker-server.ts — server-side config helper with hardcoded
+     Worker URL fallback (matches sheet.ts SHEET_BASE_URL pattern)
+  2. Created src/app/api/catalog/route.ts — proxies GET to Worker ?action=catalog
+     - 5s timeout, edge runtime
+     - Returns {products:"[]", stock:"", ts:now, error:"worker_unreachable"} on failure
+     - Sets Cache-Control: no-store + CDN-Cache-Control: no-store +
+       Cloudflare-CDN-Cache-Control: no-store to prevent edge caching
+  3. Created src/app/api/version/route.ts — proxies GET to Worker ?action=version
+     - 3s timeout, edge runtime
+     - Returns {v:0} on failure (signals frontend to fetch full catalog)
+     - Same no-store headers
+  4. Created src/app/api/refresh/route.ts — proxies POST to Worker /refresh
+     - 30s timeout (Apps Script sync can take a while)
+     - Adds X-Admin-Secret header SERVER-SIDE (NEVER exposed to client)
+     - Surfaces actual Worker errors (unauthorized / rate_limited / unreachable)
+     - Rate-limited is treated as success (KV was recently updated)
+  5. Fixed worker-client.ts: `&` → `?` on lines 109 + 270
+     `/api/catalog&_t=...` → `/api/catalog?_t=...`
+     `/api/version&_t=...` → `/api/version?_t=...`
+
+- VERIFIED LOCALLY (dev server on port 3001):
+  ✅ GET /api/version returns {v: 1787515414696} (real Worker version)
+  ✅ GET /api/catalog returns 62 real products with proper JSON structure
+  ✅ POST /api/refresh surfaces actual error: "unauthorized" (because local
+     admin secret doesn't match production Worker secret — but the proxy
+     correctly forwards the request)
+  ✅ Response headers verified:
+     cache-control: no-store, no-cache, must-revalidate, max-age=0
+     cdn-cache-control: no-store
+     cloudflare-cdn-cache-control: no-store
+     pragma: no-cache
+     expires: 0
+  ✅ ESLint clean (0 errors, 0 warnings)
+  ✅ TypeScript build clean (only pre-existing unrelated errors in examples/ + skills/)
+  ✅ Next.js production build clean (10.4s)
+  ✅ All 9 edge function routes registered (catalog, version, refresh new; order,
+     products, r2-image, r2-upload, stock pre-existing)
+  ✅ @cloudflare/next-on-pages build clean — generated .vercel/output/static
+     with all 9 edge function routes including /api/catalog, /api/refresh,
+     /api/version
+
+- DEPLOYMENT STATUS:
+  ⚠️ Committed locally (commit 19254f0) but NOT pushed to GitHub.
+  Reason: No GITHUB_TOKEN / CLOUDFLARE_API_TOKEN in this environment.
+  Previous deployments in earlier sessions also used git push, which
+  requires GitHub auth that's no longer available in this session.
+  → User must run: `git push origin main` from their local machine
+     to trigger Cloudflare Pages git integration build.
+  → After Cloudflare Pages rebuilds (5-10 min), the new /api/catalog,
+     /api/version, /api/refresh routes will be live on soumdeco.pages.dev.
+
+- POST-DEPLOY VERIFICATION (run after `git push` completes):
+  Visit these URLs in the browser — they should return valid JSON:
+  1. https://soumdeco.pages.dev/api/version → should return {"v":1787515414696}
+  2. https://soumdeco.pages.dev/api/catalog → should return {"products":"[{...}]"}
+  3. Test admin save → wait 5 min → visit from incognito window → see change
+
+Stage Summary:
+- ROOT CAUSE FOUND: Missing /api/catalog, /api/version, /api/refresh Pages
+  Function proxies + malformed URL (`&` instead of `?`)
+- FIX COMPLETE: 3 new files + 1 file modified, all build + lint clean
+- FIX VERIFIED LOCALLY: All endpoints work, headers prevent caching
+- DEPLOYMENT PENDING: User must push commit 19254f0 to GitHub to trigger
+  Cloudflare Pages rebuild
+- This is the FINAL fix for the "items never update" bug that has been
+  misdiagnosed repeatedly (Cloudflare edge cache, KV caching, etc.)
+- The actual problem was much simpler: the routes the frontend was
+  calling simply didn't exist on the server.
+
