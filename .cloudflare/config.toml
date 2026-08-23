@@ -3,6 +3,13 @@
 command = "npx @cloudflare/next-on-pages"
 upload_format = "service-worker"
 
+# CRITICAL: nodejs_compat_v2 is REQUIRED for Next.js API routes to work.
+# Without it, the bundle's `import "async_hooks"` (without `node:` prefix)
+# cannot be resolved → ALL /api/* routes return HTTP 500 at runtime.
+# This was the ROOT CAUSE of the "items never update" bug.
+# NOTE: Cannot use both nodejs_compat and nodejs_compat_v2 — pick one.
+compatibility_flags = ["nodejs_compat_v2"]
+
 [build.environment]
 NEXT_PUBLIC_SHEET_URL = "https://script.google.com/macros/s/AKfycbzUqywmIIQ6D4clXmnJNRFfLYJ_FhjTlXyUqGQ3GZmPxDNZUKW3QeVUY071pZwwk52X/exec"
 NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME = "anhvhy4j"
