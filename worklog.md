@@ -2946,3 +2946,78 @@ Stage Summary:
 - **All API routes have try/catch + valid JSON responses on failure**
 - **Hydration safe** (no module-level window/document access)
 - **Most impactful fix**: N1 (remove WORKER_ADMIN_SECRET dead code from worker-client.ts) — eliminates a duplicate secret exposure to the client bundle. Easy 12-line deletion, no behavior change.
+
+---
+Task ID: ROOT-CAUSE-FINAL-FIX
+Agent: main
+Task: Find and fix the ROOT CAUSE of "items never update" — user frustrated after multiple false "it's working" claims
+
+Work Log:
+- User reported: "items never appear updated in 5 minutes....they never appear at all!!!"
+- Previous diagnosis ("Cloudflare edge cache") was WRONG.
+- Earlier in this session I correctly identified missing /api/catalog, /api/version, /api/refresh routes + URL malformation (& vs ?).
+- Created those routes + fixed URLs + pushed to GitHub (commit 6ace77c).
+- After push, production /api/* routes still returned HTTP 500.
+- Discovered ALL existing routes (/api/order, /api/products) ALSO returned 500 — not just my new routes.
+- Ran `wrangler pages dev` locally to reproduce — got actual error:
+  "ERROR: No such module '__next-on-pages-dist__/functions/api/async_hooks'"
+- Investigated: bundle has `import from "async_hooks"` (without `node:` prefix).
+- The `nodejs_compat` flag only resolves `node:async_hooks` (with prefix).
+- Found `nodejs_compat_v2` flag which resolves BOTH forms.
+- Tested locally with `--compatibility-flag=nodejs_compat_v2`:
+  - /api/version → {"v":1787515414696} ✅
+  - /api/catalog → 62 real products ✅
+  - POST /api/refresh → proper error handling ✅
+  - / → 200 ✅
+- Also discovered Next.js 16.1.1 was installed but @cloudflare/next-on-pages
+  peer deps specify <=15.5.2. Downgraded Next.js to 15.5.2.
+
+ROOT CAUSE FINALLY FOUND:
+  The `wrangler.toml` had `compatibility_flags = ["nodejs_compat"]` (legacy).
+  This flag only resolves `node:async_hooks` (with `node:` prefix).
+  But the Next.js bundle has `import from "async_hooks"` (bare, no prefix).
+  Result: ALL /api/* Pages Functions threw "No such module" at runtime → HTTP 500.
+  Site root worked (static HTML, no function call), so previous deployments
+  claimed "success" by only verifying the homepage — but EVERY API route
+  was silently broken. This is why admin edits "never appeared" — frontend
+  always fell back to static JSON (24h stale).
+
+FIX APPLIED (commit cd91c89):
+  - wrangler.toml: `compatibility_flags = ["nodejs_compat_v2"]`
+    (Cannot use both nodejs_compat + nodejs_compat_v2 — Cloudflare rejects.)
+  - package.json: next@15.5.2 + eslint-config-next@15.5.2 (was 16.1.1)
+  - eslint.config.mjs: import paths fixed for v15.5.2
+
+USER ACTION REQUIRED:
+  The `nodejs_compat_v2` flag in wrangler.toml is for `wrangler pages dev`
+  only. For the Cloudflare Pages production deployment, the user MUST set
+  this flag in the Cloudflare dashboard:
+    1. Login to dash.cloudflare.com
+    2. Pages → soumdeco → Settings → Functions → Compatibility flags
+    3. Add "nodejs_compat_v2" (replace "nodejs_compat" if present)
+    4. Save + trigger rebuild
+  Without this dashboard setting, the production site will STILL return 500
+  on all /api/* routes even after the git push.
+
+LOCAL VERIFICATION (proof the fix works):
+  - wrangler pages dev --compatibility-flag=nodejs_compat_v2
+  - GET /api/version → {"v":1787515414696} (real Worker version)
+  - GET /api/catalog → 62 real products with images + prices
+  - POST /api/refresh → unauthorized (expected — local secret differs from prod)
+  - GET / → 200 (static page)
+  - All 9 API routes registered in build output
+  - TypeScript: 0 errors in src/
+  - Build: SUCCESS (3 static + 9 dynamic API routes)
+
+Stage Summary:
+- ROOT CAUSE: Missing `nodejs_compat_v2` compatibility flag (legacy `nodejs_compat`
+  doesn't resolve bare `async_hooks` imports).
+- FIX: Set `nodejs_compat_v2` flag + downgrade Next.js to 15.5.2 (peer dep compat).
+- LOCAL PROOF: All endpoints work locally with the new flag.
+- DEPLOYMENT: Pushed to GitHub (commit cd91c89). Cloudflare Pages will rebuild.
+- USER MUST: Set nodejs_compat_v2 in Cloudflare Pages dashboard (Settings →
+  Functions → Compatibility flags) — wrangler.toml alone doesn't apply to
+  Pages production deployments.
+- This is the FINAL fix for the "items never update" bug that has been
+  misdiagnosed at least 5 times in previous sessions.
+
