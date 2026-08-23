@@ -1,69 +1,49 @@
 import { NextResponse } from "next/server";
-import {
-  getServerWorkerUrl,
-  fetchWithTimeout,
-  noStoreHeaders,
-} from "@/lib/worker-server";
 
-// Cloudflare edge runtime — must be edge for env var access + fetch
+// Cloudflare edge runtime
 export const runtime = "edge";
 
 /**
- * GET /api/version
- *
- * Same-domain proxy to the standalone Worker's ?action=version endpoint.
+ * GET /api/version — Same-domain proxy to Worker ?action=version
  *
  * WHY THIS EXISTS:
- *   The frontend polls this endpoint every 5 minutes (when tab is visible)
- *   to check if the catalog changed. The response is tiny (~8 bytes: {v:1234567890}).
- *   If the version matches the last known version, the frontend SKIPS the
- *   full catalog fetch (saving ~70KB per poll = 80% quota reduction).
+ *   The frontend polls this endpoint every 5 min to check if the catalog
+ *   changed. Same-domain proxy because Algerian WiFi blocks *.workers.dev.
  *
- *   Same-domain proxy because Algerian WiFi blocks *.workers.dev DNS.
- *
- * WHAT IT DOES:
- *   - Fetches {WORKER_URL}/?action=version with a 3s timeout
- *   - Returns {v: <timestamp>} (the Worker's lastChange timestamp)
- *   - On failure, returns {v: 0} (treated as "Worker blocked — fetch full catalog")
- *
- * CACHE BUSTING:
- *   We set Cache-Control: no-store AND Cloudflare-CDN-Cache-Control: no-store
- *   to ensure Cloudflare's edge cache NEVER serves stale version numbers.
- *   The frontend also sends ?_t=${Date.now()} as a cache-buster.
+ * WHY HARDCODED URL:
+ *   Reading process.env at runtime on Cloudflare Pages edge can be flaky.
+ *   The Worker URL is public knowledge (it only reads from KV, no secrets).
+ *   Hardcoding it ensures this route NEVER 500s due to env var issues.
  */
 export async function GET() {
-  const workerUrl = getServerWorkerUrl();
+  const WORKER_URL = "https://soumdeco-data-sync.soumdeco713.workers.dev";
+
+  const noStore = {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "CDN-Cache-Control": "no-store",
+    "Cloudflare-CDN-Cache-Control": "no-store",
+    Pragma: "no-cache",
+    Expires: "0",
+  };
 
   try {
-    const res = await fetchWithTimeout(
-      `${workerUrl}/?action=version`,
-      {
-        method: "GET",
-        headers: { Accept: "application/json" },
-      },
-      3000, // 3s timeout — version endpoint is tiny and should be instant
-    );
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(`${WORKER_URL}/?action=version`, {
+      method: "GET",
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
 
-    if (res && res.ok) {
+    if (res.ok) {
       const text = await res.text();
-      return new NextResponse(text, {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          ...noStoreHeaders(),
-        },
-      });
+      return new NextResponse(text, { status: 200, headers: noStore });
     }
   } catch {
     // Fall through to error response
   }
 
   // Worker failed — return v:0 (signals frontend to fetch full catalog)
-  return NextResponse.json(
-    { v: 0, error: "worker_unreachable" },
-    {
-      status: 200,
-      headers: noStoreHeaders(),
-    },
-  );
+  return NextResponse.json({ v: 0 }, { status: 200, headers: noStore });
 }

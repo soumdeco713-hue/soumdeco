@@ -1,126 +1,100 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  getServerWorkerUrl,
-  getServerAdminSecret,
-  fetchWithTimeout,
-  noStoreHeaders,
-} from "@/lib/worker-server";
 
-// Cloudflare edge runtime — must be edge for env var access + fetch
+// Cloudflare edge runtime
 export const runtime = "edge";
 
 /**
- * POST /api/refresh
- *
- * Same-domain proxy to the standalone Worker's /refresh endpoint.
+ * POST /api/refresh — Same-domain proxy to Worker /refresh
  *
  * WHY THIS EXISTS:
- *   After admin saves a product (via the admin panel), the admin's browser
- *   calls this endpoint to force the Worker to immediately sync fresh data
- *   from Google Apps Script into KV. Without this, visitors would have to
- *   wait up to 5 minutes for the cron to fire.
- *
- *   Same-domain proxy because Algerian WiFi blocks *.workers.dev DNS.
+ *   After admin saves a product, the admin's browser calls this endpoint
+ *   to force the Worker to immediately sync fresh data from Google Apps
+ *   Script into KV. Same-domain proxy because Algerian WiFi blocks *.workers.dev.
  *
  * SECURITY:
- *   The admin secret is read from env vars SERVER-SIDE (not exposed to client).
- *   The client just calls POST /api/refresh with NO secret — the secret is
- *   added by this Pages Function when forwarding to the Worker.
- *   This means: even if someone discovers /api/refresh, they can't trigger
- *   it remotely without knowing the admin secret (which is now server-side only).
- *
- * WHAT IT DOES:
- *   - Reads WORKER_ADMIN_SECRET from env (server-side — NEVER exposed to client)
- *   - POSTs to {WORKER_URL}/refresh with X-Admin-Secret header
- *   - Returns the Worker's response verbatim
- *   - On failure, returns {ok: false, synced: false, error: "..."}
+ *   The admin secret is hardcoded here (server-side only, never exposed
+ *   to the client bundle). The frontend just calls POST /api/refresh with
+ *   NO secret — this Pages Function adds the secret when forwarding to the Worker.
  */
 export async function POST(_req: NextRequest) {
-  const workerUrl = getServerWorkerUrl();
-  const adminSecret = getServerAdminSecret();
+  const WORKER_URL = "https://soumdeco-data-sync.soumdeco713.workers.dev";
+  const ADMIN_SECRET = "dimou2411@dz"; // Must match Worker's ADMIN_SECRET
 
-  if (!adminSecret) {
-    return NextResponse.json(
-      {
-        ok: false,
-        synced: false,
-        error: "admin_secret_not_configured",
-        message:
-          "Le secret admin n'est pas configuré. Configurez NEXT_PUBLIC_WORKER_ADMIN_SECRET dans Cloudflare Pages.",
-      },
-      {
-        status: 200, // 200 so admin sees a friendly error instead of a network failure
-        headers: noStoreHeaders(),
-      },
-    );
-  }
+  const noStore = {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "CDN-Cache-Control": "no-store",
+    "Cloudflare-CDN-Cache-Control": "no-store",
+    Pragma: "no-cache",
+    Expires: "0",
+  };
 
   try {
-    const res = await fetchWithTimeout(
-      `${workerUrl}/refresh`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Admin-Secret": adminSecret,
-        },
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    const res = await fetch(`${WORKER_URL}/refresh`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Admin-Secret": ADMIN_SECRET,
       },
-      30000, // 30s timeout — Apps Script sync can take a while
-    );
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
 
-    if (res && res.ok) {
+    if (res.ok) {
       const text = await res.text();
-      return new NextResponse(text, {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          ...noStoreHeaders(),
+      return new NextResponse(text, { status: 200, headers: noStore });
+    }
+
+    // Worker responded with non-200 — surface the actual error
+    if (res.status === 401) {
+      return NextResponse.json(
+        {
+          ok: false,
+          synced: false,
+          error: "unauthorized",
+          message: "Secret admin incorrect — vérifiez la configuration.",
         },
-      });
+        { status: 200, headers: noStore },
+      );
     }
 
-    // Worker responded with non-200 (e.g. 401 unauthorized, 405 method not allowed).
-    // Surface the actual Worker error so admin can diagnose.
-    let workerError = "worker_unreachable";
-    let workerMessage = "Le Worker de synchronisation est injoignable.";
-    if (res) {
-      try {
-        const errBody = await res.json();
-        if (errBody?.error === "unauthorized") {
-          workerError = "unauthorized";
-          workerMessage =
-            "Secret admin incorrect — vérifiez NEXT_PUBLIC_WORKER_ADMIN_SECRET.";
-        } else if (errBody?.error === "rate_limited") {
-          // Rate limit is OK — KV was recently updated, so the goal is achieved.
-          return NextResponse.json(
-            {
-              ok: true,
-              synced: true,
-              message: "Synchronisation récente — données à jour.",
-            },
-            { status: 200, headers: noStoreHeaders() },
-          );
-        } else if (errBody?.error) {
-          workerError = errBody.error;
-          workerMessage = `Worker: ${errBody.error}`;
-        }
-      } catch {
-        // Body wasn't JSON — keep default message
+    // Try to parse Worker error response
+    try {
+      const errBody = await res.json();
+      if (errBody?.error === "rate_limited") {
+        // Rate limit is OK — KV was recently updated, so the goal is achieved.
+        return NextResponse.json(
+          {
+            ok: true,
+            synced: true,
+            message: "Synchronisation récente — données à jour.",
+          },
+          { status: 200, headers: noStore },
+        );
       }
+      return NextResponse.json(
+        {
+          ok: false,
+          synced: false,
+          error: errBody?.error || "worker_error",
+          message: errBody?.error || "Erreur Worker.",
+        },
+        { status: 200, headers: noStore },
+      );
+    } catch {
+      // Body wasn't JSON — return generic error
+      return NextResponse.json(
+        {
+          ok: false,
+          synced: false,
+          error: "worker_unreachable",
+          message: "Le Worker de synchronisation est injoignable.",
+        },
+        { status: 200, headers: noStore },
+      );
     }
-
-    return NextResponse.json(
-      {
-        ok: false,
-        synced: false,
-        error: workerError,
-        message: workerMessage,
-      },
-      {
-        status: 200,
-        headers: noStoreHeaders(),
-      },
-    );
   } catch (err) {
     return NextResponse.json(
       {
@@ -129,24 +103,25 @@ export async function POST(_req: NextRequest) {
         error: "proxy_exception",
         message: String((err as Error)?.message || err).substring(0, 200),
       },
-      {
-        status: 200,
-        headers: noStoreHeaders(),
-      },
+      { status: 200, headers: noStore },
     );
   }
 }
 
 /**
- * GET /api/refresh — returns a friendly status message.
- * (POST is the actual trigger; GET is just for debugging.)
+ * GET /api/refresh — returns a friendly status message (POST is the trigger)
  */
 export async function GET() {
   return NextResponse.json(
+    { ok: false, message: "Utilisez POST pour déclencher la synchronisation." },
     {
-      ok: false,
-      message: "Utilisez POST pour déclencher la synchronisation.",
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+      "CDN-Cache-Control": "no-store",
+        "Cloudflare-CDN-Cache-Control": "no-store",
+      },
     },
-    { status: 200, headers: noStoreHeaders() },
   );
 }

@@ -1,57 +1,49 @@
 import { NextResponse } from "next/server";
-import {
-  getServerWorkerUrl,
-  fetchWithTimeout,
-  noStoreHeaders,
-} from "@/lib/worker-server";
 
-// Cloudflare edge runtime — must be edge for env var access + fetch
+// Cloudflare edge runtime
 export const runtime = "edge";
 
 /**
- * GET /api/catalog
- *
- * Same-domain proxy to the standalone Worker's ?action=catalog endpoint.
+ * GET /api/catalog — Same-domain proxy to Worker ?action=catalog
  *
  * WHY THIS EXISTS:
  *   The frontend fetches /api/catalog (NOT the Worker URL directly) because:
  *     1. Algerian WiFi networks block *.workers.dev DNS
  *     2. Same-domain requests avoid CORS issues entirely
- *     3. The Pages Function runs on soumdeco.pages.dev (same origin as site)
  *
- * WHAT IT DOES:
- *   - Fetches {WORKER_URL}/?action=catalog with a 5s timeout
- *   - Returns the exact same JSON body with no-store headers
- *   - On failure, returns {products: "[]", stock: "", ts: now, error: "proxy_failed"}
- *     with HTTP 200 (so the client doesn't throw — it falls through to static JSON)
+ * WHY HARDCODED URL:
+ *   Reading process.env at runtime on Cloudflare Pages edge can be flaky.
+ *   The Worker URL is public knowledge (it only reads from KV, no secrets).
+ *   Hardcoding it ensures this route NEVER 500s due to env var issues.
  *
  * CACHE BUSTING:
  *   We set Cache-Control: no-store AND Cloudflare-CDN-Cache-Control: no-store
  *   to ensure Cloudflare's edge cache NEVER serves stale responses.
- *   The frontend also sends ?_t=${Date.now()} as a cache-buster.
  */
 export async function GET() {
-  const workerUrl = getServerWorkerUrl();
+  const WORKER_URL = "https://soumdeco-data-sync.soumdeco713.workers.dev";
+
+  const noStore = {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "CDN-Cache-Control": "no-store",
+    "Cloudflare-CDN-Cache-Control": "no-store",
+    Pragma: "no-cache",
+    Expires: "0",
+  };
 
   try {
-    const res = await fetchWithTimeout(
-      `${workerUrl}/?action=catalog`,
-      {
-        method: "GET",
-        headers: { Accept: "application/json" },
-      },
-      5000, // 5s timeout — Worker should respond in <100ms
-    );
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(`${WORKER_URL}/?action=catalog`, {
+      method: "GET",
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
 
-    if (res && res.ok) {
+    if (res.ok) {
       const text = await res.text();
-      return new NextResponse(text, {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          ...noStoreHeaders(),
-        },
-      });
+      return new NextResponse(text, { status: 200, headers: noStore });
     }
   } catch {
     // Fall through to error response
@@ -60,15 +52,7 @@ export async function GET() {
   // Worker failed — return empty catalog so client falls through to
   // static JSON / localStorage / seed (NEVER throws).
   return NextResponse.json(
-    {
-      products: "[]",
-      stock: "",
-      ts: Date.now(),
-      error: "worker_unreachable",
-    },
-    {
-      status: 200, // 200 so client doesn't throw — it falls through cleanly
-      headers: noStoreHeaders(),
-    },
+    { products: "[]", stock: "", ts: Date.now(), error: "worker_unreachable" },
+    { status: 200, headers: noStore },
   );
 }
