@@ -221,56 +221,37 @@ export async function triggerWorkerRefresh(): Promise<{
   message: string;
   synced?: boolean;
 }> {
-  const workerUrl = getWorkerUrl();
-  const secret = getAdminSecret();
-  if (!workerUrl) {
-    return {
-      ok: false,
-      message: "Le service de synchronisation n'est pas configuré.",
-    };
-  }
-  if (!secret) {
-    return {
-      ok: false,
-      message: "Clé d'administration manquante — reconfigurez le worker.",
-    };
-  }
+  // ALGERIAN WIFI FIX: Call /api/refresh (SAME DOMAIN — never blocked)
+  // instead of the Worker (*.workers.dev — blocked on WiFi).
+  // This ensures admin edits reach KV even on blocked WiFi networks.
   try {
     const res = await fetchWithTimeout(
-      `${workerUrl}/?action=refresh`,
+      `/api/refresh`,
       {
         method: "POST",
-        headers: {
-          "X-Admin-Secret": secret,
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
       },
-      15000,
+      30000, // 30s timeout — sync can take a while (Apps Script fetch)
     );
-    if (!res) {
-      return { ok: false, message: "Le worker ne répond pas." };
+    if (res && res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (data?.ok && data?.synced) {
+        return {
+          ok: true,
+          synced: true,
+          message: data.productsChanged || data.stockChanged
+            ? "Données mises à jour — les visiteurs verront les changements dans 5 minutes max."
+            : "Aucun changement détecté — les données sont déjà à jour.",
+        };
+      }
+      // Rate-limited is OK — KV was recently updated
+      if (data?.error === "rate_limited") {
+        return { ok: true, synced: true, message: "Synchronisation récente — données à jour." };
+      }
     }
-    const data = await res.json().catch(() => ({}));
-    if (data?.ok && data?.synced) {
-      return {
-        ok: true,
-        synced: true,
-        message: data.productsChanged || data.stockChanged
-          ? "Données mises à jour — les visiteurs verront les changements dans 5 minutes max."
-          : "Aucun changement détecté — les données sont déjà à jour.",
-      };
-    }
-    return {
-      ok: false,
-      message: data?.error
-        ? `Erreur: ${data.error}`
-        : "La synchronisation a échoué.",
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      message: `Erreur réseau: ${String((err as Error)?.message || err)}`,
-    };
+    return { ok: false, message: "La synchronisation a échoué." };
+  } catch {
+    return { ok: false, message: "Erreur réseau." };
   }
 }
 
