@@ -63,11 +63,20 @@ export const metadata: Metadata = {
     siteName: BRAND.name,
     type: "website",
     locale: "ar_DZ",
+    images: [
+      {
+        url: "/logo.jpg",
+        width: 1053,
+        height: 1053,
+        alt: `${BRAND.name} logo`,
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: `${BRAND.name} — ${BRAND.tagline}`,
     description: BRAND.tagline,
+    images: ["/logo.jpg"],
   },
 };
 
@@ -86,6 +95,36 @@ export default function RootLayout({
         <link rel="preconnect" href="https://script.google.com" />
         {/* Unregister old service worker (was causing "stuck at loading") */}
         <script src="/unregister-sw.js" async></script>
+        {/* SEO: JSON-LD structured data for rich snippets */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "Store",
+              name: BRAND.name,
+              description: BRAND.tagline,
+              url: "https://soumdeco.pages.dev",
+              logo: "https://soumdeco.pages.dev/logo.jpg",
+              image: "https://soumdeco.pages.dev/logo.jpg",
+              address: {
+                "@type": "PostalAddress",
+                addressLocality: "Alger",
+                addressCountry: "DZ",
+              },
+              contactPoint: {
+                "@type": "ContactPoint",
+                telephone: BRAND.contact.phoneDisplay,
+                email: BRAND.contact.email,
+                contactType: "customer service",
+              },
+              sameAs: [
+                `https://www.instagram.com/${BRAND.contact.instagram}/`,
+                `https://www.facebook.com/${BRAND.contact.facebook}`,
+              ],
+            }),
+          }}
+        />
       </head>
       <body
         className={`${jost.variable} ${cormorant.variable} ${inter.variable} ${arabic.variable} font-arabic antialiased bg-background text-foreground`}
