@@ -3021,3 +3021,68 @@ Stage Summary:
 - This is the FINAL fix for the "items never update" bug that has been
   misdiagnosed at least 5 times in previous sessions.
 
+
+---
+Task ID: BUILD-FAILURE-INVESTIGATION
+Agent: main
+Task: User reported "Build failed!!!" — investigate and fix everything
+
+Work Log:
+- User said "Build failed" but didn't specify which build (local, GitHub Actions, or Cloudflare Pages).
+- Ran comprehensive diagnosis:
+  1. Production endpoints — ALL HTTP 200 ✅
+     - GET / → 200 (363ms)
+     - GET /api/version → 200, returns {"v":1787533578490}
+     - GET /api/catalog → 200, returns 62 products
+     - GET /api/stock → 200, returns CSV
+     - GET /api/products → 200
+     - GET /api/order → 200
+     - GET /api → 200
+     - POST /api/refresh → 200, {"ok":true,"synced":true}
+  2. Worker health → ok=true, 62 products, 0 failures, kvAge=536ms ✅
+  3. Cloudflare Pages deployment logs → "Success: Your site was deployed!" ✅
+  4. GitHub Actions → All 10 most recent runs = success ✅
+  5. Cloudflare Pages project config → compatibility_flags=['nodejs_compat_v2'] ✅
+  6. Latest deployment (f5eb7021) → deploy stage = success ✅
+
+- Found a Cloudflare DASHBOARD DISPLAY BUG:
+  The deployment stages show:
+    queued: status=active ended=None    ← BUG: stays "active" forever
+    initialize: status=idle
+    clone_repo: status=idle
+    build: status=idle
+    deploy: status=success ended=2026-08-24T01:17:04 ← actual success
+  This means the Cloudflare dashboard may show "Building..." forever
+  even though the deployment is already live. The "queued" stage never
+  closes for ad_hoc (direct upload) deployments.
+
+- Ran local build to confirm no code issue:
+  - npm install: clean ✅
+  - npx next build: clean (11 routes, 0 errors) ✅
+  - npx @cloudflare/next-on-pages: clean (164 static assets) ✅
+  - npx tsc --noEmit: 0 errors in src/ ✅
+
+- Deployed fresh build (f5eb7021) to confirm:
+  - All 18 endpoint tests pass (18/18) ✅
+  - Site root, all API routes, Worker endpoints, all static data files
+
+- Project source: {} (no git integration) — git pushes do NOT trigger
+  Cloudflare Pages builds. All deployments are ad_hoc (direct wrangler upload).
+
+CONCLUSION:
+- No build failure exists. Production is healthy.
+- The "Build failed" message the user saw was likely:
+  1. Cached Cloudflare dashboard showing old state, OR
+  2. The Cloudflare dashboard "queued: active" display bug making it
+     look like the build is stuck, OR
+  3. User attempted to manually retry a deployment from dashboard
+     (which fails because project has no git source configured).
+
+Stage Summary:
+- ALL 18 production tests pass.
+- Local build clean (TS 0 errors, Next.js build clean, CF build clean).
+- Cloudflare deployment logs: "Success: Your site was deployed!"
+- Latest deployment f5eb7021 is LIVE and serving traffic.
+- The "build failed" was a false alarm — likely the Cloudflare dashboard
+  display bug showing "queued: active" forever.
+
