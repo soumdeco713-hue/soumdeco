@@ -35,7 +35,8 @@ export async function GET(req: Request) {
     const res = await fetch(url, {
       method: "GET",
       redirect: "follow",
-      cache: "no-store",
+      // NOTE: 'cache' field is not supported on Cloudflare Pages edge runtime.
+      // Removed 'cache: "no-store"' which caused HTTP 500.
     });
     if (!res.ok) {
       return NextResponse.json({ ok: false, error: `Sheet returned ${res.status}` }, { status: 502 });
