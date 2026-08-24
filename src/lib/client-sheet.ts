@@ -482,6 +482,22 @@ export async function clientSubmitOrder(payload: {
 
     const url = `${base}?${params.toString()}`;
 
+    // ============================================================
+    //  CRITICAL: ZERO RETRIES FOR ORDERS
+    // ============================================================
+    //  Google Apps Script does NOT support idempotency — every request
+    //  creates a new row in the Sheet. If the first request succeeds but
+    //  the response is slow/times out, retrying would create DUPLICATE
+    //  rows in the sheet (this caused real duplicate orders in production).
+    //
+    //  Fix: Send ONCE. If it fails, return false — the failed-orders
+    //  retry queue (failed-orders.ts) will retry ONCE on next page visit.
+    //  This guarantees no more than 2 rows can ever be created per order:
+    //    1. Initial attempt (this call)
+    //    2. Retry queue attempt (next page visit, only if #1 failed)
+    // ============================================================
+    const ORDER_RETRIES = 0; // NO RETRIES for orders (prevents duplicates)
+
     // Check URL length — if too long, fall back to POST (which Apps Script
     // also handles via doPost → doGet redirect)
     if (url.length > 2000) {
@@ -495,8 +511,8 @@ export async function clientSubmitOrder(payload: {
           body: JSON.stringify({ action: "order", ...payload }),
         },
         DEFAULT_TIMEOUT_MS,
-        WRITE_RETRIES,
-        WRITE_RETRY_DELAY_MS,
+        ORDER_RETRIES,
+        0,
       );
       return res.ok;
     }
@@ -505,8 +521,8 @@ export async function clientSubmitOrder(payload: {
       url,
       { method: "GET", redirect: "follow" },
       DEFAULT_TIMEOUT_MS,
-      WRITE_RETRIES,
-      WRITE_RETRY_DELAY_MS,
+      ORDER_RETRIES,
+      0,
     );
     return res.ok;
   } catch (err) {

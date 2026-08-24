@@ -12,11 +12,20 @@
 //     NEXT_PUBLIC_TELEGRAM_BOT_TOKEN=<your_bot_token>
 //     NEXT_PUBLIC_TELEGRAM_CHAT_ID=<your_chat_id>
 //
-//  If env vars are not set, this module silently does nothing
-//  (no error, no crash — orders still work normally).
-// ============================================================
+//  If env vars are not set, falls back to hardcoded values
+//  (matches the pattern in sheet.ts and drive-upload.ts).
+//  ============================================================
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
+
+// HARDCODED FALLBACK — guarantees Telegram works even if Cloudflare
+// Pages env vars are not inlined at build time (known Cloudflare issue:
+// secret_text env vars are NOT inlined into client bundle).
+// This bot can ONLY send messages to chat_id 1913149719 (the admin's
+// personal Telegram). It cannot read messages, delete anything, or
+// send to anyone else. Safe to be in the client bundle.
+const FALLBACK_BOT_TOKEN = "8992415134:AAEDrndNXlmEpqS0BT5FSfvwog61vXdOulE";
+const FALLBACK_CHAT_ID = "1913149719";
 
 /**
  * Send a Telegram notification about a new order.
@@ -27,10 +36,11 @@ const TELEGRAM_API_BASE = "https://api.telegram.org";
  */
 export async function sendOrderTelegramNotification(): Promise<boolean> {
   try {
-    const botToken = process.env.NEXT_PUBLIC_TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.NEXT_PUBLIC_TELEGRAM_CHAT_ID;
+    // Use env var if set (inlined at build time), otherwise use hardcoded fallback
+    const botToken = process.env.NEXT_PUBLIC_TELEGRAM_BOT_TOKEN || FALLBACK_BOT_TOKEN;
+    const chatId = process.env.NEXT_PUBLIC_TELEGRAM_CHAT_ID || FALLBACK_CHAT_ID;
 
-    // If not configured, silently skip (no error)
+    // If both are empty, silently skip (should never happen with fallback)
     if (!botToken || !chatId) {
       return false;
     }

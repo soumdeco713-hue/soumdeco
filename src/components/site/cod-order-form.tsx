@@ -427,11 +427,13 @@ export function CodOrderForm({
       setDone(true);
       onSuccess?.();
 
-      // Send Telegram notification (non-blocking, silent on failure)
+      // Send Telegram notification (NON-BLOCKING but awaited for reliability)
       // Fires AFTER the order is confirmed — never blocks the thank-you screen
+      // but DOES wait for completion so the fetch isn't cancelled if the
+      // customer navigates away quickly.
       try {
         const { sendOrderTelegramNotification } = await import("@/lib/telegram-notify");
-        sendOrderTelegramNotification().catch(() => {});
+        await sendOrderTelegramNotification().catch(() => {});
       } catch {
         // Silent — Telegram is optional
       }
