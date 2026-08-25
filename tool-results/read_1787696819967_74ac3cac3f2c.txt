@@ -1,0 +1,1141 @@
+     1→"use client";
+     2→
+     3→import { useEffect, useMemo, useState } from "react";
+     4→import { toast } from "sonner";
+     5→import { Check, Send, Heart, Sparkles } from "lucide-react";
+     6→import {
+     7→  getShippingPrice,
+     8→  ShippingCompany,
+     9→  DeliveryType,
+    10→  SHIPPING_COMPANY_LABELS_AR,
+    11→  DELIVERY_TYPE_LABELS_AR,
+    12→} from "@/lib/shipping";
+    13→import { formatPrice, QuantityTier } from "@/lib/products";
+    14→import { useAlgeriaData, PHONE_REGEX } from "@/hooks/use-algeria-data";
+    15→import { BRAND } from "@/lib/brand-config";
+    16→
+    17→export type OrderItem = {
+    18→  name: string;
+    19→  price: number | null;
+    20→  quantity: number;
+    21→  /** Optional productId — used for orphan detection (not always available) */
+    22→  productId?: string;
+    23→};
+    24→
+    25→type CodOrderFormProps = {
+    26→  items: OrderItem[];
+    27→  rupture?: boolean;
+    28→  onSuccess?: () => void;
+    29→  onContinueShopping?: () => void;
+    30→  /** Extra notes that should be appended to the order notes (e.g. variation selections). */
+    31→  extraNotes?: string;
+    32→  /** Optional quantity tiers — when provided AND items.length === 1, the 4-button
+    33→   *  selector highlights tier quantities with a ✨ badge and applies discount /
+    34→   *  free-shipping benefits to the totals. */
+    35→  quantityTiers?: QuantityTier[];
+    36→  /** True when required variants are not selected — blocks order submission. */
+    37→  variantsMissing?: boolean;
+    38→  /** Names of the missing variants (e.g. ["اللون", "المقاس"]) for the error toast. */
+    39→  missingVariantNames?: string[];
+    40→};
+    41→
+    42→type FormState = {
+    43→  fullName: string;
+    44→  phone: string;
+    45→  wilaya: string;
+    46→  commune: string;
+    47→  company: ShippingCompany;
+    48→  delivery: DeliveryType;
+    49→  notes: string;
+    50→};
+    51→
+    52→function generateOrderRef(): string {
+    53→  const n = Math.floor(100000 + Math.random() * 900000);
+    54→  return `SD-${n}`;
+    55→}
+    56→
+    57→export function CodOrderForm({
+    58→  items: initialItems,
+    59→  rupture,
+    60→  onSuccess,
+    61→  onContinueShopping,
+    62→  extraNotes,
+    63→  quantityTiers,
+    64→  variantsMissing = false,
+    65→  missingVariantNames = [],
+    66→}: CodOrderFormProps) {
+    67→  const { wilayas, getCommunesForWilaya, loading } = useAlgeriaData();
+    68→  const [items, setItems] = useState<OrderItem[]>(initialItems);
+    69→  const [form, setForm] = useState<FormState>({
+    70→    fullName: "",
+    71→    phone: "",
+    72→    wilaya: "",
+    73→    commune: "",
+    74→    company: "zr_express",
+    75→    delivery: "stop_desk",
+    76→    notes: "",
+    77→  });
+    78→  const [phoneError, setPhoneError] = useState(false);
+    79→  const [submitting, setSubmitting] = useState(false);
+    80→  const [done, setDone] = useState(false);
+    81→  const [orderRef, setOrderRef] = useState("");
+    82→  const [customQty, setCustomQty] = useState(""); // local input text — independent from buttons
+    83→  const [orderSummary, setOrderSummary] = useState<null | {
+    84→    items: OrderItem[];
+    85→    productTotal: number;
+    86→    discountAmount: number;
+    87→    shippingPrice: number;
+    88→    grandTotal: number;
+    89→    freeShippingApplied: boolean;
+    90→    fullName: string;
+    91→    phone: string;
+    92→    wilayaLabel: string;
+    93→    deliveryLabel: string;
+    94→    date: string;
+    95→  }>(null);
+    96→
+    97→  // Sync items when prop changes (e.g., modal opens different product)
+    98→  useEffect(() => {
+    99→    setItems(initialItems);
+   100→  }, [initialItems]);
+   101→
+   102→  const communes = useMemo(
+   103→    () => (form.wilaya ? getCommunesForWilaya(form.wilaya) : []),
+   104→    [form.wilaya, getCommunesForWilaya],
+   105→  );
+   106→
+   107→  // Reset commune when wilaya changes
+   108→  useEffect(() => {
+   109→    setForm((f) => ({ ...f, commune: "" }));
+   110→  }, [form.wilaya]);
+   111→
+   112→  // The NORMAL shipping price (without any tier benefit applied).
+   113→  // Returns null until BOTH wilaya AND commune are selected.
+   114→  const normalShippingPrice = useMemo(() => {
+   115→    if (!form.wilaya || !form.commune) return null;
+   116→    const result = getShippingPrice(form.wilaya, form.company, form.delivery);
+   117→    return result ? result.price : null;
+   118→  }, [form.wilaya, form.commune, form.company, form.delivery]);
+   119→
+   120→  // Active tier — only for single-item orders where the parent passed `quantityTiers`.
+   121→  // Used to compute discount and free-shipping benefits.
+   122→  //
+   123→  // Tier matching logic:
+   124→  //  - mode "exact": triggers ONLY when qty === t.qty
+   125→  //  - mode "min":   triggers when qty >= t.qty
+   126→  //
+   127→  // When multiple tiers match (e.g. qty=5 matches both "min:2" and "min:4"),
+   128→  // we pick the one with the HIGHEST qualifying qty (most generous threshold reached).
+   129→  // Among same-qty tiers, "min" wins over "exact" (more generous).
+   130→  const activeTier = useMemo(() => {
+   131→    if (items.length !== 1) return null;
+   132→    const q = items[0].quantity;
+   133→    const allTiers = quantityTiers ?? [];
+   134→    if (allTiers.length === 0) return null;
+   135→
+   136→    // Find all matching tiers
+   137→    const matching = allTiers.filter((t) => {
+   138→      const mode = t.mode ?? "exact";
+   139→      return mode === "min" ? q >= t.qty : q === t.qty;
+   140→    });
+   141→
+   142→    if (matching.length === 0) return null;
+   143→    if (matching.length === 1) return matching[0];
+   144→
+   145→    // Multiple matches — pick the best one.
+   146→    // Priority: highest qty threshold first (most generous threshold reached).
+   147→    // Among same-qty tiers: "min" beats "exact", then highest discount.
+   148→    matching.sort((a, b) => {
+   149→      if (a.qty !== b.qty) return b.qty - a.qty; // higher qty first
+   150→      const aMode = a.mode ?? "exact";
+   151→      const bMode = b.mode ?? "exact";
+   152→      if (aMode !== bMode) return aMode === "min" ? -1 : 1; // min first
+   153→      const aDisc = a.discountAmount ?? 0;
+   154→      const bDisc = b.discountAmount ?? 0;
+   155→      return bDisc - aDisc; // higher discount first
+   156→    });
+   157→    return matching[0];
+   158→  }, [items, quantityTiers]);
+   159→
+   160→  // Discount from the active tier (if any) — clamped so total can never go negative.
+   161→  const discountAmount = activeTier?.discountAmount ?? 0;
+   162→
+   163→  // Whether the active tier grants free shipping for the current delivery type.
+   164→  const freeShippingApplied = useMemo(() => {
+   165→    if (!activeTier || activeTier.freeShipping === "none") return false;
+   166→    if (activeTier.freeShipping === "both") return true;
+   167→    if (activeTier.freeShipping === "desk" && form.delivery === "stop_desk") return true;
+   168→    if (activeTier.freeShipping === "home" && form.delivery === "home") return true;
+   169→    return false;
+   170→  }, [activeTier, form.delivery]);
+   171→
+   172→  const productTotal = useMemo(
+   173→    () => items.reduce((s, i) => s + (i.price ?? 0) * i.quantity, 0),
+   174→    [items],
+   175→  );
+   176→
+   177→  // Product total AFTER discount (never negative).
+   178→  const productTotalAfterDiscount = useMemo(
+   179→    () => Math.max(0, productTotal - discountAmount),
+   180→    [productTotal, discountAmount],
+   181→  );
+   182→
+   183→  // Final shipping price: 0 if the tier grants free shipping, otherwise normal price.
+   184→  const shippingPrice = useMemo(() => {
+   185→    if (normalShippingPrice === null) return null;
+   186→    return freeShippingApplied ? 0 : normalShippingPrice;
+   187→  }, [normalShippingPrice, freeShippingApplied]);
+   188→
+   189→  const grandTotal = useMemo(() => {
+   190→    const ship = shippingPrice ?? 0;
+   191→    return productTotalAfterDiscount + ship;
+   192→  }, [productTotalAfterDiscount, shippingPrice]);
+   193→
+   194→  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
+   195→    setForm((f) => ({ ...f, [key]: value }));
+   196→    if (key === "phone") setPhoneError(false);
+   197→  };
+   198→
+   199→  const setSingleQty = (q: number) => {
+   200→    if (q < 1) return;
+   201→    setItems((prev) =>
+   202→      prev.length === 1 ? [{ ...prev[0], quantity: q }] : prev,
+   203→    );
+   204→  };
+   205→
+   206→  const tierBenefitLine = (tier: QuantityTier): string => {
+   207→    const hasFree = tier.freeShipping && tier.freeShipping !== "none";
+   208→    const discount = tier.discountAmount ?? 0;
+   209→    const hasDiscount = discount > 0;
+   210→    const mode = tier.mode ?? "exact";
+   211→    const qtyLabel = mode === "min" ? `${tier.qty} قطعة أو أكثر` : `${tier.qty} قطعة`;
+   212→    const shippingLabel =
+   213→      tier.freeShipping === "both"
+   214→        ? "كلاهما"
+   215→        : tier.freeShipping === "desk"
+   216→        ? "المكتب"
+   217→        : tier.freeShipping === "home"
+   218→        ? "المنزل"
+   219→        : "";
+   220→    if (hasFree && hasDiscount) {
+   221→      return `🎉 توصيل مجاني (${shippingLabel}) + خصم ${discount} دج عند شراء ${qtyLabel}!`;
+   222→    }
+   223→    if (hasFree) {
+   224→      return `🎉 توصيل مجاني (${shippingLabel}) عند شراء ${qtyLabel}!`;
+   225→    }
+   226→    if (hasDiscount) {
+   227→      return `🎉 خصم ${discount} دج عند شراء ${qtyLabel}!`;
+   228→    }
+   229→    return "";
+   230→  };
+   231→
+   232→  const validate = (): boolean => {
+   233→    if (!form.fullName.trim()) {
+   234→      toast.error("الرجاء إدخال الاسم الكامل");
+   235→      return false;
+   236→    }
+   237→    if (!PHONE_REGEX.test(form.phone.replace(/\D/g, ""))) {
+   238→      setPhoneError(true);
+   239→      toast.error(
+   240→        "رقم الهاتف غير صحيح. يجب أن يبدأ بـ 05 أو 06 أو 07 ويتكون من 10 أرقام",
+   241→      );
+   242→      return false;
+   243→    }
+   244→    if (!form.wilaya) {
+   245→      toast.error("الرجاء اختيار الولاية");
+   246→      return false;
+   247→    }
+   248→    if (!form.commune) {
+   249→      toast.error("الرجاء اختيار البلدية");
+   250→      return false;
+   251→    }
+   252→    return true;
+   253→  };
+   254→
+   255→  const handleSubmit = async () => {
+   256→    if (rupture) return;
+   257→
+   258→    // OBLIGATORY VARIANT CHECK — same priority as name field.
+   259→    // If the product has variants and the customer hasn't selected them,
+   260→    // block the order submission. This catches the case where the customer
+   261→    // fills out the order form directly on the product page without
+   262→    // selecting variants first.
+   263→    if (variantsMissing) {
+   264→      if (missingVariantNames.length === 1) {
+   265→        toast.error(`الرجاء اختيار ${missingVariantNames[0]}`);
+   266→      } else {
+   267→        toast.error(`الرجاء اختيار: ${missingVariantNames.join("، ")}`);
+   268→      }
+   269→      return;
+   270→    }
+   271→
+   272→    if (!validate()) return;
+   273→
+   274→    // P0 FIX #2: Re-check rupture at checkout submit time
+   275→    if (typeof rupture !== "undefined" && rupture) {
+   276→      toast.error("هذا المنتج نفدت الكمية. لا يمكن إتمام الطلب.");
+   277→      return;
+   278→    }
+   279→
+   280→    // P0 FIX #4: Sanitize items — remove NaN prices, prevent NaN from reaching Apps Script
+   281→    const sanitizedItems = items.map((it) => ({
+   282→      ...it,
+   283→      price:
+   284→        typeof it.price === "number" && !isNaN(it.price) && it.price >= 0
+   285→          ? it.price
+   286→          : null, // null = price-on-request (prevents NaN in sheet)
+   287→      name: it.name || "منتج بدون اسم", // prevent empty names
+   288→    }));
+   289→
+   290→    // P0 FIX #3: Filter out items with no name (orphan/invalid cart items)
+   291→    // Uses productId if available, otherwise falls back to name check
+   292→    const validItems = sanitizedItems.filter(
+   293→      (it) => it.name && it.name.trim() !== "",
+   294→    );
+   295→    if (validItems.length === 0) {
+   296→      toast.error("السلة فارغة أو تحتوي على منتجات لم تعد متاحة.");
+   297→      return;
+   298→    }
+   299→
+   300→    // SECONDARY VARIANT CHECK: ensure every item that requires a variant
+   301→    // actually has variant info in its name (format: "Product Name (variant info)")
+   302→    // This is a safety net — the primary check is on the product page before
+   303→    // add-to-cart. But if somehow an item gets into the cart without variant
+   304→    // info (e.g., old cart from before this feature), we catch it here.
+   305→    const itemsMissingVariant = validItems.filter((it) => {
+   306→      // If the product name contains "(" it means variant info was included
+   307→      // If it does NOT contain "(", the product either has no variants OR
+   308→      // the variant was not selected (which shouldn't happen due to the
+   309→      // primary check, but this is a safety net)
+   310→      // We can't know here if the product has variants (we don't have the
+   311→      // catalog), so we just check: if productId exists and name has no "(",
+   312→      // it MIGHT be missing variant info. But since we can't verify without
+   313→      // the catalog, we skip this check for multi-item carts and only
+   314→      // apply it for single-item orders where we have the variantTiers prop.
+   315→      return false; // safety net disabled — primary check on product page is sufficient
+   316→    });
+   317→    if (itemsMissingVariant.length > 0) {
+   318→      toast.error("الرجاء اختيار الخيارات المطلوبة للمنتج.");
+   319→      return;
+   320→    }
+   321→
+   322→    setSubmitting(true);
+   323→
+   324→    const wilayaLabel =
+   325→      wilayas.find((w) => w.code === form.wilaya)?.name || form.wilaya;
+   326→    const deliveryLabel = DELIVERY_TYPE_LABELS_AR[form.delivery];
+   327→    const companyLabel = SHIPPING_COMPANY_LABELS_AR[form.company];
+   328→    const ship = shippingPrice ?? 0;
+   329→    const finalGrandTotal = productTotalAfterDiscount + ship;
+   330→
+   331→    try {
+   332→      // Send ALL items as ONE single order (1 row in the sheet, 1 shipping price)
+   333→      const allProducts = validItems
+   334→        .map((it) => `${it.name} ×${it.quantity}`)
+   335→        .join(" + ");
+   336→      const totalQty = validItems.reduce((s, i) => s + i.quantity, 0);
+   337→      const totalUnitPrice = validItems.reduce(
+   338→        (s, i) => s + (i.price ?? 0),
+   339→        0,
+   340→      );
+   341→
+   342→      // ============================================================
+   343→      //  VARIANT EXTRACTION — extract clean variant name for the
+   344→      //  new "Variant" column in the Orders sheet.
+   345→      //
+   346→      //  Cart item names look like:
+   347→      //    "Cocotte minute (اللون: Red)" → variant = "Red"
+   348→      //    "Product (اللون: Red · المقاس: Large)" → variant = "Red - Large"
+   349→      //    "Simple Product" → variant = "" (no variant)
+   350→      //
+   351→      //  This is sent as a separate URL param (&variant=Red) so the
+   352→      //  Apps Script writes it to the Variant column — zero parsing
+   353→      //  server-side. The trigger reads the column directly.
+   354→      // ============================================================
+   355→      const extractVariant = (itemName: string): string => {
+   356→        const match = itemName.match(/\(([^)]+)\)\s*$/);
+   357→        if (!match) return "";
+   358→        const content = match[1].trim();
+   359→        const parts = content.split("·");
+   360→        const values: string[] = [];
+   361→        for (const part of parts) {
+   362→          const trimmed = part.trim();
+   363→          const colonIdx = trimmed.lastIndexOf(":");
+   364→          if (colonIdx >= 0) {
+   365→            const value = trimmed.substring(colonIdx + 1).trim();
+   366→            if (value) values.push(value);
+   367→          } else if (trimmed) {
+   368→            values.push(trimmed);
+   369→          }
+   370→        }
+   371→        return values.join(" - ");
+   372→      };
+   373→      // For single-item orders: extract variant directly
+   374→      // For multi-item orders: join all variants (rare but handles it)
+   375→      const orderVariant = validItems.length === 1
+   376→        ? extractVariant(validItems[0].name)
+   377→        : validItems
+   378→            .map((it) => {
+   379→              const v = extractVariant(it.name);
+   380→              return v ? `${it.name.split(" (")[0]}: ${v}` : "";
+   381→            })
+   382→            .filter(Boolean)
+   383→            .join(" + ");
+   384→
+   385→      // Combine user notes with variation summary (if any)
+   386→      const companyNote = SHIPPING_COMPANY_LABELS_AR[form.company];
+   387→
+   388→      const combinedNotes = [extraNotes, form.notes, companyNote]
+   389→        .filter((s) => s && s.trim())
+   390→        .join(" · ");
+   391→
+   392→      // If a discount or free shipping was applied, append a small note so the
+   393→      // store owner can see the benefit granted to this customer.
+   394→      const benefitNote =
+   395→        discountAmount > 0 && freeShippingApplied
+   396→          ? `🎉 خصم ${discountAmount} دج + توصيل مجاني`
+   397→          : discountAmount > 0
+   398→          ? `🎉 خصم ${discountAmount} دج`
+   399→          : freeShippingApplied
+   400→          ? `🎉 توصيل مجاني`
+   401→          : "";
+   402→      const finalNotes = [combinedNotes, benefitNote]
+   403→        .filter(Boolean)
+   404→        .join(" · ");
+   405→
+   406→      // Submit order DIRECTLY to Google Apps Script using the bulletproof
+   407→      // clientSubmitOrder function (real CORS mode, retry logic, timeout).
+   408→      // This bypasses Cloudflare's broken edge API entirely.
+   409→      const { clientSubmitOrder } = await import("@/lib/client-sheet");
+   410→
+   411→      // ============================================================
+   412→      //  BUILD STOCK KEY — the EXACT Stock tab entry name
+   413→      //  for variants that have stock tracking (|stock in variants string).
+   414→      //
+   415→      //  Format: "ProductName - VariantName"
+   416→      //  This matches EXACTLY what updateVariantStockTab_ creates in the
+   417→      //  Stock tab. The SUMIFS formula in the Stock tab uses this key
+   418→      //  to auto-decrement when order status = "Confirmed".
+   419→      //
+   420→      //  Only built for variants that HAVE |stock set.
+   421→      //  If no variant has stock → stockKey is empty → no variant decrement.
+   422→      // ============================================================
+   423→      let stockKey = "";
+   424→      if (validItems.length === 1) {
+   425→        const item = validItems[0];
+   426→        // Extract product name (strip variant parentheses)
+   427→        const prodName = item.name.replace(/\s*\([^)]+\)\s*$/, "").trim();
+   428→        // Try to find the product in the catalog to get its variants
+   429→        // The item might have variant info in its name
+   430→        const variantMatch = item.name.match(/\(([^)]+)\)\s*$/);
+   431→        if (variantMatch) {
+   432→          const variantContent = variantMatch[1].trim();
+   433→          const variantParts = variantContent.split("·");
+   434→          // For each selected variant, extract the value
+   435→          const selectedValues: string[] = [];
+   436→          for (const part of variantParts) {
+   437→            const trimmed = part.trim();
+   438→            const colonIdx = trimmed.lastIndexOf(":");
+   439→            if (colonIdx >= 0) {
+   440→              const value = trimmed.substring(colonIdx + 1).trim();
+   441→              if (value) selectedValues.push(value);
+   442→            } else if (trimmed) {
+   443→              selectedValues.push(trimmed);
+   444→            }
+   445→          }
+   446→          // Build stockKey for each variant value
+   447→          // The Stock tab has entries like "Product - 10L" (one per variant)
+   448→          // We need to try each selected variant to find which one has stock
+   449→          // Send ALL possible keys (comma-separated) — the SUMIFS will match
+   450→          // the one that exists in the Stock tab
+   451→          if (selectedValues.length > 0) {
+   452→            stockKey = selectedValues
+   453→              .map((v) => `${prodName} - ${v}`)
+   454→              .join(",");
+   455→          }
+   456→        }
+   457→      }
+   458→
+   459→      const orderOk = await clientSubmitOrder({
+   460→        product: allProducts,
+   461→        quantity: String(totalQty),
+   462→        price: items.length === 1 ? items[0].price ?? null : totalUnitPrice,
+   463→        shippingPrice: ship,
+   464→        grandTotal: finalGrandTotal,
+   465→        shippingCompanyLabel: companyLabel,
+   466→        fullName: form.fullName,
+   467→        phone: form.phone.replace(/\D/g, ""),
+   468→        wilaya: wilayaLabel,
+   469→        commune: form.commune,
+   470→        deliveryLabel,
+   471→        notes: finalNotes,
+   472→        variant: orderVariant,
+   473→        stockKey,
+   474→      });
+   475→
+   476→      if (!orderOk) {
+   477→        // Order failed to reach the sheet — save to the retry queue.
+   478→        // The retry queue is processed on the next page visit (in useCatalog init).
+   479→        // The customer already saw a thank-you screen — this is a background safety net.
+   480→        try {
+   481→          const { addFailedOrder } = await import("@/lib/failed-orders");
+   482→          addFailedOrder({
+   483→            timestamp: new Date().toISOString(),
+   484→            product: allProducts,
+   485→            quantity: String(totalQty),
+   486→            price: items.length === 1 ? items[0].price ?? null : totalUnitPrice,
+   487→            shippingPrice: ship,
+   488→            grandTotal: finalGrandTotal,
+   489→            shippingCompanyLabel: companyLabel,
+   490→            fullName: form.fullName,
+   491→            phone: form.phone,
+   492→            wilaya: wilayaLabel,
+   493→            commune: form.commune,
+   494→            deliveryLabel,
+   495→            notes: finalNotes,
+   496→          });
+   497→        } catch {
+   498→          console.error(
+   499→            "[Order] CRITICAL: Failed to submit order AND failed to save to retry queue",
+   500→          );
+   501→        }
+   502→      }
+   503→
+   504→      // ALWAYS show the thank-you screen — the customer has done their part.
+   505→      // The order is either in the sheet OR in localStorage for retry.
+   506→      setOrderRef(generateOrderRef());
+   507→      setOrderSummary({
+   508→        items,
+   509→        productTotal,
+   510→        discountAmount,
+   511→        shippingPrice: ship,
+   512→        grandTotal: finalGrandTotal,
+   513→        freeShippingApplied,
+   514→        fullName: form.fullName,
+   515→        phone: form.phone,
+   516→        wilayaLabel,
+   517→        deliveryLabel,
+   518→        date: new Date().toLocaleString("fr-FR"),
+   519→      });
+   520→      setDone(true);
+   521→      onSuccess?.();
+   522→
+   523→      // Send Telegram notification (NON-BLOCKING but awaited for reliability)
+   524→      // Fires AFTER the order is confirmed — never blocks the thank-you screen
+   525→      // but DOES wait for completion so the fetch isn't cancelled if the
+   526→      // customer navigates away quickly.
+   527→      try {
+   528→        const { sendOrderTelegramNotification } = await import("@/lib/telegram-notify");
+   529→        await sendOrderTelegramNotification().catch(() => {});
+   530→      } catch {
+   531→        // Silent — Telegram is optional
+   532→      }
+   533→    } catch {
+   534→      // Even on unhandled exception, show the thank-you screen
+   535→      // (better UX — customer doesn't see an error, order was attempted)
+   536→      setOrderRef(generateOrderRef());
+   537→      setOrderSummary({
+   538→        items,
+   539→        productTotal,
+   540→        discountAmount,
+   541→        shippingPrice: ship,
+   542→        grandTotal: finalGrandTotal,
+   543→        freeShippingApplied,
+   544→        fullName: form.fullName,
+   545→        phone: form.phone,
+   546→        wilayaLabel,
+   547→        deliveryLabel,
+   548→        date: new Date().toLocaleString("fr-FR"),
+   549→      });
+   550→      setDone(true);
+   551→      onSuccess?.();
+   552→    } finally {
+   553→      setSubmitting(false);
+   554→    }
+   555→  };
+   556→
+   557→  // === RUPTURE STATE ===
+   558→  if (rupture) {
+   559→    return (
+   560→      <div
+   561→       
+   562→       
+   563→        className="rounded-xl border border-terracotta/40 bg-terracotta/10 p-6 text-center font-arabic backdrop-blur-sm"
+   564→      >
+   565→        <p className="text-lg font-semibold text-terracotta neon-text-magenta">نفدت الكمية</p>
+   566→        <p className="mt-2 text-[13px] leading-relaxed text-gray">
+   567→          هذا المنتج غير متوفر حالياً. تواصل معنا لمعرفة موعد توفره القادم.
+   568→        </p>
+   569→        <div className="mt-5 flex flex-col gap-2">
+   570→          <button
+   571→            type="button"
+   572→            onClick={() => onContinueShopping?.()}
+   573→            className="w-full rounded-full bg-emerald px-4 py-3 text-sm font-semibold text-night transition-colors hover:bg-emerald-bright"
+   574→            style={{ boxShadow: "0 0 18px rgba(42, 125, 91, 0.45)" }}
+   575→          >
+   576→            متابعة التسوق
+   577→          </button>
+   578→        </div>
+   579→      </div>
+   580→    );
+   581→  }
+   582→
+   583→  // === THANK-YOU STATE — super elegant, beautiful, with love ===
+   584→  if (done && orderSummary) {
+   585→    return (
+   586→      <div
+   587→       
+   588→       
+   589→        className="px-1 py-2 text-center font-arabic"
+   590→      >
+   591→        {/* Animated heart with neon glow + floating sparkles */}
+   592→        <div className="relative mx-auto mb-5 h-24 w-24">
+   593→          {/* Outer pulsing glow rings */}
+   594→          <div
+   595→            aria-hidden
+   596→            className="pulse-soft absolute inset-0 rounded-full"
+   597→            style={{
+   598→              background:
+   599→                "radial-gradient(circle, rgba(194, 91, 126, 0.25) 0%, transparent 70%)",
+   600→              filter: "blur(12px)",
+   601→            }}
+   602→          />
+   603→          <div
+   604→            aria-hidden
+   605→            className="pulse-soft absolute inset-0 rounded-full"
+   606→            style={{
+   607→              background:
+   608→                "radial-gradient(circle, rgba(15, 13, 10, 0.22) 0%, transparent 70%)",
+   609→              filter: "blur(16px)",
+   610→              animationDelay: "0.5s",
+   611→            }}
+   612→          />
+   613→
+   614→          {/* Floating sparkle stars around the heart */}
+   615→          <div
+   616→            className="float-strong absolute -top-1 -right-1 text-brass-bright"
+   617→          >
+   618→            <Sparkles className="h-4 w-4" fill="currentColor" />
+   619→          </div>
+   620→          <div
+   621→            className="float-strong absolute -bottom-1 -left-2 text-neon-magenta"
+   622→            style={{ animationDelay: "0.3s" }}
+   623→          >
+   624→            <Sparkles className="h-3.5 w-3.5" fill="currentColor" />
+   625→          </div>
+   626→          <div
+   627→            className="float-strong absolute top-1/2 -right-3 text-charcoal"
+   628→            style={{ animationDelay: "0.7s" }}
+   629→          >
+   630→            <Sparkles className="h-3 w-3" fill="currentColor" />
+   631→          </div>
+   632→          <div
+   633→            className="float-strong absolute top-1/2 -left-3 text-neon-cyan"
+   634→            style={{ animationDelay: "1s" }}
+   635→          >
+   636→            <Sparkles className="h-3 w-3" fill="currentColor" />
+   637→          </div>
+   638→
+   639→          {/* Heart icon — pulsing with love */}
+   640→          <div
+   641→            className="fade-up relative flex h-full w-full items-center justify-center"
+   642→          >
+   643→            <div
+   644→              className="pulse-soft flex h-20 w-20 items-center justify-center rounded-full"
+   645→              style={{
+   646→                background:
+   647→                  "linear-gradient(135deg, #C25B7E 0%, #B5453A 50%, #C25B7E 100%)",
+   648→                boxShadow:
+   649→                  "0 4px 20px -2px rgba(194, 91, 126, 0.50), 0 0 0 4px rgba(255, 255, 255, 0.80), 0 0 0 5px rgba(194, 91, 126, 0.20)",
+   650→              }}
+   651→            >
+   652→              <div className="pulse-soft">
+   653→                <Heart
+   654→                  className="h-9 w-9 text-white"
+   655→                  fill="white"
+   656→                  strokeWidth={0}
+   657→                />
+   658→              </div>
+   659→            </div>
+   660→          </div>
+   661→        </div>
+   662→
+   663→        {/* Thank you heading — animated blue-black gradient */}
+   664→        <h3
+   665→          className="fade-up font-arabic text-2xl font-bold sm:text-3xl"
+   666→          style={{ animationDelay: "0.3s" }}
+   667→        >
+   668→          <span className="text-blue-black-animated">شكراً لك من كلّ قلبنا! ❤</span>
+   669→        </h3>
+   670→
+   671→        {/* Warm message */}
+   672→        <p
+   673→          className="fade-up mt-3 text-[14px] leading-loose text-gray"
+   674→          style={{ animationDelay: "0.5s" }}
+   675→        >
+   676→          تمّ استلام طلبك بنجاح. نحن سعداء بثقتك بنا، وسنتواصل معك قريباً
+   677→          لتأكيد الطلب وترتيب التوصيل.
+   678→        </p>
+   679→
+   680→        {/* Order reference — elegant badge with animated black */}
+   681→        <div
+   682→          className="fade-up mt-4 inline-flex items-center gap-2 rounded-full border border-charcoal/25 bg-white px-4 py-2"
+   683→          style={{
+   684→            boxShadow: "0 2px 12px -2px rgba(15, 13, 10, 0.18)",
+   685→            animationDelay: "0.7s",
+   686→          }}
+   687→        >
+   688→          <span className="text-[11px] text-gray">رقم الطلب</span>
+   689→          <span className="font-arabic text-sm font-bold text-animated-black">
+   690→            {orderRef}
+   691→          </span>
+   692→        </div>
+   693→
+   694→        {/* Order summary — elegant card with soft glow */}
+   695→        <div
+   696→          className="fade-up mt-5 overflow-hidden rounded-2xl border border-clay/40 bg-white p-4 text-left text-[12px]"
+   697→          style={{
+   698→            boxShadow:
+   699→              "0 4px 20px -6px rgba(74, 85, 104, 0.18), 0 0 0 1px rgba(74, 85, 104, 0.06)",
+   700→            animationDelay: "0.9s",
+   701→          }}
+   702→        >
+   703→          {/* Items */}
+   704→          {orderSummary.items.map((it, i) => (
+   705→            <div key={i} className="mb-1.5 flex justify-between">
+   706→              <span className="text-gray line-clamp-1">{it.name}</span>
+   707→              <span className="font-bold text-charcoal">×{it.quantity}</span>
+   708→            </div>
+   709→          ))}
+   710→          <div className="my-2.5 h-px bg-clay/30" />
+   711→          {/* Totals */}
+   712→          <div className="mb-1 flex justify-between">
+   713→            <span className="text-gray">المجموع</span>
+   714→            <span className="font-medium text-charcoal">{formatPrice(orderSummary.productTotal)}</span>
+   715→          </div>
+   716→          {orderSummary.discountAmount > 0 && (
+   717→            <div className="mb-1 flex justify-between">
+   718→              <span className="text-neon-magenta">الخصم</span>
+   719→              <span className="font-medium text-neon-magenta">-{formatPrice(orderSummary.discountAmount)}</span>
+   720→            </div>
+   721→          )}
+   722→          <div className="mb-1.5 flex justify-between">
+   723→            <span className="text-gray">التوصيل</span>
+   724→            <span className="font-medium text-charcoal">
+   725→              {orderSummary.freeShippingApplied
+   726→                ? "0 دج (مجاني)"
+   727→                : formatPrice(orderSummary.shippingPrice)}
+   728→            </span>
+   729→          </div>
+   730→          <div className="mb-2.5 flex justify-between border-t border-clay/30 pt-2 text-[14px] font-bold">
+   731→            <span className="text-charcoal">المجموع الكلي</span>
+   732→            <span className="text-emerald">{formatPrice(orderSummary.grandTotal)}</span>
+   733→          </div>
+   734→          <div className="my-2.5 h-px bg-clay/30" />
+   735→          {/* Customer info */}
+   736→          <div className="mb-1 flex justify-between">
+   737→            <span className="text-gray">الاسم</span>
+   738→            <span className="font-medium text-charcoal">{orderSummary.fullName}</span>
+   739→          </div>
+   740→          <div className="mb-1 flex justify-between">
+   741→            <span className="text-gray">الهاتف</span>
+   742→            <bdi dir="ltr" className="font-medium text-charcoal">{orderSummary.phone}</bdi>
+   743→          </div>
+   744→          <div className="mb-1 flex justify-between">
+   745→            <span className="text-gray">الولاية</span>
+   746→            <span className="font-medium text-charcoal">{orderSummary.wilayaLabel}</span>
+   747→          </div>
+   748→          <div className="mb-1 flex justify-between">
+   749→            <span className="text-gray">التوصيل</span>
+   750→            <span className="font-medium text-charcoal">{orderSummary.deliveryLabel}</span>
+   751→          </div>
+   752→          <div className="flex justify-between">
+   753→            <span className="text-gray">التاريخ</span>
+   754→            <span className="text-[11px] text-charcoal">{orderSummary.date}</span>
+   755→          </div>
+   756→        </div>
+   757→
+   758→        {/* "With love" footer */}
+   759→        <p
+   760→          className="fade-up mt-4 flex items-center justify-center gap-1.5 text-[12px] text-gray-light"
+   761→          style={{ animationDelay: "1.2s" }}
+   762→        >
+   763→          <span>صُنع بحبّ في</span>
+   764→          <span className="font-bold text-blue-black-animated">{BRAND.name}</span>
+   765→          <span
+   766→            className="pulse-soft text-neon-magenta"
+   767→          >
+   768→            ❤
+   769→          </span>
+   770→        </p>
+   771→
+   772→        {/* Action buttons */}
+   773→        <div
+   774→          className="fade-up mt-5 flex flex-col gap-2"
+   775→          style={{ animationDelay: "1.4s" }}
+   776→        >
+   777→          <button
+   778→            type="button"
+   779→            onClick={() => onContinueShopping?.()}
+   780→            className="w-full rounded-full bg-animated-black px-4 py-3 text-sm font-bold text-white transition-transform hover:scale-[1.02] active:scale-[0.98] hover:shadow-lg"
+   781→            style={{
+   782→              boxShadow:
+   783→                "0 4px 20px -2px rgba(15, 13, 10, 0.40), 0 0 0 1px rgba(15, 13, 10, 0.15)",
+   784→            }}
+   785→          >
+   786→            متابعة التسوق
+   787→          </button>
+   788→        </div>
+   789→      </div>
+   790→    );
+   791→  }
+   792→
+   793→  // === FORM STATE ===
+   794→  const inputClass =
+   795→    "w-full rounded-lg border border-clay/40 bg-night/60 px-3 py-2.5 text-left font-arabic text-[13px] text-charcoal outline-none transition-colors focus:border-charcoal focus:bg-night-soft";
+   796→  const labelClass =
+   797→    "mb-1 block font-arabic text-[12px] font-medium text-charcoal";
+   798→
+   799→  return (
+   800→    <div className="font-arabic">
+   801→      {/* COD reminder banner */}
+   802→      <div className="mb-4 rounded-lg border border-charcoal/30 bg-charcoal/5 px-3 py-2 text-center text-[12px] font-medium text-charcoal">
+   803→        💵 الدفع عند الاستلام · توصيل لكل الولايات
+   804→      </div>
+   805→
+   806→      <div className="space-y-4">
+   807→        {/* 1. Full name */}
+   808→        <div>
+   809→          <label className={labelClass} htmlFor="cod-fullname">
+   810→            الاسم الكامل · Nom complet
+   811→          </label>
+   812→          <input
+   813→            id="cod-fullname"
+   814→            type="text"
+   815→            value={form.fullName}
+   816→            onChange={(e) => set("fullName", e.target.value)}
+   817→            className={inputClass}
+   818→            placeholder="مثال: محمد أمين"
+   819→          />
+   820→        </div>
+   821→
+   822→        {/* 2. Phone */}
+   823→        <div>
+   824→          <label className={labelClass} htmlFor="cod-phone">
+   825→            رقم الهاتف · Téléphone
+   826→          </label>
+   827→          <input
+   828→            id="cod-phone"
+   829→            type="tel"
+   830→            dir="ltr"
+   831→            value={form.phone}
+   832→            onChange={(e) => set("phone", e.target.value)}
+   833→            className={`${inputClass} text-left ${
+   834→              phoneError
+   835→                ? "border-terracotta bg-terracotta/5"
+   836→                : "border-clay"
+   837→            }`}
+   838→            placeholder="0X XX XX XX XX"
+   839→            inputMode="numeric"
+   840→            maxLength={10}
+   841→          />
+   842→          {phoneError && (
+   843→            <p className="mt-1 font-arabic text-[11px] text-terracotta">
+   844→              يجب أن يبدأ بـ 05 أو 06 أو 07 ويتكون من 10 أرقام
+   845→            </p>
+   846→          )}
+   847→        </div>
+   848→
+   849→        {/* 3. Wilaya */}
+   850→        <div>
+   851→          <label className={labelClass} htmlFor="cod-wilaya">
+   852→            الولاية · Wilaya
+   853→          </label>
+   854→          <select
+   855→            id="cod-wilaya"
+   856→            value={form.wilaya}
+   857→            onChange={(e) => set("wilaya", e.target.value)}
+   858→            className={`${inputClass} ${
+   859→              !form.wilaya ? "text-gray-light" : ""
+   860→            }`}
+   861→            disabled={loading}
+   862→          >
+   863→            <option value="">
+   864→              {loading ? "جاري التحميل..." : "اختر الولاية"}
+   865→            </option>
+   866→            {wilayas.map((w) => (
+   867→              <option key={w.code} value={w.code} className="text-charcoal">
+   868→                {w.code} - {w.name} ({w.ar_name})
+   869→              </option>
+   870→            ))}
+   871→          </select>
+   872→        </div>
+   873→
+   874→        {/* 4. Commune */}
+   875→        <div>
+   876→          <label className={labelClass} htmlFor="cod-commune">
+   877→            البلدية · Commune
+   878→          </label>
+   879→          <select
+   880→            id="cod-commune"
+   881→            value={form.commune}
+   882→            onChange={(e) => set("commune", e.target.value)}
+   883→            className={`${inputClass} ${
+   884→              !form.commune ? "text-gray-light" : ""
+   885→            }`}
+   886→            disabled={!form.wilaya}
+   887→          >
+   888→            <option value="">
+   889→              {form.wilaya ? "اختر البلدية" : "اختر الولاية أولاً"}
+   890→            </option>
+   891→            {communes.map((c) => (
+   892→              <option key={c.id} value={c.name} className="text-charcoal">
+   893→                {c.name} ({c.ar_name})
+   894→              </option>
+   895→            ))}
+   896→          </select>
+   897→        </div>
+   898→
+   899→        {/* 5. Shipping company — client chooses which company */}
+   900→        <div>
+   901→          <label className={labelClass}>شركة التوصيل · Société de livraison</label>
+   902→          <div className="grid grid-cols-2 gap-2">
+   903→            {(["zr_express", "ecom_delivery"] as ShippingCompany[]).map((s) => (
+   904→              <button
+   905→                key={s}
+   906→                type="button"
+   907→                onClick={() => set("company", s)}
+   908→                className={`font-arabic text-[12px] rounded-lg border px-3 py-2.5 font-medium transition-colors ${
+   909→                  form.company === s
+   910→                    ? "border-charcoal bg-charcoal/10 text-charcoal"
+   911→                    : "border-clay/40 bg-night/40 text-gray hover:border-charcoal/50 hover:text-charcoal"
+   912→                }`}
+   913→              >
+   914→                {SHIPPING_COMPANY_LABELS_AR[s]}
+   915→              </button>
+   916→            ))}
+   917→          </div>
+   918→          <p className="mt-1.5 font-arabic text-[10px] text-gray-light">
+   919→            📦 اختر شركة التوصيل المناسبة لك
+   920→          </p>
+   921→        </div>
+   922→
+   923→        {/* 6. Delivery type */}
+   924→        <div>
+   925→          <label className={labelClass}>طريقة التوصيل</label>
+   926→          <div className="grid grid-cols-2 gap-2">
+   927→            {(["stop_desk", "home"] as DeliveryType[]).map((d) => (
+   928→              <button
+   929→                key={d}
+   930→                type="button"
+   931→                onClick={() => set("delivery", d)}
+   932→                className={`font-arabic text-[12px] rounded-lg border px-3 py-2.5 font-medium transition-colors ${
+   933→                  form.delivery === d
+   934→                    ? "border-charcoal bg-charcoal/10 text-charcoal"
+   935→                    : "border-clay/40 bg-night/40 text-gray hover:border-charcoal/50 hover:text-charcoal"
+   936→                }`}
+   937→              >
+   938→                {DELIVERY_TYPE_LABELS_AR[d]}
+   939→              </button>
+   940→            ))}
+   941→          </div>
+   942→        </div>
+   943→
+   944→        {/* 7. Shipping price + delay display — only shows once wilaya + commune are selected. */}
+   945→        <div className="rounded-lg border border-charcoal/30 bg-charcoal/5 px-3 py-2.5 text-[12px]">
+   946→          {form.wilaya && form.commune && normalShippingPrice !== null ? (
+   947→            <div className="flex flex-col gap-1">
+   948→              <span className="font-arabic text-charcoal">
+   949→                🚚 التوصيل ·{" "}
+   950→                {freeShippingApplied
+   951→                  ? "0 دج (مجاني 🎉)"
+   952→                  : formatPrice(normalShippingPrice)}
+   953→              </span>
+   954→            </div>
+   955→          ) : (
+   956→            <span className="font-arabic text-gray-light">
+   957→              🚚 التوصيل · اختر الولاية والبلدية لعرض السعر
+   958→            </span>
+   959→          )}
+   960→        </div>
+   961→
+   962→        {/* 8. Items / quantities.
+   963→            For single-item orders we show the 4 quick-select buttons (1, 2, 3, 4)
+   964→            PLUS a number input for ordering more than 4 pieces (any quantity).
+   965→            The ✨ emoji appears on buttons that match a tier (when `quantityTiers` is provided). */}
+   966→        {items.length === 1 ? (
+   967→          <div>
+   968→            {/* Selected variant summary — shown when the parent passes extraNotes
+   969→                (e.g. "اللون: أحمر · المقاس: كبير"). Read-only display; the actual
+   970→                selection buttons live in the parent (product page). */}
+   971→            {extraNotes && extraNotes.trim() && (
+   972→              <div className="mb-2 rounded-lg border border-emerald/25 bg-emerald/5 px-3 py-2 text-[12px] font-arabic">
+   973→                <span className="text-gray-light">الخيار المحدد: </span>
+   974→                <span className="font-medium text-charcoal">{extraNotes}</span>
+   975→              </div>
+   976→            )}
+   977→            <label className={labelClass}>الكمية · Quantité</label>
+   978→            <div className="flex items-end justify-center gap-3">
+   979→              {[1, 2, 3, 4].map((q) => {
+   980→                const isActive = items[0].quantity === q;
+   981→                const tier = (quantityTiers ?? []).find((t) => t.qty === q);
+   982→                return (
+   983→                  <div
+   984→                    key={q}
+   985→                    className="relative flex flex-col items-center"
+   986→                  >
+   987→                    {tier && (
+   988→                      <span
+   989→                        aria-hidden
+   990→                        className="pointer-events-none absolute -top-3 text-[11px]"
+   991→                      >
+   992→                        ✨
+   993→                      </span>
+   994→                    )}
+   995→                    <button
+   996→                      type="button"
+   997→                      onClick={() => { setSingleQty(q); setCustomQty(""); }}
+   998→                      aria-label={`اختر ${q} قطعة`}
+   999→                      aria-pressed={isActive}
+  1000→                      className={`flex h-10 w-10 items-center justify-center rounded-full border-2 font-arabic text-sm font-bold transition-all hover:-translate-y-0.5 active:scale-90 sm:h-11 sm:w-11 ${
+  1001→                        isActive
+  1002→                          ? "border-transparent bg-animated-black text-white shadow-md"
+  1003→                          : "border-clay/40 bg-night/60 text-charcoal hover:border-neon-magenta/50"
+  1004→                      }`}
+  1005→                    >
+  1006→                      {q}
+  1007→                    </button>
+  1008→                  </div>
+  1009→                );
+  1010→              })}
+  1011→              {/* "+" separator + number input for ordering more than 4 pieces.
+  1012→                  Uses local state (customQty) so typing multi-digit numbers
+  1013→                  like 10, 15, 20 works smoothly on phone keyboards.
+  1014→                  The actual quantity only updates when:
+  1015→                  - Value is ≥5 (committed immediately)
+  1016→                  - User presses Enter or blurs (commits whatever is valid) */}
+  1017→              <span className="font-arabic text-lg text-gray-light self-center mx-1">+</span>
+  1018→              <div className="flex flex-col items-center">
+  1019→                <input
+  1020→                  type="number"
+  1021→                  min={1}
+  1022→                  inputMode="numeric"
+  1023→                  value={customQty}
+  1024→                  onChange={(e) => {
+  1025→                    const raw = e.target.value;
+  1026→                    setCustomQty(raw);
+  1027→                    const v = parseInt(raw, 10);
+  1028→                    if (!isNaN(v) && v >= 1) {
+  1029→                      setSingleQty(v);
+  1030→                    }
+  1031→                  }}
+  1032→                  onBlur={() => {
+  1033→                    const v = parseInt(customQty, 10);
+  1034→                    if (isNaN(v) || v < 1) {
+  1035→                      setCustomQty("");
+  1036→                    }
+  1037→                  }}
+  1038→                  onKeyDown={(e) => {
+  1039→                    if (e.key === "Enter") {
+  1040→                      (e.target as HTMLInputElement).blur();
+  1041→                    }
+  1042→                  }}
+  1043→                  placeholder="5+"
+  1044→                  aria-label="كمية مخصصة"
+  1045→                  className={`flex h-10 w-14 items-center justify-center rounded-full border-2 px-1 text-center font-arabic text-sm font-bold outline-none transition-all sm:h-11 sm:w-16 ${
+  1046→                    items[0].quantity > 4
+  1047→                      ? "border-transparent bg-animated-black text-white shadow-md"
+  1048→                      : "border-clay/40 bg-night/60 text-charcoal focus:border-neon-magenta/50"
+  1049→                  }`}
+  1050→                />
+  1051→              </div>
+  1052→            </div>
+  1053→            {activeTier && tierBenefitLine(activeTier) && (
+  1054→              <p className="mt-3 text-center font-arabic text-[11px] font-medium text-neon-magenta">
+  1055→                {tierBenefitLine(activeTier)}
+  1056→              </p>
+  1057→            )}
+  1058→          </div>
+  1059→        ) : (
+  1060→          <div>
+  1061→            <label className={labelClass}>المنتجات</label>
+  1062→            <div className="rounded-lg border border-clay/40 bg-night/40 p-2 text-[12px]">
+  1063→              {items.map((it, i) => (
+  1064→                <div
+  1065→                  key={i}
+  1066→                  className="flex items-center justify-between py-1"
+  1067→                >
+  1068→                  <span className="line-clamp-1 text-gray">{it.name}</span>
+  1069→                  <span className="font-medium text-charcoal">
+  1070→                    ×{it.quantity}
+  1071→                  </span>
+  1072→                </div>
+  1073→              ))}
+  1074→            </div>
+  1075→          </div>
+  1076→        )}
+  1077→
+  1078→        {/* 9. Notes */}
+  1079→        <div>
+  1080→          <label className={labelClass} htmlFor="cod-notes">
+  1081→            ملاحظات (اختياري) · Notes
+  1082→          </label>
+  1083→          <textarea
+  1084→            id="cod-notes"
+  1085→            value={form.notes}
+  1086→            onChange={(e) => set("notes", e.target.value)}
+  1087→            rows={2}
+  1088→            className={`${inputClass} resize-none`}
+  1089→            placeholder="أي تفاصيل إضافية..."
+  1090→          />
+  1091→        </div>
+  1092→
+  1093→        {/* 10. Total breakdown — applies discount + free shipping from the active tier.
+  1094→            Math:
+  1095→              productTotal = unitPrice × qty
+  1096→              productTotalAfterDiscount = max(0, productTotal − discount)
+  1097→              shippingPrice = (freeShippingApplied) ? 0 : normalShippingPrice
+  1098→              grandTotal = productTotalAfterDiscount + shippingPrice */}
+  1099→        <div className="rounded-lg border border-charcoal/20 bg-charcoal/3 p-3 text-[12px]">
+  1100→          <div className="mb-1 flex justify-between">
+  1101→            <span className="text-gray">المجموع · Total produit</span>
+  1102→            <span className="font-medium text-charcoal">{formatPrice(productTotal)}</span>
+  1103→          </div>
+  1104→          {discountAmount > 0 && (
+  1105→            <div className="mb-1 flex justify-between">
+  1106→              <span className="text-neon-magenta">الخصم · Remise</span>
+  1107→              <span className="font-medium text-neon-magenta">-{formatPrice(discountAmount)}</span>
+  1108→            </div>
+  1109→          )}
+  1110→          <div className="mb-1 flex justify-between">
+  1111→            <span className="text-gray">التوصيل · Livraison</span>
+  1112→            <span className="font-medium text-charcoal">
+  1113→              {shippingPrice === null
+  1114→                ? "—"
+  1115→                : freeShippingApplied
+  1116→                ? "0 دج (مجاني)"
+  1117→                : formatPrice(shippingPrice)}
+  1118→            </span>
+  1119→          </div>
+  1120→          <div className="mt-1 flex justify-between border-t border-clay/30 pt-1 text-[14px] font-bold">
+  1121→            <span className="text-charcoal">المجموع الكلي · Grand total</span>
+  1122→            <span className="text-animated-black">{formatPrice(grandTotal)}</span>
+  1123→          </div>
+  1124→        </div>
+  1125→
+  1126→        {/* 11. Submit — with Send icon */}
+  1127→        <button
+  1128→          type="button"
+  1129→          onClick={handleSubmit}
+  1130→          disabled={submitting || variantsMissing}
+  1131→          className="flex w-full items-center justify-center gap-2 rounded-full bg-animated-black px-4 py-3 text-sm font-semibold text-white transition-shadow hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
+  1132→          style={{ boxShadow: "0 4px 20px -2px rgba(15, 13, 10, 0.35)" }}
+  1133→        >
+  1134→          <Send className="h-4 w-4" />
+  1135→          {submitting ? "جاري الإرسال..." : variantsMissing ? "اختر الخيارات أولاً" : "تأكيد الطلب"}
+  1136→        </button>
+  1137→      </div>
+  1138→    </div>
+  1139→  );
+  1140→}
+  1141→

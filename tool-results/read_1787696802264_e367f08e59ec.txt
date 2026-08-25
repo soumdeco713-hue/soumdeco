@@ -1,0 +1,836 @@
+     1→/**
+     2→ * ============================================================
+     3→ *  SoumDecoDZ — Apps Script (ORDERS + STOCK + PRODUCTS)
+     4→ * ============================================================
+     5→ *
+     6→ *  Products: stored in Google Sheet (product data) + Cloudinary (images)
+     7→ *  Orders:   stored in Google Sheet (Orders tab)
+     8→ *  Stock:    stored in Google Sheet (Stock tab)
+     9→ *
+    10→ *  GET  ?action=stock              → Stock tab as CSV (polled every 10 min)
+    11→ *  GET  ?action=products           → Products tab as JSON (polled every 10 min)
+    12→ *  GET  ?action=order&...          → append order row
+    13→ *  POST ?action=product_create     → upsert product (JSON body, no URL limit)
+    14→ *  GET  ?action=product_delete&id= → delete by id
+    15→ *  GET  ?action=product_reset      → wipe Products tab
+    16→ * ============================================================
+    17→ */
+    18→
+    19→var ORDERS_SHEET = 'Orders';
+    20→var STOCK_SHEET = 'Stock';
+    21→var PRODUCTS_SHEET = 'Products';
+    22→var PRODUCTS_COLS = ['id', 'name', 'description', 'category', 'price', 'image', 'images', 'featured', 'isSpecialOffer', 'variations', 'variants', 'stock', 'highlights', 'sortOrder', 'badge', 'oldPrice', 'quantityTiers'];
+    23→var IMG_SEP = '~~~';
+    24→
+    25→// Orders sheet column positions (1-indexed in the sheet, 0-indexed here).
+    26→// These MUST match the order in the appendRow() call inside doCreateOrderFromParams.
+    27→var ORDERS_COL = {
+    28→  DATE: 0, STATUS: 1, PRODUCT: 2, QTY: 3, UNIT_PRICE: 4,
+    29→  SHIPPING: 5, TOTAL: 6, CUSTOMER: 7, PHONE: 8, WILAYA: 9,
+    30→  COMMUNE: 10, DELIVERY: 11, COMPANY: 12, NOTES: 13, VARIANT: 14, STOCK_KEY: 15
+    31→};
+    32→
+    33→function doGet(e) {
+    34→  e = e || {}; var p = e.parameter || {};
+    35→  var action = String(p.action || '').toLowerCase();
+    36→  try {
+    37→    if (action === 'stock') return serveStock();
+    38→    if (action === 'products') return serveProducts();
+    39→    if (action === 'order') return doCreateOrderFromParams(p);
+    40→    if (action === 'product_delete') return doDeleteProduct(p.id || '');
+    41→    if (action === 'product_reset') return doResetProducts();
+    42→    if (action === 'dedupe') return doDedupeProducts();
+    43→    if (action === 'cleanup') return doCleanupSheet();
+    44→    if (action === 'health') return jsonOut({ ok: true, time: new Date().toISOString(), sheet: SpreadsheetApp.getActiveSpreadsheet().getName() });
+    45→    if (action === 'statistics') return setupStatistics();
+    46→    return jsonOut({ ok: false, error: 'unknown action: ' + action });
+    47→  } catch (err) { return jsonOut({ ok: false, error: String(err) }); }
+    48→}
+    49→
+    50→function doPost(e) {
+    51→  e = e || {}; var p = e.parameter || {};
+    52→  var action = String(p.action || '').toLowerCase();
+    53→  try {
+    54→    if (action === 'product_create' || action === 'product_update') {
+    55→      var bodyStr = e.postData ? e.postData.contents : '';
+    56→      var prod = bodyStr ? JSON.parse(bodyStr) : p;
+    57→      return doCreateProduct(prod);
+    58→    }
+    59→    return doGet(e);
+    60→  } catch (err) { return jsonOut({ ok: false, error: String(err) }); }
+    61→}
+    62→
+    63→// ============================================================
+    64→//  ORDERS
+    65→// ============================================================
+    66→
+    67→function doCreateOrderFromParams(p) {
+    68→  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ORDERS_SHEET);
+    69→  if (!sheet) {
+    70→    sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet(ORDERS_SHEET);
+    71→    sheet.appendRow(['Date','Status','Product','Qty','Unit Price','Shipping','Total','Customer','Phone','Wilaya','Commune','Delivery','Company','Notes','Variant','Stock Key']);
+    72→  }
+    73→  // Auto-add 'Variant' + 'Stock Key' columns if they don't exist
+    74→  var headerRow = sheet.getRange(1, 1, 1, 16).getValues()[0];
+    75→  if (!headerRow[14] || String(headerRow[14]).trim() !== 'Variant') {
+    76→    sheet.getRange(1, 15).setValue('Variant');
+    77→  }
+    78→  if (!headerRow[15] || String(headerRow[15]).trim() !== 'Stock Key') {
+    79→    sheet.getRange(1, 16).setValue('Stock Key');
+    80→  }
+    81→  sheet.appendRow([
+    82→    new Date(), 'New',
+    83→    p.product || '', Number(p.quantity) || 1,
+    84→    (p.price === null || p.price === undefined || p.price === '') ? '' : Number(p.price),
+    85→    Number(p.shippingPrice) || 0, Number(p.grandTotal) || 0,
+    86→    p.fullName || '', p.phone || '', p.wilaya || '', p.commune || '',
+    87→    p.deliveryLabel || '', p.shippingCompanyLabel || '', p.notes || '',
+    88→    p.variant || '', p.stockKey || ''
+    89→  ]);
+    90→  return jsonOut({ ok: true });
+    91→}
+    92→
+    93→// ============================================================
+    94→//  STOCK
+    95→// ============================================================
+    96→
+    97→function serveStock() {
+    98→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+    99→  var sheet = ss.getSheetByName(STOCK_SHEET);
+   100→  if (!sheet) { sheet = ss.insertSheet(STOCK_SHEET); sheet.appendRow(['Product Name','Stock Count']); }
+   101→  var headerRow = sheet.getRange(1, 1, 1, 2).getValues()[0];
+   102→  if (String(headerRow[0]||'') !== 'Product Name' || String(headerRow[1]||'') !== 'Stock Count') {
+   103→    sheet.getRange(1, 1, 1, 2).setValues([['Product Name','Stock Count']]);
+   104→  }
+   105→  var values = sheet.getDataRange().getValues();
+   106→  var rows = [];
+   107→  for (var i = 0; i < values.length; i++) {
+   108→    var r = values[i];
+   109→    if (i === 1 && r[0] && /[\u0600-\u06FF\u{1F000}-\u{1FFFF}]/u.test(String(r[0]))) continue;
+   110→    rows.push(r.map(function(c){ return '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"'; }).join(','));
+   111→  }
+   112→  var csv = rows.join('\n');
+   113→  return ContentService.createTextOutput(csv).setMimeType(ContentService.MimeType.CSV);
+   114→}
+   115→
+   116→// ============================================================
+   117→//  PRODUCTS
+   118→// ============================================================
+   119→
+   120→function ensureProductsSheet() {
+   121→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+   122→  var sheet = ss.getSheetByName(PRODUCTS_SHEET);
+   123→  if (!sheet) {
+   124→    sheet = ss.insertSheet(PRODUCTS_SHEET);
+   125→    sheet.appendRow(PRODUCTS_COLS);
+   126→    return sheet;
+   127→  }
+   128→  // Fix headers if they don't match PRODUCTS_COLS (e.g. Arabic labels from template)
+   129→  var headerRow = sheet.getRange(1, 1, 1, PRODUCTS_COLS.length).getValues()[0];
+   130→  var needsFix = false;
+   131→  for (var i = 0; i < PRODUCTS_COLS.length; i++) {
+   132→    if (String(headerRow[i] || '') !== PRODUCTS_COLS[i]) { needsFix = true; break; }
+   133→  }
+   134→  if (needsFix) {
+   135→    sheet.getRange(1, 1, 1, PRODUCTS_COLS.length).setValues([PRODUCTS_COLS]);
+   136→  }
+   137→  return sheet;
+   138→}
+   139→
+   140→function serveProducts() {
+   141→  var sheet = ensureProductsSheet();
+   142→  var values = sheet.getDataRange().getValues();
+   143→  if (values.length < 2) return jsonOut([]);
+   144→  var header = values[0];
+   145→  var out = [];
+   146→  // Track seen IDs to skip duplicate rows (the sheet sometimes has dupes
+   147→  // when a product is saved twice or moved between categories).
+   148→  var seenIds = {};
+   149→  // Start from row 2 (index 1). Skip guidance row (row 2) if it contains
+   150→  // Arabic/emoji hints instead of real product data.
+   151→  for (var i = 1; i < values.length; i++) {
+   152→    var r = values[i];
+   153→    if (!r[0]) continue;
+   154→    // Skip the guidance row — detect it by checking if the id cell contains
+   155→    // non-ASCII characters (emojis/Arabic) which real product IDs never have.
+   156→    var idStr = String(r[0]);
+   157→    if (/[\u0600-\u06FF\u{1F000}-\u{1FFFF}]/u.test(idStr)) continue;
+   158→    // Skip duplicate IDs (keep first occurrence)
+   159→    if (seenIds[idStr]) continue;
+   160→    seenIds[idStr] = true;
+   161→    var obj = {};
+   162→    for (var j = 0; j < header.length; j++) obj[header[j]] = r[j];
+   163→    obj.price = (obj.price===''||obj.price===null||obj.price===undefined)?null:Number(obj.price);
+   164→    obj.oldPrice = (obj.oldPrice===''||obj.oldPrice===null||obj.oldPrice===undefined)?null:Number(obj.oldPrice);
+   165→    obj.featured = (obj.featured===true||obj.featured===1||obj.featured==='1'||(typeof obj.featured==='string'&&obj.featured.toLowerCase()==='true'));
+   166→    obj.isSpecialOffer = (obj.isSpecialOffer===true||obj.isSpecialOffer===1||obj.isSpecialOffer==='1'||(typeof obj.isSpecialOffer==='string'&&obj.isSpecialOffer.toLowerCase()==='true'));
+   167→    // stock — null when blank/non-numeric, otherwise a number.
+   168→    obj.stock = (obj.stock===''||obj.stock===null||obj.stock===undefined)?null:Number(obj.stock);
+   169→    // variants — pass through as a string for the client to parse.
+   170→    obj.variants = obj.variants==null?'':String(obj.variants);
+   171→    if ((!obj.images||String(obj.images).trim()==='')&&obj.image) obj.images = String(obj.image);
+   172→    // Auto-fix common category typos
+   173→    if (obj.category) {
+   174→      var cat = String(obj.category).trim();
+   175→      if (cat === 'Meubes') cat = 'Meubles';
+   176→      obj.category = cat;
+   177→    }
+   178→    out.push(obj);
+   179→  }
+   180→  return jsonOut(out);
+   181→}
+   182→
+   183→function doCreateProduct(p) {
+   184→  var sheet = ensureProductsSheet();
+   185→  if (findProductRow_(sheet, p.id) >= 0) return doUpdateProduct(p);
+   186→  sheet.appendRow(buildProductRow_(p));
+   187→  // Auto-add product name to Stock tab so admin only needs to set the stock count
+   188→  addToStockTab_(p.name || '');
+   189→  // Also sync stock from product to Stock tab (if admin set a stock value)
+   190→  updateStockTab_(p.name || '', p.stock);
+   191→  // Also sync per-variant stock to Stock tab (if variants have stock values)
+   192→  updateVariantStockTab_(p.name || '', p.variants || '');
+   193→  return jsonOut({ ok: true });
+   194→}
+   195→
+   196→function doUpdateProduct(p) {
+   197→  var sheet = ensureProductsSheet();
+   198→  var rowIdx = findProductRow_(sheet, p.id);
+   199→  if (rowIdx < 0) return doCreateProduct(p);
+   200→  sheet.getRange(rowIdx + 2, 1, 1, PRODUCTS_COLS.length).setValues([buildProductRow_(p)]);
+   201→  // Sync stock from product to Stock tab (if admin set a stock value)
+   202→  updateStockTab_(p.name || '', p.stock);
+   203→  // Also sync per-variant stock to Stock tab
+   204→  updateVariantStockTab_(p.name || '', p.variants || '');
+   205→  return jsonOut({ ok: true });
+   206→}
+   207→
+   208→function doDeleteProduct(id) {
+   209→  var sheet = ensureProductsSheet();
+   210→  var rowIdx = findProductRow_(sheet, id);
+   211→  if (rowIdx < 0) return jsonOut({ ok: false, error: 'not found' });
+   212→  // Get product name before deleting (so we can also remove from Stock tab)
+   213→  var productName = sheet.getRange(rowIdx + 2, 2).getValue(); // column B = name
+   214→  sheet.deleteRow(rowIdx + 2);
+   215→  // Also remove from Stock tab
+   216→  removeFromStockTab_(productName);
+   217→  return jsonOut({ ok: true });
+   218→}
+   219→
+   220→// Auto-add product name to Stock tab when a product is created.
+   221→// Admin only needs to set the stock count — the name is pre-filled.
+   222→function addToStockTab_(productName) {
+   223→  if (!productName) return;
+   224→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+   225→  var sheet = ss.getSheetByName(STOCK_SHEET);
+   226→  if (!sheet) return;
+   227→  // Check if product already exists in Stock tab
+   228→  var lastRow = sheet.getLastRow();
+   229→  if (lastRow >= 2) {
+   230→    var names = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+   231→    for (var i = 0; i < names.length; i++) {
+   232→      if (String(names[i][0] || '').trim() === productName.trim()) return; // already exists
+   233→    }
+   234→  }
+   235→  // Add new row with product name + empty stock count (unlimited)
+   236→  sheet.appendRow([productName, '']);
+   237→}
+   238→
+   239→// Remove product from Stock tab when a product is deleted.
+   240→function removeFromStockTab_(productName) {
+   241→  if (!productName) return;
+   242→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+   243→  var sheet = ss.getSheetByName(STOCK_SHEET);
+   244→  if (!sheet) return;
+   245→  var lastRow = sheet.getLastRow();
+   246→  if (lastRow < 2) return;
+   247→  var values = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+   248→  for (var i = 0; i < values.length; i++) {
+   249→    if (String(values[i][0] || '').trim() === productName.trim()) {
+   250→      sheet.deleteRow(i + 2);
+   251→      return;
+   252→    }
+   253→  }
+   254→}
+   255→
+   256→// ============================================================
+   257→//  updateStockTab_ — Sync stock from product to Stock tab
+   258→// ============================================================
+   259→//  Called from doCreateProduct + doUpdateProduct.
+   260→//  If the product has a stock value (number, including 0),
+   261→//  this updates (or creates) the corresponding row in the
+   262→//  Stock tab so the visitor sees the correct stock count.
+   263→//
+   264→//  - If productName already exists in Stock tab → update count
+   265→//  - If productName doesn't exist → add new row with count
+   266→//  - If stock is null/undefined/empty → skip (don't touch Stock tab)
+   267→//  - Never touches other products' rows (safe — no overlap)
+   268→// ============================================================
+   269→function updateStockTab_(productName, stockValue) {
+   270→  if (!productName) return;
+   271→  // Only update if stock is explicitly set (number, including 0)
+   272→  // null/undefined/empty → admin didn't set stock → don't touch Stock tab
+   273→  if (stockValue === null || stockValue === undefined || stockValue === '') return;
+   274→
+   275→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+   276→  var sheet = ss.getSheetByName(STOCK_SHEET);
+   277→  if (!sheet) {
+   278→    // Stock sheet doesn't exist — create it with headers
+   279→    sheet = ss.insertSheet(STOCK_SHEET);
+   280→    sheet.appendRow(['Product Name', 'Stock Count']);
+   281→  }
+   282→
+   283→  var count = String(stockValue); // number → string for sheet storage
+   284→
+   285→  // Search for existing row with this product name
+   286→  var lastRow = sheet.getLastRow();
+   287→  if (lastRow >= 2) {
+   288→    var names = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+   289→    for (var i = 0; i < names.length; i++) {
+   290→      if (String(names[i][0] || '').trim() === productName.trim()) {
+   291→        // Found — update the count (column B = column 2)
+   292→        sheet.getRange(i + 2, 2).setValue(count);
+   293→        return; // updated, done
+   294→      }
+   295→    }
+   296→  }
+   297→  // Not found — add new row
+   298→  sheet.appendRow([productName, count]);
+   299→}
+   300→
+   301→// ============================================================
+   302→//  updateVariantStockTab_ — Sync per-variant stock to Stock tab
+   303→// ============================================================
+   304→//  Called from doCreateProduct + doUpdateProduct.
+   305→//  Parses the variants string and for each variant that has
+   306→//  a stock value, creates/updates a row in the Stock tab
+   307→//  with name "ProductName - VariantName" and the stock count.
+   308→//
+   309→//  Variants format: "color:Red:0|0,color:Blue:0|3,color:Green:0"
+   310→//  The |stock suffix is optional — only variants WITH it get
+   311→//  a Stock tab entry.
+   312→//
+   313→//  - Format: "ProductName - VariantName","stockCount"
+   314→//  - Safe: only touches rows for THIS product's variants
+   315→//  - Never overwrites other products' rows
+   316→// ============================================================
+   317→function updateVariantStockTab_(productName, variantsStr) {
+   318→  if (!productName || !variantsStr) return;
+   319→
+   320→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+   321→  var sheet = ss.getSheetByName(STOCK_SHEET);
+   322→  if (!sheet) return;
+   323→
+   324→  // Parse variants string: "color:Red:0|0,color:Blue:0|3,..."
+   325→  var parts = variantsStr.split(',');
+   326→  for (var i = 0; i < parts.length; i++) {
+   327→    var part = parts[i].trim();
+   328→    if (!part) continue;
+   329→
+   330→    // Check for |stock suffix
+   331→    var pipeIdx = part.lastIndexOf('|');
+   332→    if (pipeIdx < 0) continue; // no stock set for this variant
+   333→
+   334→    var stockStr = part.substring(pipeIdx + 1).trim();
+   335→    var mainPart = part.substring(0, pipeIdx).trim();
+   336→
+   337→    // Parse stock value (must be a number >= 0)
+   338→    var stockNum = Number(stockStr);
+   339→    if (isNaN(stockNum) || stockNum < 0) continue;
+   340→
+   341→    // Extract variant name from mainPart: "type:name:priceAdjustment"
+   342→    // The name is between the first and last colon
+   343→    var firstColon = mainPart.indexOf(':');
+   344→    if (firstColon < 0) continue;
+   345→    var rest = mainPart.substring(firstColon + 1);
+   346→    var lastColon = rest.lastIndexOf(':');
+   347→    var variantName;
+   348→    if (lastColon < 0) {
+   349→      variantName = rest.trim();
+   350→    } else {
+   351→      variantName = rest.substring(0, lastColon).trim();
+   352→    }
+   353→    if (!variantName) continue;
+   354→
+   355→    // Build the Stock tab entry name: "ProductName - VariantName"
+   356→    var stockTabName = productName + ' - ' + variantName;
+   357→
+   358→    // Search for existing row and update, or add new
+   359→    var lastRow = sheet.getLastRow();
+   360→    var found = false;
+   361→    if (lastRow >= 2) {
+   362→      var names = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+   363→      for (var j = 0; j < names.length; j++) {
+   364→        if (String(names[j][0] || '').trim() === stockTabName) {
+   365→          // Found — update the count
+   366→          sheet.getRange(j + 2, 2).setValue(String(stockNum));
+   367→          found = true;
+   368→          break;
+   369→        }
+   370→      }
+   371→    }
+   372→    if (!found) {
+   373→      // Not found — add new row
+   374→      sheet.appendRow([stockTabName, String(stockNum)]);
+   375→    }
+   376→  }
+   377→}
+   378→
+   379→function doResetProducts() {
+   380→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+   381→  var sheet = ss.getSheetByName(PRODUCTS_SHEET);
+   382→  if (sheet) ss.deleteSheet(sheet);
+   383→  var newSheet = ss.insertSheet(PRODUCTS_SHEET);
+   384→  newSheet.appendRow(PRODUCTS_COLS);
+   385→  return jsonOut({ ok: true });
+   386→}
+   387→
+   388→function buildProductRow_(p) {
+   389→  var imagesStr = String(p.images || p.image || '');
+   390→  var coverImage = imagesStr ? imagesStr.split(IMG_SEP)[0] : '';
+   391→  return PRODUCTS_COLS.map(function(col) {
+   392→    if (col === 'price') return (p.price===null||p.price===undefined||p.price==='')?'':Number(p.price);
+   393→    if (col === 'oldPrice') return (p.oldPrice===null||p.oldPrice===undefined||p.oldPrice==='')?'':Number(p.oldPrice);
+   394→    if (col === 'featured') return (p.featured===true||p.featured==='true'||p.featured===1||p.featured==='1')?'true':'false';
+   395→    if (col === 'isSpecialOffer') return (p.isSpecialOffer===true||p.isSpecialOffer==='true'||p.isSpecialOffer===1||p.isSpecialOffer==='1')?'true':'false';
+   396→    if (col === 'stock') {
+   397→      // null / undefined / blank → empty cell (means unlimited on the website)
+   398→      if (p.stock===null||p.stock===undefined||p.stock==='') return '';
+   399→      var n = Number(p.stock);
+   400→      return isNaN(n) ? '' : n;
+   401→    }
+   402→    if (col === 'image') return coverImage;
+   403→    if (col === 'images') return imagesStr;
+   404→    return (p[col]===undefined||p[col]===null)?'':String(p[col]);
+   405→  });
+   406→}
+   407→
+   408→function findProductRow_(sheet, id) {
+   409→  var values = sheet.getDataRange().getValues();
+   410→  if (values.length < 2) return -1;
+   411→  for (var i = 1; i < values.length; i++) { if (String(values[i][0]) === String(id)) return i - 1; }
+   412→  return -1;
+   413→}
+   414→
+   415→function jsonOut(obj) {
+   416→  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+   417→}
+   418→
+   419→// ============================================================
+   420→//  STATISTICS — auto-update Statistics tab with formulas
+   421→// ============================================================
+   422→//  Creates/updates a "Statistics" tab with:
+   423→//    - Total orders
+   424→//    - Total revenue
+   425→//    - Top 10 products (by order count)
+   426→//    - Top 10 wilayas (by order count)
+   427→//
+   428→//  Uses QUERY formulas on the Orders tab — auto-updates when
+   429→//  new orders arrive. No Apps Script trigger needed.
+   430→//
+   431→//  Call via: ?action=statistics
+   432→//  Or: run setupStatistics() manually in the Apps Script editor.
+   433→// ============================================================
+   434→
+   435→function setupStatistics() {
+   436→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+   437→  var sheet = ss.getSheetByName('Statistics');
+   438→  if (!sheet) { sheet = ss.insertSheet('Statistics'); }
+   439→  sheet.clear();
+   440→  
+   441→  sheet.setColumnWidth(1, 350); sheet.setColumnWidth(2, 120);
+   442→  sheet.setColumnWidth(3, 120); sheet.setColumnWidth(4, 150); sheet.setColumnWidth(5, 150);
+   443→  
+   444→  // Colors
+   445→  var brass = '#9A7E3A'; var cream = '#FAF8F4'; var sand = '#F1ECE3';
+   446→  var stone = '#E8E4DC'; var white = 'FFFFFF'; var dark = '#1C1815';
+   447→  
+   448→  function secTitle(row, text, icon) {
+   449→    var c = sheet.getRange(row, 1, 1, 5);
+   450→    c.merge(); c.setValue(icon + ' ' + text);
+   451→    c.setFontWeight('bold').setFontSize(12).setFontColor(dark).setBackground(sand);
+   452→  }
+   453→  function hdr(row, col, text) {
+   454→    var c = sheet.getRange(row, col);
+   455→    c.setValue(text); c.setFontWeight('bold').setFontColor(white).setBackground(brass);
+   456→    c.setBorder(true, true, true, true, true, true);
+   457→  }
+   458→  function val(row, col, formula, fmt) {
+   459→    var c = sheet.getRange(row, col);
+   460→    c.setValue(formula); if (fmt) c.setNumberFormat(fmt);
+   461→    c.setBorder(true, true, true, true, true, true);
+   462→  }
+   463→  
+   464→  // Title
+   465→  var t = sheet.getRange(1, 1, 1, 5);
+   466→  t.merge(); t.setValue('📊 SOUM DECO — Tableau de bord');
+   467→  t.setFontWeight('bold').setFontSize(16).setFontColor(brass).setBackground(cream);
+   468→  
+   469→  // S1: Summary
+   470→  secTitle(3, 'Résumé', '📦');
+   471→  sheet.getRange(4, 1).setValue('Total Commandes').setFontWeight('bold');
+   472→  val(4, 2, '=IFERROR(COUNTA(Orders!C2:C),0)', '0');
+   473→  sheet.getRange(5, 1).setValue("Chiffre d'Affaires (DZD)").setFontWeight('bold');
+   474→  val(5, 2, '=IFERROR(SUM(Orders!G2:G),0)', '#,##0');
+   475→  sheet.getRange(6, 1).setValue('Panier Moyen (DZD)').setFontWeight('bold');
+   476→  val(6, 2, '=IFERROR(IF(COUNTA(Orders!C2:C)>0,SUM(Orders!G2:G)/COUNTA(Orders!C2:C),0),0)', '#,##0');
+   477→  
+   478→  // S2: Top 10 Products
+   479→  secTitle(8, 'Top 10 Produits', '🏆');
+   480→  hdr(9, 1, 'Produit'); hdr(9, 2, 'Commandes'); hdr(9, 3, 'CA (DZD)');
+   481→  sheet.getRange(10, 1).setValue('=IFERROR(QUERY(Orders!C2:G, "SELECT C, COUNT(C), SUM(G) WHERE C IS NOT NULL GROUP BY C ORDER BY COUNT(C) DESC LIMIT 10", 1), "Aucune commande")');
+   482→  
+   483→  // S3: Top 10 Wilayas
+   484→  secTitle(22, 'Top 10 Wilayas', '📍');
+   485→  hdr(23, 1, 'Wilaya'); hdr(23, 2, 'Commandes'); hdr(23, 3, 'CA (DZD)');
+   486→  sheet.getRange(24, 1).setValue('=IFERROR(QUERY(Orders!J2:G, "SELECT J, COUNT(J), SUM(G) WHERE J IS NOT NULL GROUP BY J ORDER BY COUNT(J) DESC LIMIT 10", 1), "Aucune commande")');
+   487→  
+   488→  // S4: Status Breakdown
+   489→  secTitle(36, 'Statut des Commandes', '📋');
+   490→  hdr(37, 1, 'Statut'); hdr(37, 2, 'Nombre');
+   491→  sheet.getRange(38, 1).setValue('=IFERROR(QUERY(Orders!B2:B, "SELECT B, COUNT(B) WHERE B IS NOT NULL GROUP BY B ORDER BY COUNT(B) DESC LIMIT 10", 1), "Aucune commande")');
+   492→  
+   493→  // S5: Top 5 Wilayas by Revenue
+   494→  secTitle(50, 'Top 5 Wilayas par CA', '💰');
+   495→  hdr(51, 1, 'Wilaya'); hdr(51, 2, 'CA (DZD)');
+   496→  sheet.getRange(52, 1).setValue('=IFERROR(QUERY(Orders!J2:G, "SELECT J, SUM(G) WHERE J IS NOT NULL GROUP BY J ORDER BY SUM(G) DESC LIMIT 5", 1), "Aucune commande")');
+   497→  
+   498→  // S6: Recent Orders (last 10)
+   499→  secTitle(58, 'Dernières 10 Commandes', '🕐');
+   500→  hdr(59, 1, 'Date'); hdr(59, 2, 'Statut'); hdr(59, 3, 'Produit'); hdr(59, 4, 'Wilaya'); hdr(59, 5, 'Total');
+   501→  sheet.getRange(60, 1).setValue('=IFERROR(QUERY(Orders!A2:P, "SELECT A, B, C, J, G ORDER BY A DESC LIMIT 10", 1), "Aucune commande")');
+   502→  
+   503→  sheet.setFrozenRows(1);
+   504→  return jsonOut({ ok: true, message: 'Statistics tab updated with 6 sections' });
+   505→}
+   506→
+   507→function setupAllSheets() {
+   508→  ensureProductsSheet();
+   509→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+   510→  if (!ss.getSheetByName(STOCK_SHEET)) { var s = ss.insertSheet(STOCK_SHEET); s.appendRow(['Product Name','Stock Count']); }
+   511→  if (!ss.getSheetByName(ORDERS_SHEET)) {
+   512→    var o = ss.insertSheet(ORDERS_SHEET);
+   513→    o.appendRow(['Date','Status','Product','Qty','Unit Price','Shipping','Total','Customer','Phone','Wilaya','Commune','Delivery','Company','Notes']);
+   514→  }
+   515→  SpreadsheetApp.getActiveSpreadsheet().toast('All sheets ready ✔');
+   516→}
+   517→
+   518→
+   519→// ============================================================
+   520→//  STOCK DECREMENT — onEdit trigger (RESTORED)
+   521→// ============================================================
+   522→//  Watches the Orders sheet. When an order's Status changes to
+   523→//  "Confirmed", the matching product's Stock is decremented.
+   524→//
+   525→//  Uses Stock Key column (column P) for EXACT matching:
+   526→//    - If stockKey has value → find exact match in Stock tab → decrement
+   527→//    - If empty → try product name match → decrement
+   528→//    - If no match → skip (can't decrement unlimited)
+   529→//
+   530→//  To install: Apps Script editor → Triggers → Add trigger →
+   531→//    Function: onStockEdit
+   532→//    Event source: From spreadsheet
+   533→//    Event type: On edit
+   534→// ============================================================
+   535→
+   536→function onStockEdit(e) {
+   537→  try {
+   538→    var range = e && e.range;
+   539→    if (!range) return;
+   540→    var sheet = range.getSheet();
+   541→    if (sheet.getName() !== ORDERS_SHEET) return;
+   542→    if (range.getColumn() !== ORDERS_COL.STATUS + 1) return;
+   543→    if (range.getRow() < 2) return;
+   544→
+   545→    var newStatus = String(e.value || '').trim().toLowerCase();
+   546→    var oldStatus = String((e.oldValue || '')).trim().toLowerCase();
+   547→
+   548→    var row = range.getRow();
+   549→    var data = sheet.getRange(row, 1, 1, ORDERS_COL.STOCK_KEY + 1).getValues()[0];
+   550→    var productName = String(data[ORDERS_COL.PRODUCT] || '').trim();
+   551→    var qtyRaw = data[ORDERS_COL.QTY];
+   552→    var qty = (qtyRaw === '' || qtyRaw === null || qtyRaw === undefined) ? 1 : parseInt(String(qtyRaw), 10);
+   553→    if (isNaN(qty) || qty < 1) qty = 1;
+   554→    if (!productName) return;
+   555→
+   556→    // Multi-item orders (contain "+") — skip
+   557→    if (productName.indexOf('+') >= 0) return;
+   558→
+   559→    // Strip trailing ×N
+   560→    var bareName = productName.replace(/\s*[×x]\s*\d+\s*$/, '').trim();
+   561→    if (!bareName) return;
+   562→
+   563→    // Read Stock Key column (column P = index 15)
+   564→    var stockKeyStr = String(data[ORDERS_COL.STOCK_KEY] || '').trim();
+   565→
+   566→    var STOCK_DECREMENTED = ['confirmed', 'shipped', 'delivered'];
+   567→
+   568→    // CASE 1: Confirmed → DECREMENT
+   569→    if (STOCK_DECREMENTED.indexOf(newStatus) >= 0) {
+   570→      if (STOCK_DECREMENTED.indexOf(oldStatus) >= 0) return;
+   571→
+   572→      // Try stockKey FIRST (EXACT match — sent by frontend)
+   573→      if (stockKeyStr) {
+   574→        // stockKey may be comma-separated (multiple variant keys)
+   575→        var keys = stockKeyStr.split(',');
+   576→        var decremented = false;
+   577→        for (var k = 0; k < keys.length; k++) {
+   578→          var key = keys[k].trim();
+   579→          if (!key) continue;
+   580→          decremented = decrementStockByKey_(key, qty);
+   581→          if (decremented) break; // found and decremented
+   582→        }
+   583→        if (decremented) return; // done
+   584→      }
+   585→
+   586→      // Fallback: try product name match
+   587→      decrementProductStock_(bareName, qty);
+   588→    }
+   589→
+   590→    // CASE 2: Cancelled → REVERT
+   591→    if (newStatus === 'cancelled') {
+   592→      if (STOCK_DECREMENTED.indexOf(oldStatus) < 0) return;
+   593→
+   594→      if (stockKeyStr) {
+   595→        var keys2 = stockKeyStr.split(',');
+   596→        var reverted = false;
+   597→        for (var k2 = 0; k2 < keys2.length; k2++) {
+   598→          var key2 = keys2[k2].trim();
+   599→          if (!key2) continue;
+   600→          reverted = incrementStockByKey_(key2, qty);
+   601→          if (reverted) break;
+   602→        }
+   603→        if (reverted) return;
+   604→      }
+   605→
+   606→      incrementProductStock_(bareName, qty);
+   607→    }
+   608→
+   609→  } catch (err) {
+   610→    Logger.log('[onStockEdit] error: ' + err);
+   611→  }
+   612→}
+   613→
+   614→// Decrement stock by EXACT Stock tab name (from stockKey)
+   615→function decrementStockByKey_(stockTabName, qty) {
+   616→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+   617→  var sheet = ss.getSheetByName(STOCK_SHEET);
+   618→  if (!sheet) return false;
+   619→  var lastRow = sheet.getLastRow();
+   620→  if (lastRow < 2) return false;
+   621→  var values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+   622→  for (var i = 0; i < values.length; i++) {
+   623→    if (String(values[i][0] || '').trim() === stockTabName.trim()) {
+   624→      var current = values[i][1];
+   625→      var currentNum = (current === '' || current === null || current === undefined) ? null : Number(current);
+   626→      if (currentNum === null || isNaN(currentNum)) return false;
+   627→      var next = Math.max(0, currentNum - qty);
+   628→      sheet.getRange(i + 2, 2).setValue(next);
+   629→      Logger.log('[Stock] DECREMENT ' + stockTabName + ' -' + qty + ' = ' + next);
+   630→      return true;
+   631→    }
+   632→  }
+   633→  return false;
+   634→}
+   635→
+   636→// Increment stock by EXACT Stock tab name (revert cancel)
+   637→function incrementStockByKey_(stockTabName, qty) {
+   638→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+   639→  var sheet = ss.getSheetByName(STOCK_SHEET);
+   640→  if (!sheet) return false;
+   641→  var lastRow = sheet.getLastRow();
+   642→  if (lastRow < 2) return false;
+   643→  var values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+   644→  for (var i = 0; i < values.length; i++) {
+   645→    if (String(values[i][0] || '').trim() === stockTabName.trim()) {
+   646→      var current = values[i][1];
+   647→      var currentNum = (current === '' || current === null || current === undefined) ? 0 : Number(current);
+   648→      if (isNaN(currentNum)) currentNum = 0;
+   649→      var next = currentNum + qty;
+   650→      sheet.getRange(i + 2, 2).setValue(next);
+   651→      Logger.log('[Stock] INCREMENT (revert) ' + stockTabName + ' +' + qty + ' = ' + next);
+   652→      return true;
+   653→    }
+   654→  }
+   655→  return false;
+   656→}
+   657→
+   658→// Decrement by product name (fallback when stockKey is empty)
+   659→function decrementProductStock_(productName, qty) {
+   660→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+   661→  var sheet = ss.getSheetByName(STOCK_SHEET);
+   662→  if (!sheet) return;
+   663→  var lastRow = sheet.getLastRow();
+   664→  if (lastRow < 2) return;
+   665→  var values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+   666→  for (var i = 0; i < values.length; i++) {
+   667→    if (String(values[i][0] || '').trim() === productName.trim()) {
+   668→      var current = values[i][1];
+   669→      var currentNum = (current === '' || current === null || current === undefined) ? null : Number(current);
+   670→      if (currentNum === null || isNaN(currentNum)) return;
+   671→      var next = Math.max(0, currentNum - qty);
+   672→      sheet.getRange(i + 2, 2).setValue(next);
+   673→      Logger.log('[Stock] DECREMENT ' + productName + ' -' + qty + ' = ' + next);
+   674→      return;
+   675→    }
+   676→  }
+   677→}
+   678→
+   679→// Increment by product name (fallback)
+   680→function incrementProductStock_(productName, qty) {
+   681→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+   682→  var sheet = ss.getSheetByName(STOCK_SHEET);
+   683→  if (!sheet) return;
+   684→  var lastRow = sheet.getLastRow();
+   685→  if (lastRow < 2) return;
+   686→  var values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+   687→  for (var i = 0; i < values.length; i++) {
+   688→    if (String(values[i][0] || '').trim() === productName.trim()) {
+   689→      var current = values[i][1];
+   690→      var currentNum = (current === '' || current === null || current === undefined) ? 0 : Number(current);
+   691→      if (isNaN(currentNum)) currentNum = 0;
+   692→      var next = currentNum + qty;
+   693→      sheet.getRange(i + 2, 2).setValue(next);
+   694→      Logger.log('[Stock] INCREMENT (revert) ' + productName + ' +' + qty + ' = ' + next);
+   695→      return;
+   696→    }
+   697→  }
+   698→}
+   699→
+   700→
+   701→// ============================================================
+   702→//  DEDUPE + CLEANUP — one-time maintenance actions
+   703→// ============================================================
+   704→
+   705→/**
+   706→ * Remove duplicate product rows (same ID appearing multiple times).
+   707→ * Keeps the FIRST occurrence (which is usually the original, most-complete row)
+   708→ * and deletes subsequent duplicates.
+   709→ *
+   710→ * Also fixes the "Meubes" → "Meubles" typo in-place for all rows.
+   711→ *
+   712→ * Called via: ?action=dedupe
+   713→ * Returns: { ok: true, removed: <count>, fixed_categories: <count>, remaining: <count> }
+   714→ */
+   715→function doDedupeProducts() {
+   716→  var sheet = ensureProductsSheet();
+   717→  var values = sheet.getDataRange().getValues();
+   718→  if (values.length < 2) return jsonOut({ ok: true, removed: 0, remaining: 0 });
+   719→
+   720→  var header = values[0];
+   721→  var idCol = 0;            // column A
+   722→  var categoryCol = header.indexOf('category');
+   723→  var nameCol = header.indexOf('name');
+   724→
+   725→  // First pass: fix "Meubes" → "Meubles" in-place for every row
+   726→  var categoryFixes = 0;
+   727→  if (categoryCol >= 0) {
+   728→    for (var i = 1; i < values.length; i++) {
+   729→      var cat = String(values[i][categoryCol] || '').trim();
+   730→      if (cat === 'Meubes') {
+   731→        sheet.getRange(i + 1, categoryCol + 1).setValue('Meubles');
+   732→        categoryFixes++;
+   733→      }
+   734→    }
+   735→  }
+   736→
+   737→  // Second pass: find duplicate IDs and mark rows for deletion
+   738→  // (iterate from the END so deleting doesn't shift indices we still need)
+   739→  var seenIds = {};
+   740→  var rowsToDelete = [];
+   741→  for (var j = 1; j < values.length; j++) {
+   742→    var idVal = String(values[j][idCol] || '').trim();
+   743→    if (!idVal) continue;
+   744→    // Skip guidance rows (emoji/Arabic in ID)
+   745→    if (/[\u0600-\u06FF\u{1F000}-\u{1FFFF}]/u.test(idVal)) continue;
+   746→    if (seenIds[idVal]) {
+   747→      rowsToDelete.push(j + 1); // sheet rows are 1-indexed, +1 because header is row 1
+   748→    } else {
+   749→      seenIds[idVal] = true;
+   750→    }
+   751→  }
+   752→
+   753→  // Delete rows from the BOTTOM UP so indices stay valid
+   754→  rowsToDelete.sort(function(a, b) { return b - a; });
+   755→  for (var k = 0; k < rowsToDelete.length; k++) {
+   756→    sheet.deleteRow(rowsToDelete[k]);
+   757→  }
+   758→
+   759→  var remaining = sheet.getLastRow() - 1; // minus header
+   760→  return jsonOut({
+   761→    ok: true,
+   762→    removed: rowsToDelete.length,
+   763→    fixed_categories: categoryFixes,
+   764→    remaining: remaining
+   765→  });
+   766→}
+   767→
+   768→/**
+   769→ * Full sheet cleanup — runs dedupe + fixes category typos + removes
+   770→ * completely empty rows (no id, no name, no image).
+   771→ *
+   772→ * Called via: ?action=cleanup
+   773→ */
+   774→function doCleanupSheet() {
+   775→  var sheet = ensureProductsSheet();
+   776→  var values = sheet.getDataRange().getValues();
+   777→  if (values.length < 2) return jsonOut({ ok: true, removed: 0, remaining: 0 });
+   778→
+   779→  var header = values[0];
+   780→  var idCol = 0;
+   781→  var nameCol = header.indexOf('name');
+   782→  var imageCol = header.indexOf('image');
+   783→  var categoryCol = header.indexOf('category');
+   784→
+   785→  // Fix "Meubes" → "Meubles"
+   786→  var categoryFixes = 0;
+   787→  if (categoryCol >= 0) {
+   788→    for (var i = 1; i < values.length; i++) {
+   789→      var cat = String(values[i][categoryCol] || '').trim();
+   790→      if (cat === 'Meubes') {
+   791→        sheet.getRange(i + 1, categoryCol + 1).setValue('Meubles');
+   792→        categoryFixes++;
+   793→      }
+   794→    }
+   795→  }
+   796→
+   797→  // Find rows to delete: duplicates OR completely empty
+   798→  var seenIds = {};
+   799→  var rowsToDelete = [];
+   800→  for (var j = 1; j < values.length; j++) {
+   801→    var idVal = String(values[j][idCol] || '').trim();
+   802→    var nameVal = nameCol >= 0 ? String(values[j][nameCol] || '').trim() : '';
+   803→    var imgVal = imageCol >= 0 ? String(values[j][imageCol] || '').trim() : '';
+   804→
+   805→    // Skip guidance rows (emoji/Arabic in ID) — but DON'T delete them
+   806→    // (they're in row 2 and provide admin guidance)
+   807→    if (/[\u0600-\u06FF\u{1F000}-\u{1FFFF}]/u.test(idVal)) continue;
+   808→
+   809→    // Delete completely empty rows (no id, no name, no image)
+   810→    if (!idVal && !nameVal && !imgVal) {
+   811→      rowsToDelete.push(j + 1);
+   812→      continue;
+   813→    }
+   814→
+   815→    // Delete duplicate IDs (keep first)
+   816→    if (idVal && seenIds[idVal]) {
+   817→      rowsToDelete.push(j + 1);
+   818→      continue;
+   819→    }
+   820→    if (idVal) seenIds[idVal] = true;
+   821→  }
+   822→
+   823→  rowsToDelete.sort(function(a, b) { return b - a; });
+   824→  for (var k = 0; k < rowsToDelete.length; k++) {
+   825→    sheet.deleteRow(rowsToDelete[k]);
+   826→  }
+   827→
+   828→  var remaining = sheet.getLastRow() - 1;
+   829→  return jsonOut({
+   830→    ok: true,
+   831→    removed: rowsToDelete.length,
+   832→    fixed_categories: categoryFixes,
+   833→    remaining: remaining
+   834→  });
+   835→}
+   836→

@@ -39,6 +39,11 @@ type FailedOrder = {
   commune: string;
   deliveryLabel: string;
   notes: string;
+  /** Variant name (e.g. "Red" or "Red - L") — preserved across retries so
+   *  the trigger can correctly decrement variant stock when admin confirms. */
+  variant?: string;
+  /** Exact Stock tab entry name (e.g. "Cocotte - 10L") — preserved across retries. */
+  stockKey?: string;
 };
 
 /**
@@ -143,6 +148,10 @@ export async function retryFailedOrders(): Promise<number> {
       commune: order.commune,
       deliveryLabel: order.deliveryLabel,
       notes: order.notes,
+      // Preserve variant + stockKey so the retried order still triggers
+      // correct variant stock decrement when admin confirms.
+      variant: order.variant,
+      stockKey: order.stockKey,
     });
 
     if (ok) {

@@ -493,6 +493,10 @@ export function CodOrderForm({
             commune: form.commune,
             deliveryLabel,
             notes: finalNotes,
+            // CRITICAL: preserve variant + stockKey so the retry still
+            // triggers variant stock decrement when admin confirms.
+            variant: orderVariant,
+            stockKey,
           });
         } catch {
           console.error(
