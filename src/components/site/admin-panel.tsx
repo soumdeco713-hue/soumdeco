@@ -38,10 +38,6 @@ type AdminPanelProps = {
   onReset: () => Promise<void>;
   onClose: () => void;
   syncing?: boolean;
-  /** Optional: Returns the stock count from the Stock tab CSV for a given product name.
-   *  Returns null if no CSV entry exists (product uses admin-panel stock instead).
-   *  Used to display the effective stock value in the edit form. */
-  getStockCount?: (productName: string) => number | null;
 };
 
 // Maximum file size for admin uploads (15MB — anything larger freezes the browser
@@ -213,13 +209,11 @@ function EditForm({
   categories,
   onSave,
   onCancel,
-  getStockCount,
 }: {
   product: Product;
   categories: string[];
   onSave: (p: Product) => Promise<void>;
   onCancel: () => void;
-  getStockCount?: (productName: string) => number | null;
 }) {
   const [draft, setDraft] = useState<Product>(product);
   const [uploading, setUploading] = useState(false);
@@ -778,19 +772,6 @@ function EditForm({
             min={0}
             autoComplete="off"
           />
-          {/* Show CSV stock value from the Stock tab (informational only) */}
-          {(() => {
-            const csvStock = getStockCount?.(draft.name ?? "");
-            if (csvStock !== null && csvStock !== undefined) {
-              return (
-                <p className="mt-1 text-xs text-gray-light">
-                  📋 المخزون في Google Sheet: {csvStock}
-                  {csvStock === 0 && " · نفدت الكمية"}
-                </p>
-              );
-            }
-            return null;
-          })()}
           <p className="mt-1 text-xs text-gray-light">
             💡 إذا كان للمنتج متغيرات (ألوان/أحجام)، حدد مخزون كل متغير بالأسفل.
           </p>
@@ -1316,7 +1297,6 @@ export function AdminPanel({
   onMove,
   onClose,
   syncing = false,
-  getStockCount,
 }: AdminPanelProps) {
   const [authed, setAuthed] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
@@ -1448,7 +1428,6 @@ export function AdminPanel({
             categories={categories}
             onSave={handleSave}
             onCancel={() => setEditing(null)}
-            getStockCount={getStockCount}
           />
         ) : (
           <>
