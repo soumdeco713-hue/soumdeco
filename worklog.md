@@ -3272,3 +3272,34 @@ Stage Summary:
 - Even without setup, admin can use ✅ Process Pending Confirmed Orders to manually sync stock for past Confirmed orders.
 - Files modified: download/apps-script.gs, upload/apps-script.gs, src/lib/failed-orders.ts, src/components/site/cod-order-form.tsx
 - New files: scripts/verify-apps-script.js, scripts/test-stock-logic.js
+
+---
+Task ID: variant-in-product-column-fix
+Agent: main
+Task: Variant info was being written ONLY to the Notes column, not the Product column — so the trigger couldn't extract it to build a stockKey for per-variant stock decrement.
+
+Work Log:
+- Diagnosed: user reported that Orders sheet rows look like:
+    Product: "Cocotte minute 06, 08, 10, 12 litres Ref 01 ×1"
+    Variant column: (empty)
+    Stock Key column: (empty)
+    Notes column: "المقاس: 06L · ..."
+- Root cause: in src/components/site/product-page.tsx, the `orderItems` array was built from `product.name` directly (line 185), WITHOUT embedding the variant summary. Only `extraNotes={variantSummary}` carried the variant info to the order form, where it got merged into `finalNotes` and written to the Notes column.
+- The cart flow (`handleAdd` at line 220) was correct — it included `${product.name} (${variantSummary})` — but the DIRECT CHECKOUT flow (orderItems) didn't include it.
+- Fix: updated `orderItems` to use `name: variantSummary ? \`${product.name} (${variantSummary})\` : product.name` (same pattern as handleAdd).
+- Also moved the `variantSummary` useMemo declaration ABOVE `orderItems` to avoid the temporal dead zone (useMemo is initialized when the component renders, not in a closure, so referencing it before declaration would throw ReferenceError).
+- Verified with /home/z/my-project/scripts/test-variant-flow.js — 4 tests pass:
+  1. ✅ Cocotte 06L → product="Cocotte minute 06, 08, 10, 12 litres Ref 01 (المقاس: 06L) ×1", variant="06L", stockKey="Cocotte minute 06, 08, 10, 12 litres Ref 01 - 06L"
+  2. ✅ Cocotte 08L → same pattern
+  3. ✅ Color+Size combo → variant="Blue - Large", stockKey comma-separated for both
+  4. ✅ No variant → all fields blank (no false positives)
+- Verified full project type-check passes (npx tsc --noEmit — 0 errors).
+
+Stage Summary:
+- BEFORE: variant was in Notes only → trigger couldn't extract it → Variant + Stock Key columns stayed empty → trigger had nothing to decrement per-variant.
+- AFTER: variant is embedded in the Product column name (as "(المقاس: 06L)"), AND extracted to the Variant column, AND used to build the Stock Key column. The Apps Script onStockEdit trigger can now:
+  1. Read the Stock Key column → find exact match in Stock tab → decrement that variant row
+  2. If no match → treat as infinite (skip)
+  3. Never fall back to whole-product decrement
+- File modified: src/components/site/product-page.tsx
+- New test file: scripts/test-variant-flow.js

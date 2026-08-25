@@ -180,9 +180,26 @@ export function ProductPage({
     return "";
   };
 
+  // Human-readable variant summary, e.g. "اللون: أحمر · المقاس: كبير · الوزن: 1كغ".
+  // Empty when nothing is selected — keeps the order notes clean.
+  // DECLARED FIRST so `orderItems` and `handleAdd` below can read it.
+  const variantSummary = useMemo(() => {
+    const parts: string[] = [];
+    if (selectedColor) parts.push(`اللون: ${selectedColor}`);
+    if (selectedSize) parts.push(`المقاس: ${selectedSize}`);
+    for (const ct of customTypes) {
+      const sel = selectedCustom[ct];
+      if (sel) parts.push(`${ct}: ${sel}`);
+    }
+    return parts.join(" · ");
+  }, [selectedColor, selectedSize, selectedCustom, customTypes]);
+
+  // CRITICAL: include variant summary in the order item name, so the
+  // order form can extract it into the Variant column + build the Stock Key
+  // for per-variant stock decrement. Format matches the cart flow (handleAdd).
   const orderItems: OrderItem[] = [
     {
-      name: product.name,
+      name: variantSummary ? `${product.name} (${variantSummary})` : product.name,
       price: adjustedPrice,
       quantity: selectedQty,
     },
@@ -222,19 +239,6 @@ export function ProductPage({
     setAdded(true);
     setTimeout(() => setAdded(false), 2000);
   };
-
-  // Human-readable variant summary, e.g. "اللون: أحمر · المقاس: كبير · الوزن: 1كغ".
-  // Empty when nothing is selected — keeps the order notes clean.
-  const variantSummary = useMemo(() => {
-    const parts: string[] = [];
-    if (selectedColor) parts.push(`اللون: ${selectedColor}`);
-    if (selectedSize) parts.push(`المقاس: ${selectedSize}`);
-    for (const ct of customTypes) {
-      const sel = selectedCustom[ct];
-      if (sel) parts.push(`${ct}: ${sel}`);
-    }
-    return parts.join(" · ");
-  }, [selectedColor, selectedSize, selectedCustom, customTypes]);
 
   return (
     <div
