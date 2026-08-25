@@ -222,6 +222,57 @@ function processAllConfirmedOrders() {
     }
 
     var stockKeyStr = String(row[ORDERS_COL.STOCK_KEY] || '').trim();
+    var variantStr = String(row[ORDERS_COL.VARIANT] || '').trim();
+
+    // ============================================================
+    //  BACKFILL — if Variant or Stock Key is empty but the product
+    //  name contains "(...)" at the end, extract variant server-side.
+    //  This catches OLD orders placed before the frontend fix was
+    //  deployed, so they too can be stock-decremented.
+    // ============================================================
+    if (!stockKeyStr || !variantStr) {
+      var extractedVariant = variantStr;
+      if (!extractedVariant) {
+        var variantMatch = bareName.match(/\(([^)]+)\)\s*$/);
+        if (variantMatch) {
+          var variantContent = variantMatch[1].trim();
+          var variantParts = variantContent.split('·');
+          var extractedValues = [];
+          for (var vp = 0; vp < variantParts.length; vp++) {
+            var part = variantParts[vp].trim();
+            if (!part) continue;
+            var colonIdx = part.lastIndexOf(':');
+            if (colonIdx >= 0) {
+              var value = part.substring(colonIdx + 1).trim();
+              if (value) extractedValues.push(value);
+            } else if (part) {
+              extractedValues.push(part);
+            }
+          }
+          extractedVariant = extractedValues.join(' - ');
+        }
+      }
+
+      if (extractedVariant && !variantStr) {
+        sheet.getRange(i + 2, ORDERS_COL.VARIANT + 1).setValue(extractedVariant);
+        variantStr = extractedVariant;
+      }
+
+      if (extractedVariant && !stockKeyStr) {
+        var cleanProductName = bareName.replace(/\s*\([^)]+\)\s*$/, '').trim();
+        var variantValues = extractedVariant.split(' - ');
+        var keys = [];
+        for (var kv = 0; kv < variantValues.length; kv++) {
+          var vv = variantValues[kv].trim();
+          if (vv) keys.push(cleanProductName + ' - ' + vv);
+        }
+        var newStockKey = keys.join(',');
+        if (newStockKey) {
+          sheet.getRange(i + 2, ORDERS_COL.STOCK_KEY + 1).setValue(newStockKey);
+          stockKeyStr = newStockKey;
+        }
+      }
+    }
 
     try {
       var decremented = false;
@@ -276,14 +327,68 @@ function doCreateOrderFromParams(p) {
   // Auto-add 'Variant' + 'Stock Key' + 'Stock Synced' columns if they don't exist
   ensureOrdersHeaders_(sheet);
 
+  // ============================================================
+  //  SERVER-SIDE VARIANT EXTRACTION (safety net)
+  //  If frontend didn't send `variant` or `stockKey`, extract them
+  //  from the product name server-side. This is the "very first method"
+  //  — works even if the frontend layer fails to populate the columns.
+  //
+  //  Product name format from frontend:
+  //    "Cocotte minute 06, 08, 10, 12 litres Ref 01 (المقاس: 06L) ×1"
+  //    → variant = "06L"
+  //    → stockKey = "Cocotte minute 06, 08, 10, 12 litres Ref 01 - 06L"
+  // ============================================================
+  var productStr = String(p.product || '');
+  var variantStr = String(p.variant || '');
+  var stockKeyStr = String(p.stockKey || '');
+
+  // Strip trailing " ×N" to get bare product name
+  var bareName = productStr.replace(/\s*[×x]\s*\d+\s*$/, '').trim();
+
+  // If variant wasn't sent, try to extract from product name (parenthesized suffix)
+  if (!variantStr) {
+    var variantMatch = bareName.match(/\(([^)]+)\)\s*$/);
+    if (variantMatch) {
+      var variantContent = variantMatch[1].trim();
+      var variantParts = variantContent.split('·');
+      var extractedValues = [];
+      for (var i = 0; i < variantParts.length; i++) {
+        var part = variantParts[i].trim();
+        if (!part) continue;
+        var colonIdx = part.lastIndexOf(':');
+        if (colonIdx >= 0) {
+          var value = part.substring(colonIdx + 1).trim();
+          if (value) extractedValues.push(value);
+        } else if (part) {
+          extractedValues.push(part);
+        }
+      }
+      variantStr = extractedValues.join(' - ');
+    }
+  }
+
+  // If stockKey wasn't sent, build it from bareName + extracted variant
+  if (!stockKeyStr && variantStr) {
+    // Strip the variant parentheses from bareName to get the clean product name
+    var cleanProductName = bareName.replace(/\s*\([^)]+\)\s*$/, '').trim();
+    // stockKey may have multiple variant values ("Red - Large")
+    var variantValues = variantStr.split(' - ');
+    var keys = [];
+    for (var k = 0; k < variantValues.length; k++) {
+      var v = variantValues[k].trim();
+      if (v) keys.push(cleanProductName + ' - ' + v);
+    }
+    stockKeyStr = keys.join(',');
+  }
+
   sheet.appendRow([
     new Date(), 'New',
-    p.product || '', Number(p.quantity) || 1,
+    productStr, Number(p.quantity) || 1,
     (p.price === null || p.price === undefined || p.price === '') ? '' : Number(p.price),
     Number(p.shippingPrice) || 0, Number(p.grandTotal) || 0,
     p.fullName || '', p.phone || '', p.wilaya || '', p.commune || '',
     p.deliveryLabel || '', p.shippingCompanyLabel || '', p.notes || '',
-    p.variant || '', p.stockKey || '', ''  // Stock Synced = empty (not yet processed)
+    variantStr, stockKeyStr, ''  // Stock Synced = empty (not yet processed)
   ]);
   return jsonOut({ ok: true });
 }
@@ -710,7 +815,57 @@ function onStockEdit(e) {
     if (!bareName) return;
 
     var stockKeyStr = String(data[ORDERS_COL.STOCK_KEY] || '').trim();
+    var variantStr = String(data[ORDERS_COL.VARIANT] || '').trim();
     var alreadySynced = String(data[ORDERS_COL.STOCK_SYNCED] || '').trim().toLowerCase();
+
+    // ============================================================
+    //  BACKFILL — if Variant or Stock Key is empty, extract from
+    //  product name server-side. Catches orders where the frontend
+    //  failed to populate these columns.
+    // ============================================================
+    if (!stockKeyStr || !variantStr) {
+      var extractedVariant = variantStr;
+      if (!extractedVariant) {
+        var variantMatch = bareName.match(/\(([^)]+)\)\s*$/);
+        if (variantMatch) {
+          var variantContent = variantMatch[1].trim();
+          var variantParts = variantContent.split('·');
+          var extractedValues = [];
+          for (var vp = 0; vp < variantParts.length; vp++) {
+            var part = variantParts[vp].trim();
+            if (!part) continue;
+            var colonIdx = part.lastIndexOf(':');
+            if (colonIdx >= 0) {
+              var value = part.substring(colonIdx + 1).trim();
+              if (value) extractedValues.push(value);
+            } else if (part) {
+              extractedValues.push(part);
+            }
+          }
+          extractedVariant = extractedValues.join(' - ');
+        }
+      }
+
+      if (extractedVariant && !variantStr) {
+        sheet.getRange(row, ORDERS_COL.VARIANT + 1).setValue(extractedVariant);
+        variantStr = extractedVariant;
+      }
+
+      if (extractedVariant && !stockKeyStr) {
+        var cleanProductName = bareName.replace(/\s*\([^)]+\)\s*$/, '').trim();
+        var variantValues = extractedVariant.split(' - ');
+        var keys = [];
+        for (var kv = 0; kv < variantValues.length; kv++) {
+          var vv = variantValues[kv].trim();
+          if (vv) keys.push(cleanProductName + ' - ' + vv);
+        }
+        var newStockKey = keys.join(',');
+        if (newStockKey) {
+          sheet.getRange(row, ORDERS_COL.STOCK_KEY + 1).setValue(newStockKey);
+          stockKeyStr = newStockKey;
+        }
+      }
+    }
 
     // ─── CASE 1: Confirmed → DECREMENT ───────────────────────────
     if (STOCK_DECREMENTED.indexOf(newStatus) >= 0) {

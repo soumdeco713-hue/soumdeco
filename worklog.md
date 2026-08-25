@@ -3303,3 +3303,50 @@ Stage Summary:
   3. Never fall back to whole-product decrement
 - File modified: src/components/site/product-page.tsx
 - New test file: scripts/test-variant-flow.js
+
+---
+Task ID: server-side-variant-extraction
+Agent: main
+Task: Variant info STILL not appearing in the Variant column — even after the frontend fix. User reports the very first method (extract from product name) can work if the column is populated.
+
+Work Log:
+- Diagnosed: the frontend fix in product-page.tsx IS in place, but the user is likely testing on the live Cloudflare Pages site which still has old deployed code. Old cart items in localStorage also have old name format.
+- Decision: add a SERVER-SIDE safety net so that even if the frontend fails to send variant info, Apps Script will extract it from the product name itself. This is the "very first method" the user mentioned.
+- Updated /home/z/my-project/download/apps-script.gs (and synced to upload/):
+  1. doCreateOrderFromParams — NEW server-side extraction:
+     - If frontend sent empty `variant` but `product` contains "(...)" at the end
+     - Extract variant from the parentheses
+     - Build stockKey as "CleanProductName - VariantValue"
+     - Write all three fields to the row
+  2. onStockEdit trigger — NEW backfill logic:
+     - When trigger fires (status changed to Confirmed)
+     - Reads the row, if Variant or Stock Key is empty
+     - Extracts from product name on-the-fly + writes back to the columns
+     - Then proceeds with normal decrement logic
+  3. processAllConfirmedOrders — NEW backfill logic:
+     - Scans all Confirmed orders
+     - For each: backfills Variant + Stock Key if missing (same logic as trigger)
+     - Then attempts stock decrement using the now-populated Stock Key
+     - This means OLD orders placed before the frontend fix can still be processed correctly!
+- Verified with /home/z/my-project/scripts/test-server-extraction.js — 6 tests pass:
+  1. ✅ Frontend sent variant only (no stockKey) → server fills stockKey
+  2. ✅ Frontend sent NOTHING (old frontend) → server extracts both
+  3. ✅ Product name with commas (Cocotte "06, 08, 10, 12") → variant extracted correctly
+  4. ✅ Color+Size combo → both variant values extracted, comma-separated stockKey
+  5. ✅ Plain order without variant → variant="", stockKey="" (no false positives)
+  6. ✅ Frontend sent full info → server preserves as-is (no override)
+- Verified syntax: node verify-apps-script.js → both files OK (1163 lines).
+- Verified TypeScript: npx tsc --noEmit → 0 errors.
+
+Stage Summary:
+- The Variant column will now ALWAYS be populated, no matter what:
+  - If frontend sends variant → server uses it
+  - If frontend sends empty variant but product name has "(...)" → server extracts
+  - If product name has no variant → variant="" (correct — no variant to track)
+- Same for Stock Key column — always populated when there's a variant
+- OLD orders can now be processed correctly via "✅ Process Pending Confirmed Orders":
+  - The batch processor backfills Variant + Stock Key for orders that are missing them
+  - Then attempts the stock decrement using the freshly-extracted Stock Key
+- This is the "very first method" the user wanted: extract variant from product name. It now runs on the server side as a safety net for any frontend gaps.
+- Files modified: download/apps-script.gs, upload/apps-script.gs
+- New test file: scripts/test-server-extraction.js
