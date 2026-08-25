@@ -442,47 +442,75 @@ function setupStatistics() {
   }
   // Clear existing content
   sheet.clear();
-  // Set headers + formulas
-  sheet.getRange(1, 1).setValue('📊 Statistics (auto-updated)');
-  sheet.getRange(1, 1).setFontWeight('bold').setFontSize(14);
+  
+  // Formatting
+  sheet.setColumnWidth(1, 350);
+  sheet.setColumnWidth(2, 100);
+  sheet.setColumnWidth(3, 100);
+  sheet.setColumnWidth(4, 150);
+  sheet.setColumnWidth(5, 150);
 
-  // Total orders
-  sheet.getRange(3, 1).setValue('Total Orders:');
-  sheet.getRange(3, 1).setFontWeight('bold');
-  sheet.getRange(3, 2).setValue('=COUNTA(Orders!C2:C)');
+  // Title
+  sheet.getRange(1, 1).setValue('📊 SOUM DECO — Tableau de bord');
+  sheet.getRange(1, 1).setFontWeight('bold').setFontSize(16).setBackground('#FAF8F4');
+  sheet.getRange(1, 1, 1, 5).merge().setBackground('#FAF8F4');
+  
+  // === SECTION 1: SUMMARY ===
+  sheet.getRange(3, 1).setValue('📦 Résumé');
+  sheet.getRange(3, 1).setFontWeight('bold').setFontSize(12).setBackground('#F1ECE3');
+  sheet.getRange(3, 1, 1, 5).merge().setBackground('#F1ECE3');
+  
+  sheet.getRange(4, 1).setValue('Total Commandes').setFontWeight('bold');
+  sheet.getRange(4, 2).setValue('=COUNTA(Orders!C2:C)').setNumberFormat('0');
+  
+  sheet.getRange(5, 1).setValue('Chiffre d\'Affaires (DZD)').setFontWeight('bold');
+  sheet.getRange(5, 2).setValue('=SUM(Orders!G2:G)').setNumberFormat('#,##0');
+  
+  sheet.getRange(6, 1).setValue('Panier Moyen (DZD)').setFontWeight('bold');
+  sheet.getRange(6, 2).setValue('=IF(COUNTA(Orders!C2:C)>0, SUM(Orders!G2:G)/COUNTA(Orders!C2:C), 0)').setNumberFormat('#,##0');
 
-  // Total revenue
-  sheet.getRange(4, 1).setValue('Total Revenue (DZD):');
-  sheet.getRange(4, 1).setFontWeight('bold');
-  sheet.getRange(4, 2).setValue('=SUM(Orders!G2:G)');
+  // === SECTION 2: TOP 10 PRODUCTS ===
+  sheet.getRange(8, 1).setValue('🏆 Top 10 Produits');
+  sheet.getRange(8, 1).setFontWeight('bold').setFontSize(12).setBackground('#F1ECE3');
+  sheet.getRange(8, 1, 1, 5).merge().setBackground('#F1ECE3');
+  
+  sheet.getRange(9, 1).setValue('Produit').setFontWeight('bold').setBackground('#E8E4DC');
+  sheet.getRange(9, 2).setValue('Commandes').setFontWeight('bold').setBackground('#E8E4DC');
+  sheet.getRange(9, 3).setValue('CA (DZD)').setFontWeight('bold').setBackground('#E8E4DC');
+  sheet.getRange(10, 1).setValue('=QUERY(Orders!C2:G, "SELECT C, COUNT(C), SUM(G) WHERE C IS NOT NULL GROUP BY C ORDER BY COUNT(C) DESC LIMIT 10", 1)');
+  
+  // === SECTION 3: TOP 10 WILAYAS ===
+  sheet.getRange(22, 1).setValue('📍 Top 10 Wilayas');
+  sheet.getRange(22, 1).setFontWeight('bold').setFontSize(12).setBackground('#F1ECE3');
+  sheet.getRange(22, 1, 1, 5).merge().setBackground('#F1ECE3');
+  
+  sheet.getRange(23, 1).setValue('Wilaya').setFontWeight('bold').setBackground('#E8E4DC');
+  sheet.getRange(23, 2).setValue('Commandes').setFontWeight('bold').setBackground('#E8E4DC');
+  sheet.getRange(23, 3).setValue('CA (DZD)').setFontWeight('bold').setBackground('#E8E4DC');
+  sheet.getRange(24, 1).setValue('=QUERY(Orders!J2:G, "SELECT J, COUNT(J), SUM(G) WHERE J IS NOT NULL GROUP BY J ORDER BY COUNT(J) DESC LIMIT 10", 1)');
 
-  // Top 10 Products
-  sheet.getRange(6, 1).setValue('Top 10 Products');
-  sheet.getRange(6, 1).setFontWeight('bold').setFontSize(12);
-  sheet.getRange(7, 1).setValue('Product');
-  sheet.getRange(7, 2).setValue('Order Count');
-  sheet.getRange(7, 1).setFontWeight('bold');
-  sheet.getRange(7, 2).setFontWeight('bold');
-  // QUERY: count orders per product, top 10
-  // Column C = Product (index 3 in 1-indexed)
-  sheet.getRange(8, 1).setValue('=QUERY(Orders!C2:C, "SELECT C, COUNT(C) WHERE C IS NOT NULL GROUP BY C ORDER BY COUNT(C) DESC LIMIT 10", 0)');
-  sheet.getRange(8, 1).setFontWeight('bold');
+  // === SECTION 4: ORDER STATUS BREAKDOWN ===
+  sheet.getRange(36, 1).setValue('📋 Statut des Commandes');
+  sheet.getRange(36, 1).setFontWeight('bold').setFontSize(12).setBackground('#F1ECE3');
+  sheet.getRange(36, 1, 1, 5).merge().setBackground('#F1ECE3');
+  
+  sheet.getRange(37, 1).setValue('Statut').setFontWeight('bold').setBackground('#E8E4DC');
+  sheet.getRange(37, 2).setValue('Nombre').setFontWeight('bold').setBackground('#E8E4DC');
+  sheet.getRange(38, 1).setValue('=QUERY(Orders!B2:B, "SELECT B, COUNT(B) WHERE B IS NOT NULL GROUP BY B ORDER BY COUNT(B) DESC LIMIT 10", 1)');
 
-  // Top 10 Wilayas
-  sheet.getRange(20, 1).setValue('Top 10 Wilayas');
-  sheet.getRange(20, 1).setFontWeight('bold').setFontSize(12);
-  sheet.getRange(21, 1).setValue('Wilaya');
-  sheet.getRange(21, 2).setValue('Order Count');
-  sheet.getRange(21, 1).setFontWeight('bold');
-  sheet.getRange(21, 2).setFontWeight('bold');
-  // Column J = Wilaya (index 10 in 1-indexed)
-  sheet.getRange(22, 1).setValue('=QUERY(Orders!J2:J, "SELECT J, COUNT(J) WHERE J IS NOT NULL GROUP BY J ORDER BY COUNT(J) DESC LIMIT 10", 0)');
+  // === SECTION 5: TOP 5 WILAYAS BY REVENUE ===
+  sheet.getRange(50, 1).setValue('💰 Top 5 Wilayas par CA');
+  sheet.getRange(50, 1).setFontWeight('bold').setFontSize(12).setBackground('#F1ECE3');
+  sheet.getRange(50, 1, 1, 5).merge().setBackground('#F1ECE3');
+  
+  sheet.getRange(51, 1).setValue('Wilaya').setFontWeight('bold').setBackground('#E8E4DC');
+  sheet.getRange(51, 2).setValue('CA (DZD)').setFontWeight('bold').setBackground('#E8E4DC');
+  sheet.getRange(52, 1).setValue('=QUERY(Orders!J2:G, "SELECT J, SUM(G) WHERE J IS NOT NULL GROUP BY J ORDER BY SUM(G) DESC LIMIT 5", 1)');
 
-  // Column widths
-  sheet.setColumnWidth(1, 300);
-  sheet.setColumnWidth(2, 150);
-
-  return jsonOut({ ok: true, message: 'Statistics tab updated' });
+  // Freeze top row
+  sheet.setFrozenRows(1);
+  
+  return jsonOut({ ok: true, message: 'Statistics tab updated with 5 sections' });
 }
 
 function setupAllSheets() {
