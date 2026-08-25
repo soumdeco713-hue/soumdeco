@@ -183,6 +183,8 @@ function doCreateProduct(p) {
   addToStockTab_(p.name || '');
   // Also sync stock from product to Stock tab (if admin set a stock value)
   updateStockTab_(p.name || '', p.stock);
+  // Also sync per-variant stock to Stock tab (if variants have stock values)
+  updateVariantStockTab_(p.name || '', p.variants || '');
   return jsonOut({ ok: true });
 }
 
@@ -193,6 +195,8 @@ function doUpdateProduct(p) {
   sheet.getRange(rowIdx + 2, 1, 1, PRODUCTS_COLS.length).setValues([buildProductRow_(p)]);
   // Sync stock from product to Stock tab (if admin set a stock value)
   updateStockTab_(p.name || '', p.stock);
+  // Also sync per-variant stock to Stock tab
+  updateVariantStockTab_(p.name || '', p.variants || '');
   return jsonOut({ ok: true });
 }
 
@@ -287,6 +291,84 @@ function updateStockTab_(productName, stockValue) {
   }
   // Not found — add new row
   sheet.appendRow([productName, count]);
+}
+
+// ============================================================
+//  updateVariantStockTab_ — Sync per-variant stock to Stock tab
+// ============================================================
+//  Called from doCreateProduct + doUpdateProduct.
+//  Parses the variants string and for each variant that has
+//  a stock value, creates/updates a row in the Stock tab
+//  with name "ProductName - VariantName" and the stock count.
+//
+//  Variants format: "color:Red:0|0,color:Blue:0|3,color:Green:0"
+//  The |stock suffix is optional — only variants WITH it get
+//  a Stock tab entry.
+//
+//  - Format: "ProductName - VariantName","stockCount"
+//  - Safe: only touches rows for THIS product's variants
+//  - Never overwrites other products' rows
+// ============================================================
+function updateVariantStockTab_(productName, variantsStr) {
+  if (!productName || !variantsStr) return;
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(STOCK_SHEET);
+  if (!sheet) return;
+
+  // Parse variants string: "color:Red:0|0,color:Blue:0|3,..."
+  var parts = variantsStr.split(',');
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i].trim();
+    if (!part) continue;
+
+    // Check for |stock suffix
+    var pipeIdx = part.lastIndexOf('|');
+    if (pipeIdx < 0) continue; // no stock set for this variant
+
+    var stockStr = part.substring(pipeIdx + 1).trim();
+    var mainPart = part.substring(0, pipeIdx).trim();
+
+    // Parse stock value (must be a number >= 0)
+    var stockNum = Number(stockStr);
+    if (isNaN(stockNum) || stockNum < 0) continue;
+
+    // Extract variant name from mainPart: "type:name:priceAdjustment"
+    // The name is between the first and last colon
+    var firstColon = mainPart.indexOf(':');
+    if (firstColon < 0) continue;
+    var rest = mainPart.substring(firstColon + 1);
+    var lastColon = rest.lastIndexOf(':');
+    var variantName;
+    if (lastColon < 0) {
+      variantName = rest.trim();
+    } else {
+      variantName = rest.substring(0, lastColon).trim();
+    }
+    if (!variantName) continue;
+
+    // Build the Stock tab entry name: "ProductName - VariantName"
+    var stockTabName = productName + ' - ' + variantName;
+
+    // Search for existing row and update, or add new
+    var lastRow = sheet.getLastRow();
+    var found = false;
+    if (lastRow >= 2) {
+      var names = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      for (var j = 0; j < names.length; j++) {
+        if (String(names[j][0] || '').trim() === stockTabName) {
+          // Found — update the count
+          sheet.getRange(j + 2, 2).setValue(String(stockNum));
+          found = true;
+          break;
+        }
+      }
+    }
+    if (!found) {
+      // Not found — add new row
+      sheet.appendRow([stockTabName, String(stockNum)]);
+    }
+  }
 }
 
 function doResetProducts() {
