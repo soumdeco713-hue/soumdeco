@@ -483,7 +483,43 @@ export async function clientSubmitOrder(payload: {
     params.set("commune", (payload.commune || "").substring(0, 50));
     params.set("deliveryLabel", (payload.deliveryLabel || "").substring(0, 50));
     params.set("notes", (payload.notes || "").substring(0, 200));
-    params.set("variant", (payload.variant || "").substring(0, 100));
+
+    // ============================================================
+    //  VARIANT EXTRACTION — extract variant from product name
+    //  and send as separate URL param for the new Variant column.
+    //
+    //  This MUST be here (in clientSubmitOrder) — not in cod-order-form.tsx —
+    //  because the cod-order-form is dynamically imported and the extraction
+    //  code might end up in a different chunk. Putting it HERE guarantees
+    //  it's in the SAME chunk as the URL params.
+    //
+    //  Product names with variants look like:
+    //    "Cocotte (اللون: Red)" → variant = "Red"
+    //    "Product (المقاس: 10L)" → variant = "10L"
+    //    "Simple Product" → variant = "" (no variant)
+    // ============================================================
+    let variantParam = payload.variant || "";
+    // If variant wasn't passed from the form, extract it from the product name
+    if (!variantParam && payload.product) {
+      const variantMatch = payload.product.match(/\(([^)]+)\)\s*$/);
+      if (variantMatch) {
+        const variantContent = variantMatch[1].trim();
+        const variantParts = variantContent.split("·");
+        const extractedValues: string[] = [];
+        for (const part of variantParts) {
+          const trimmed = part.trim();
+          const colonIdx = trimmed.lastIndexOf(":");
+          if (colonIdx >= 0) {
+            const value = trimmed.substring(colonIdx + 1).trim();
+            if (value) extractedValues.push(value);
+          } else if (trimmed) {
+            extractedValues.push(trimmed);
+          }
+        }
+        variantParam = extractedValues.join(" - ");
+      }
+    }
+    params.set("variant", variantParam.substring(0, 100));
 
     const url = `${base}?${params.toString()}`;
 
