@@ -473,6 +473,44 @@ function onStockEdit(e) {
     var bareName = productName.replace(/\s*[×x]\s*\d+\s*$/, '').trim();
     if (!bareName) return;
 
+    // ============================================================
+    //  VARIANT EXTRACTION
+    //  ============================================================
+    //  Order names with variants look like:
+    //    "Cocotte minute (color: Red)" → product="Cocotte minute", variant="Red"
+    //    "Cocotte minute (size: Large)" → product="Cocotte minute", variant="Large"
+    //    "Service a table" → product="Service a table", variant=null (no variant)
+    //
+    //  The Stock tab has variant entries as: "ProductName - VariantName"
+    //  We extract the variant from the parentheses and look for that entry.
+    //  If found → decrement variant stock. If not found → product-level stock.
+    // ============================================================
+    var variantName = null;
+    var parenMatch = bareName.match(/\(([^)]+)\)\s*$/);
+    if (parenMatch) {
+      var variantContent = parenMatch[1].trim();
+      // Variant format: "color: Red" or "size: Large" or "color: Red · size: Large"
+      // Extract the VALUE (after the colon), handle multi-variant with " · " separator
+      var variantParts = variantContent.split('·');
+      var extractedNames = [];
+      for (var vp = 0; vp < variantParts.length; vp++) {
+        var vpTrimmed = variantParts[vp].trim();
+        var colonIdx = vpTrimmed.lastIndexOf(':');
+        if (colonIdx >= 0) {
+          var value = vpTrimmed.substring(colonIdx + 1).trim();
+          if (value) extractedNames.push(value);
+        } else {
+          // No colon — use the whole content as variant name
+          if (vpTrimmed) extractedNames.push(vpTrimmed);
+        }
+      }
+      if (extractedNames.length > 0) {
+        variantName = extractedNames.join(' - ');
+      }
+      // Strip the parentheses from bareName for product-level lookup
+      bareName = bareName.replace(/\s*\([^)]+\)\s*$/, '').trim();
+    }
+
     // Statuses that have already decremented stock (stock was reduced):
     var STOCK_DECREMENTED = ['confirmed', 'shipped', 'delivered'];
 
@@ -480,14 +518,25 @@ function onStockEdit(e) {
     // → DECREMENT stock (only if old status was NOT already a decremented one)
     if (STOCK_DECREMENTED.indexOf(newStatus) >= 0) {
       if (STOCK_DECREMENTED.indexOf(oldStatus) >= 0) return; // already decremented
-      decrementProductStock_(bareName, qty);
+      // Try variant-specific stock first, then product-level
+      if (variantName) {
+        var decremented = decrementVariantStock_(bareName, variantName, qty);
+        if (!decremented) decrementProductStock_(bareName, qty); // fallback to product-level
+      } else {
+        decrementProductStock_(bareName, qty);
+      }
     }
 
     // CASE 2: Transition INTO cancelled (from a decremented status)
     // → REVERT stock (add back the quantity)
     if (newStatus === 'cancelled') {
       if (STOCK_DECREMENTED.indexOf(oldStatus) < 0) return; // wasn't decremented, nothing to revert
-      incrementProductStock_(bareName, qty);
+      if (variantName) {
+        var reverted = incrementVariantStock_(bareName, variantName, qty);
+        if (!reverted) incrementProductStock_(bareName, qty); // fallback to product-level
+      } else {
+        incrementProductStock_(bareName, qty);
+      }
     }
 
   } catch (err) {
@@ -544,6 +593,72 @@ function incrementProductStock_(productName, qty) {
       return;
     }
   }
+}
+
+// ============================================================
+//  VARIANT-SPECIFIC STOCK DECREMENT/INCREMENT
+//  ============================================================
+//  These functions look for "ProductName - VariantName" in the Stock tab.
+//  If found → decrement/increment that specific variant's stock.
+//  If not found → return false (caller falls back to product-level stock).
+//
+//  Safe: never touches other products' rows (exact name match required).
+//  Safe: stock never goes negative (Math.max(0, ...)).
+//  Safe: if stock is null/empty → skip (don't touch — can't decrement unlimited).
+// ============================================================
+
+/** Find "ProductName - VariantName" in Stock tab and decrement by qty.
+ *  Returns true if found + decremented, false if not found. */
+function decrementVariantStock_(productName, variantName, qty) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(STOCK_SHEET);
+  if (!sheet) return false;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return false;
+  var stockTabName = productName + ' - ' + variantName;
+  var values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+  for (var i = 0; i < values.length; i++) {
+    var rowName = String(values[i][0] || '').trim();
+    if (rowName === stockTabName) {
+      var current = values[i][1];
+      var currentNum = (current === '' || current === null || current === undefined)
+        ? null
+        : Number(current);
+      if (currentNum === null || isNaN(currentNum)) return false; // can't decrement unlimited
+      var next = Math.max(0, currentNum - qty);
+      sheet.getRange(i + 2, 2).setValue(next);
+      Logger.log('[Stock] DECREMENT VARIANT ' + stockTabName + ' -' + qty + ' = ' + next);
+      return true; // found + decremented
+    }
+  }
+  return false; // not found
+}
+
+/** Find "ProductName - VariantName" in Stock tab and increment by qty (revert cancel).
+ *  Returns true if found + incremented, false if not found. */
+function incrementVariantStock_(productName, variantName, qty) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(STOCK_SHEET);
+  if (!sheet) return false;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return false;
+  var stockTabName = productName + ' - ' + variantName;
+  var values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+  for (var i = 0; i < values.length; i++) {
+    var rowName = String(values[i][0] || '').trim();
+    if (rowName === stockTabName) {
+      var current = values[i][1];
+      var currentNum = (current === '' || current === null || current === undefined)
+        ? 0
+        : Number(current);
+      if (isNaN(currentNum)) currentNum = 0;
+      var next = currentNum + qty;
+      sheet.getRange(i + 2, 2).setValue(next);
+      Logger.log('[Stock] INCREMENT VARIANT (revert) ' + stockTabName + ' +' + qty + ' = ' + next);
+      return true; // found + incremented
+    }
+  }
+  return false; // not found
 }
 
 // ============================================================
