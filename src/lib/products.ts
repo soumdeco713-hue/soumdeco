@@ -18,6 +18,13 @@ export type ProductVariant = {
   name: string;
   /** Added to the base price (can be 0 or negative). Optional. */
   priceAdjustment?: number;
+  /** Optional per-variant stock count.
+   *  - null/undefined = unlimited/unknown (use product-level stock)
+   *  - 0 = out of stock (variant shows "نفدت الكمية")
+   *  - N = N items left (triggers low-stock badge if 1-3)
+   * Encoded in the variants string with a `|` separator: type:name:priceAdjustment|stock
+   * Backward compatible — old 3-field strings (no `|`) parse with stock = undefined. */
+  stock?: number | null;
 };
 
 /** Quantity tier — a special offer triggered by the customer's order quantity.
@@ -738,14 +745,38 @@ export function parseVariants(s: string | undefined | null): ProductVariant[] {
   for (const part of trimmed.split(VARIANT_SEP)) {
     const clean = part.trim();
     if (!clean) continue;
+
+    // NEW: Extract optional `|stock` suffix BEFORE parsing the rest.
+    // Format: type:name:priceAdjustment|stock
+    // The `|` separator was chosen because:
+    //  - Not used in any existing variant data (verified across all 9 products)
+    //  - Doesn't conflict with `:` (within entries) or `,` (between entries)
+    //  - Old strings without `|` → stock = undefined → unlimited (backward compat)
+    let stock: number | null | undefined = undefined;
+    let mainPart = clean;
+    const pipeIdx = clean.lastIndexOf("|");
+    if (pipeIdx >= 0) {
+      const stockStr = clean.slice(pipeIdx + 1).trim();
+      mainPart = clean.slice(0, pipeIdx).trim();
+      if (stockStr === "" || stockStr.toLowerCase() === "null") {
+        stock = null; // explicitly unlimited
+      } else {
+        const stockNum = Number(stockStr);
+        if (!isNaN(stockNum) && stockNum >= 0) {
+          stock = stockNum;
+        }
+        // If not a valid number, leave stock = undefined (treat as no stock field)
+      }
+    }
+
     // Split from the LEFT into at most 3 parts: type, name, priceAdjustment.
     // Names CAN contain colons (rare but possible); the priceAdjustment is the
     // LAST segment.
-    const firstColon = clean.indexOf(":");
+    const firstColon = mainPart.indexOf(":");
     if (firstColon < 0) continue;
-    const type = clean.slice(0, firstColon).trim();
+    const type = mainPart.slice(0, firstColon).trim();
     if (!type) continue; // accept any non-empty type (color, size, or custom)
-    const rest = clean.slice(firstColon + 1);
+    const rest = mainPart.slice(firstColon + 1);
     const lastColon = rest.lastIndexOf(":");
     let name: string;
     let adjustment = 0;
@@ -765,6 +796,8 @@ export function parseVariants(s: string | undefined | null): ProductVariant[] {
       type: type as "color" | "size",
       name,
       priceAdjustment: adjustment,
+      // Only include stock if it was explicitly set (undefined = not in string)
+      ...(stock !== undefined ? { stock } : {}),
     });
   }
   return out;
@@ -775,7 +808,15 @@ export function joinVariants(variants: ProductVariant[] | undefined | null): str
   if (!Array.isArray(variants) || variants.length === 0) return "";
   return variants
     .filter((v) => v && v.type && v.name)
-    .map((v) => `${v.type}:${v.name}:${Number(v.priceAdjustment ?? 0)}`)
+    .map((v) => {
+      const base = `${v.type}:${v.name}:${Number(v.priceAdjustment ?? 0)}`;
+      // Only append `|stock` if stock is explicitly set (number, including 0)
+      // null/undefined → omit (unlimited, backward compat with old strings)
+      if (typeof v.stock === "number" && !isNaN(v.stock) && v.stock >= 0) {
+        return `${base}|${v.stock}`;
+      }
+      return base;
+    })
     .join(VARIANT_SEP);
 }
 
@@ -792,10 +833,20 @@ export function normalizeVariants(raw: unknown): ProductVariant[] {
           v.priceAdjustment == null
             ? undefined
             : Number(v.priceAdjustment);
+        // Preserve stock field if present (null or number)
+        const stockRaw = v.stock;
+        let stock: number | null | undefined = undefined;
+        if (stockRaw === null) {
+          stock = null;
+        } else if (stockRaw !== undefined && stockRaw !== "") {
+          const s = Number(stockRaw);
+          if (!isNaN(s) && s >= 0) stock = s;
+        }
         return {
           type,
           name: String(v.name),
           priceAdjustment: typeof adj === "number" && !isNaN(adj) ? adj : undefined,
+          ...(stock !== undefined ? { stock } : {}),
         };
       })
       .filter((v) => v.name.trim() !== "");

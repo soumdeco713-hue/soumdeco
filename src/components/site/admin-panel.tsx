@@ -378,6 +378,22 @@ function EditForm({
     }));
   };
 
+  // NEW: Update per-variant stock. null = unlimited, 0 = out of stock, N = N left.
+  // This is encoded into the variants string as `type:name:priceAdjustment|stock`.
+  const updateVariantStock = (idx: number, stock: number | null) => {
+    setDraft((d) => ({
+      ...d,
+      variants: (d.variants ?? []).map((v, i) =>
+        i === idx
+          ? {
+              ...v,
+              stock: stock === null || isNaN(stock) ? null : Math.max(0, stock),
+            }
+          : v,
+      ),
+    }));
+  };
+
   // Quantity tiers management — special offers at specific quantities.
   // Each tier can combine a free-shipping benefit AND a discount amount.
   const tiers = draft.quantityTiers ?? [];
@@ -720,6 +736,42 @@ function EditForm({
           />
         </div>
 
+        {/* 6c. Product Stock (NEW — per-product stock management) */}
+        <div>
+          <label htmlFor={`fld-stock-${draft.id ?? "new"}`} className="mb-1 block text-sm font-medium text-charcoal">
+            المخزون{" "}
+            <span className="text-xs font-normal text-gray-light">
+              (فارغ = غير محدود ∞ · 0 = نفد · رقم = الكمية المتبقية)
+            </span>
+          </label>
+          <input
+            id={`fld-stock-${draft.id ?? "new"}`}
+            name="productStock"
+            type="number"
+            value={
+              draft.stock === null || draft.stock === undefined
+                ? ""
+                : draft.stock
+            }
+            onChange={(e) =>
+              setDraft({
+                ...draft,
+                stock:
+                  e.target.value === ""
+                    ? null
+                    : Math.max(0, Number(e.target.value)),
+              })
+            }
+            className={inputClass}
+            placeholder="فارغ = غير محدود"
+            min={0}
+            autoComplete="off"
+          />
+          <p className="mt-1 text-xs text-gray-light">
+            💡 إذا كان للمنتج متغيرات (ألوان/أحجام)، حدد مخزون كل متغير بالأسفل.
+          </p>
+        </div>
+
         {/* 7. Colors — simple list of name + optional price adjustment */}
         <div>
           <div className="mb-2 flex items-center justify-between">
@@ -741,13 +793,14 @@ function EditForm({
           {variants.some((v) => v.type === "color") ? (
             <div className="space-y-2">
               {variants.map((v, i) => v.type === "color" && (
-                <div key={`color-${i}`} className="flex gap-2">
+                <div key={`color-${i}`} className="flex flex-wrap gap-2">
                   <input
                     type="text"
                     value={v.name}
                     onChange={(e) => updateVariantName(i, e.target.value)}
                     placeholder="مثال: أحمر"
                     className={`${inputClass} flex-1`}
+                    style={{ minWidth: "120px" }}
                   />
                   <input
                     type="number"
@@ -756,9 +809,26 @@ function EditForm({
                     placeholder="0"
                     aria-label="تعديل السعر (دج)"
                     className={`${inputClass} flex-shrink-0`}
-                    style={{ width: "120px" }}
+                    style={{ width: "100px" }}
                   />
                   <span className="self-center font-arabic text-xs text-gray-light">دج</span>
+                  <input
+                    type="number"
+                    value={v.stock ?? ""}
+                    onChange={(e) =>
+                      updateVariantStock(
+                        i,
+                        e.target.value === "" ? null : Number(e.target.value),
+                      )
+                    }
+                    placeholder="∞"
+                    aria-label="المخزون"
+                    className={`${inputClass} flex-shrink-0`}
+                    style={{ width: "90px" }}
+                    min={0}
+                    autoComplete="off"
+                  />
+                  <span className="self-center font-arabic text-xs text-gray-light">مخزون</span>
                   <button
                     type="button"
                     onClick={() => removeVariant(i)}
@@ -770,7 +840,7 @@ function EditForm({
                 </div>
               ))}
               <p className="font-arabic text-[11px] text-gray-light">
-                التعديل الإضافي يُضاف إلى السعر الأساسي (مثال: +100 دج للّون المميّز).
+                التعديل الإضافي يُضاف إلى السعر الأساسي (مثال: +100 دج للّون المميّز). مخزون فارغ = غير محدود ∞ · 0 = نفد.
               </p>
             </div>
           ) : (
@@ -801,13 +871,14 @@ function EditForm({
           {variants.some((v) => v.type === "size") ? (
             <div className="space-y-2">
               {variants.map((v, i) => v.type === "size" && (
-                <div key={`size-${i}`} className="flex gap-2">
+                <div key={`size-${i}`} className="flex flex-wrap gap-2">
                   <input
                     type="text"
                     value={v.name}
                     onChange={(e) => updateVariantName(i, e.target.value)}
                     placeholder="مثال: كبير"
                     className={`${inputClass} flex-1`}
+                    style={{ minWidth: "120px" }}
                   />
                   <input
                     type="number"
@@ -816,9 +887,26 @@ function EditForm({
                     placeholder="0"
                     aria-label="تعديل السعر (دج)"
                     className={`${inputClass} flex-shrink-0`}
-                    style={{ width: "120px" }}
+                    style={{ width: "100px" }}
                   />
                   <span className="self-center font-arabic text-xs text-gray-light">دج</span>
+                  <input
+                    type="number"
+                    value={v.stock ?? ""}
+                    onChange={(e) =>
+                      updateVariantStock(
+                        i,
+                        e.target.value === "" ? null : Number(e.target.value),
+                      )
+                    }
+                    placeholder="∞"
+                    aria-label="المخزون"
+                    className={`${inputClass} flex-shrink-0`}
+                    style={{ width: "90px" }}
+                    min={0}
+                    autoComplete="off"
+                  />
+                  <span className="self-center font-arabic text-xs text-gray-light">مخزون</span>
                   <button
                     type="button"
                     onClick={() => removeVariant(i)}
@@ -830,7 +918,7 @@ function EditForm({
                 </div>
               ))}
               <p className="font-arabic text-[11px] text-gray-light">
-                التعديل الإضافي يُضاف إلى السعر الأساسي (مثال: +50 دج للمقاس الكبير).
+                التعديل الإضافي يُضاف إلى السعر الأساسي (مثال: +50 دج للمقاس الكبير). مخزون فارغ = غير محدود ∞ · 0 = نفد.
               </p>
             </div>
           ) : (
@@ -929,13 +1017,14 @@ function EditForm({
                         </div>
                         <div className="space-y-2">
                           {ctVariants.map(({ v, i }) => (
-                            <div key={i} className="flex gap-2">
+                            <div key={i} className="flex flex-wrap gap-2">
                               <input
                                 type="text"
                                 value={v.name}
                                 onChange={(e) => updateVariantName(i, e.target.value)}
                                 placeholder="مثال: 1 كغ"
                                 className={`${inputClass} flex-1`}
+                                style={{ minWidth: "120px" }}
                               />
                               <input
                                 type="number"
@@ -944,9 +1033,26 @@ function EditForm({
                                 placeholder="0"
                                 aria-label="تعديل السعر (دج)"
                                 className={`${inputClass} flex-shrink-0`}
-                                style={{ width: "120px" }}
+                                style={{ width: "100px" }}
                               />
                               <span className="self-center font-arabic text-xs text-gray-light">دج</span>
+                              <input
+                                type="number"
+                                value={v.stock ?? ""}
+                                onChange={(e) =>
+                                  updateVariantStock(
+                                    i,
+                                    e.target.value === "" ? null : Number(e.target.value),
+                                  )
+                                }
+                                placeholder="∞"
+                                aria-label="المخزون"
+                                className={`${inputClass} flex-shrink-0`}
+                                style={{ width: "90px" }}
+                                min={0}
+                                autoComplete="off"
+                              />
+                              <span className="self-center font-arabic text-xs text-gray-light">مخزون</span>
                               <button
                                 type="button"
                                 onClick={() => removeVariant(i)}
@@ -962,9 +1068,7 @@ function EditForm({
                     );
                   })}
                   <p className="font-arabic text-[11px] text-gray-light">
-                    التعديل الإضافي يُضاف إلى السعر الأساسي. للتحكم في المخزون لكل خيار:
-                    أضف صف في تبويب Stock باسم المنتج متبوعاً بـ &quot; - &quot; ثم اسم الخيار
-                    (مثال: &quot;Service a table - Red&quot;).
+                    التعديل الإضافي يُضاف إلى السعر الأساسي. لكل خيار: مخزون فارغ = غير محدود ∞ · 0 = نفد · رقم = الكمية المتبقية.
                   </p>
                 </div>
               ) : (

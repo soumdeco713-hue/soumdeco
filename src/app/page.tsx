@@ -201,15 +201,70 @@ export default function Home() {
   // never show "stuck at loading" skeletons when we have data to display.
   const showSkeletons = catalog.loading && validProducts.length === 0 && !catalog.hydrated;
 
-  // Rupture + low stock checks — from the Stock tab (polled every 5.5 min)
+  // ============================================================
+  //  ENHANCED STOCK CHECKS
+  //  ============================================================
+  //  Priority (CSV from Stock tab takes precedence — preserves existing stock):
+  //    1. Stock tab CSV (existing) → if entry exists, use it
+  //    2. Product.stock / Variant.stock from admin panel (new) → fallback
+  //
+  //  This guarantees:
+  //  - Products with existing stock in the sheet → SAME behavior as before
+  //  - Products without CSV entry → admin panel stock is used (NEW feature)
+  //  - Admin can always override by setting stock in the sheet CSV
+  //  ============================================================
   const isRupture = useCallback(
-    (product: Product) => stock.isRupture(product.name),
+    (product: Product) => {
+      // 1. Stock tab CSV first (existing behavior — preserved)
+      const csvCount = stock.getStockCount(product.name);
+      if (csvCount !== null) return csvCount === 0;
+      // 2. No CSV entry → check product.stock from admin panel (new)
+      return product.stock === 0;
+    },
     [stock],
   );
 
   const isLowStock = useCallback(
-    (product: Product) => stock.isLowStock(product.name),
+    (product: Product) => {
+      // 1. Stock tab CSV first (existing behavior — preserved)
+      const csvCount = stock.getStockCount(product.name);
+      if (csvCount !== null) {
+        return csvCount > 0 && csvCount <= 3;
+      }
+      // 2. No CSV entry → check product.stock from admin panel (new)
+      if (product.stock !== null && product.stock !== undefined) {
+        return product.stock > 0 && product.stock <= 3;
+      }
+      return false;
+    },
     [stock],
+  );
+
+  // Enhanced per-variant rupture check — checks variant.stock from variants string
+  const isVariantRupture = useCallback(
+    (productName: string, variantName: string): boolean => {
+      // 1. Stock tab CSV first (existing behavior — preserved)
+      // Format: "Product Name - Variant Name"
+      const csvCount = stock.getStockCount(`${productName} - ${variantName}`);
+      if (csvCount !== null) return csvCount === 0;
+
+      // 2. No CSV entry → check variant.stock from variants string (new)
+      // variantName could be "Red" or "Red - Large" (combined selections)
+      // Split by " - " and check if ANY selected variant has stock = 0
+      const product = catalog.products.find((p) => p.name === productName);
+      if (product?.variants && product.variants.length > 0) {
+        const selectedParts = variantName.split(" - ").map((s) => s.trim());
+        for (const part of selectedParts) {
+          if (!part) continue;
+          const variant = product.variants.find((v) => v.name === part);
+          if (variant && typeof variant.stock === "number" && variant.stock === 0) {
+            return true;
+          }
+        }
+      }
+      return false;
+    },
+    [stock, catalog.products],
   );
 
   // ===== ADMIN VIEW =====
@@ -253,10 +308,10 @@ export default function Home() {
             product={product}
             onAddToCart={handleAddToCart}
             onBack={exitToHome}
-            rupture={stock.isRupture(product.name)}
+            rupture={isRupture(product)}
             relatedProducts={relatedFinal}
             onProductClick={handleProductClick}
-            isVariantRupture={stock.isVariantRupture}
+            isVariantRupture={isVariantRupture}
           />
         </ErrorBoundary>
       );
