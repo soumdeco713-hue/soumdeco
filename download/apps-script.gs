@@ -181,6 +181,8 @@ function doCreateProduct(p) {
   sheet.appendRow(buildProductRow_(p));
   // Auto-add product name to Stock tab so admin only needs to set the stock count
   addToStockTab_(p.name || '');
+  // Also sync stock from product to Stock tab (if admin set a stock value)
+  updateStockTab_(p.name || '', p.stock);
   return jsonOut({ ok: true });
 }
 
@@ -189,6 +191,8 @@ function doUpdateProduct(p) {
   var rowIdx = findProductRow_(sheet, p.id);
   if (rowIdx < 0) return doCreateProduct(p);
   sheet.getRange(rowIdx + 2, 1, 1, PRODUCTS_COLS.length).setValues([buildProductRow_(p)]);
+  // Sync stock from product to Stock tab (if admin set a stock value)
+  updateStockTab_(p.name || '', p.stock);
   return jsonOut({ ok: true });
 }
 
@@ -238,6 +242,51 @@ function removeFromStockTab_(productName) {
       return;
     }
   }
+}
+
+// ============================================================
+//  updateStockTab_ — Sync stock from product to Stock tab
+// ============================================================
+//  Called from doCreateProduct + doUpdateProduct.
+//  If the product has a stock value (number, including 0),
+//  this updates (or creates) the corresponding row in the
+//  Stock tab so the visitor sees the correct stock count.
+//
+//  - If productName already exists in Stock tab → update count
+//  - If productName doesn't exist → add new row with count
+//  - If stock is null/undefined/empty → skip (don't touch Stock tab)
+//  - Never touches other products' rows (safe — no overlap)
+// ============================================================
+function updateStockTab_(productName, stockValue) {
+  if (!productName) return;
+  // Only update if stock is explicitly set (number, including 0)
+  // null/undefined/empty → admin didn't set stock → don't touch Stock tab
+  if (stockValue === null || stockValue === undefined || stockValue === '') return;
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(STOCK_SHEET);
+  if (!sheet) {
+    // Stock sheet doesn't exist — create it with headers
+    sheet = ss.insertSheet(STOCK_SHEET);
+    sheet.appendRow(['Product Name', 'Stock Count']);
+  }
+
+  var count = String(stockValue); // number → string for sheet storage
+
+  // Search for existing row with this product name
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    var names = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < names.length; i++) {
+      if (String(names[i][0] || '').trim() === productName.trim()) {
+        // Found — update the count (column B = column 2)
+        sheet.getRange(i + 2, 2).setValue(count);
+        return; // updated, done
+      }
+    }
+  }
+  // Not found — add new row
+  sheet.appendRow([productName, count]);
 }
 
 function doResetProducts() {

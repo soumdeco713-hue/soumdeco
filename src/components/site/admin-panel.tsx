@@ -38,6 +38,10 @@ type AdminPanelProps = {
   onReset: () => Promise<void>;
   onClose: () => void;
   syncing?: boolean;
+  /** Returns the stock count from the Stock tab CSV for a given product name.
+   *  Used to pre-fill the stock field in the edit form with the current
+   *  effective stock value (what the visitor sees). */
+  getStockCount?: (productName: string) => number | null;
 };
 
 // Maximum file size for admin uploads (15MB — anything larger freezes the browser
@@ -209,11 +213,13 @@ function EditForm({
   categories,
   onSave,
   onCancel,
+  getStockCount,
 }: {
   product: Product;
   categories: string[];
   onSave: (p: Product) => Promise<void>;
   onCancel: () => void;
+  getStockCount?: (productName: string) => number | null;
 }) {
   const [draft, setDraft] = useState<Product>(product);
   const [uploading, setUploading] = useState(false);
@@ -736,12 +742,12 @@ function EditForm({
           />
         </div>
 
-        {/* 6c. Product Stock (per-product stock management)
-         *    Displays the EFFECTIVE stock value:
-         *    - If Stock tab CSV has an entry → show that value (it takes priority)
-         *    - If no CSV entry → show the admin-panel stock (product.stock)
-         *    The admin can edit the field, but if CSV has a value, a warning
-         *    explains that the CSV overrides this field. */}
+        {/* 6c. Product Stock
+         *    Pre-fills with the CSV stock value (from Stock tab) so the admin
+         *    can see the current effective stock without opening the sheet.
+         *    When admin saves, the stock goes to the Products tab AND
+         *    automatically syncs to the Stock tab (via updateStockTab_ in Apps Script).
+         */}
         <div>
           <label htmlFor={`fld-stock-${draft.id ?? "new"}`} className="mb-1 block text-sm font-medium text-charcoal">
             المخزون{" "}
@@ -754,9 +760,13 @@ function EditForm({
             name="productStock"
             type="number"
             value={
-              draft.stock === null || draft.stock === undefined
-                ? ""
-                : draft.stock
+              // Show CSV stock value if it exists (what visitor currently sees)
+              // Otherwise show the admin panel stock (Products tab value)
+              (() => {
+                const csvStock = getStockCount?.(draft.name ?? "");
+                if (csvStock !== null && csvStock !== undefined) return csvStock;
+                return draft.stock === null || draft.stock === undefined ? "" : draft.stock;
+              })()
             }
             onChange={(e) =>
               setDraft({
@@ -1297,6 +1307,7 @@ export function AdminPanel({
   onMove,
   onClose,
   syncing = false,
+  getStockCount,
 }: AdminPanelProps) {
   const [authed, setAuthed] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
@@ -1428,6 +1439,7 @@ export function AdminPanel({
             categories={categories}
             onSave={handleSave}
             onCancel={() => setEditing(null)}
+            getStockCount={getStockCount}
           />
         ) : (
           <>
