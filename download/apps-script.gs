@@ -694,57 +694,105 @@ function incrementProductStock_(productName, qty) {
 // ============================================================
 
 /** Find "ProductName - VariantName" in Stock tab and decrement by qty.
- *  Returns true if found + decremented, false if not found. */
+ *  Returns true if found + decremented, false if not found.
+ *
+ *  SMART MATCH: Tries EXACT match first, then falls back to
+ *  checking if ANY Stock tab row contains BOTH the product name
+ *  AND any part of the variant name. This handles cases where
+ *  the variant has multiple values (e.g., "Red - Large") but the
+ *  Stock tab only has one (e.g., "Product - Large"). */
 function decrementVariantStock_(productName, variantName, qty) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(STOCK_SHEET);
   if (!sheet) return false;
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return false;
+
+  // Build the full expected name: "ProductName - VariantName"
   var stockTabName = productName + ' - ' + variantName;
+
+  // Split variant into parts (e.g., "Red - Large" → ["Red", "Large"])
+  var variantParts = variantName.split(' - ');
+
   var values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
   for (var i = 0; i < values.length; i++) {
     var rowName = String(values[i][0] || '').trim();
+
+    // Layer 1: EXACT match: "Product - Red - Large"
     if (rowName === stockTabName) {
-      var current = values[i][1];
-      var currentNum = (current === '' || current === null || current === undefined)
-        ? null
-        : Number(current);
-      if (currentNum === null || isNaN(currentNum)) return false; // can't decrement unlimited
-      var next = Math.max(0, currentNum - qty);
-      sheet.getRange(i + 2, 2).setValue(next);
-      Logger.log('[Stock] DECREMENT VARIANT ' + stockTabName + ' -' + qty + ' = ' + next);
-      return true; // found + decremented
+      return doDecrement_(sheet, i, values, qty, stockTabName);
+    }
+
+    // Layer 2: Product name matches + ANY variant part matches
+    // e.g., Stock tab has "Product - Large" and variant is "Red - Large"
+    // → "Product - Large" contains "Product" AND contains "Large" → MATCH!
+    if (rowName.indexOf(productName) >= 0) {
+      for (var p = 0; p < variantParts.length; p++) {
+        var part = variantParts[p].trim();
+        if (part && rowName.indexOf(part) >= 0 && rowName.indexOf(productName + ' - ') >= 0) {
+          return doDecrement_(sheet, i, values, qty, rowName);
+        }
+      }
     }
   }
   return false; // not found
 }
 
+// Helper: actually decrement the stock + log
+function doDecrement_(sheet, rowIndex, values, qty, stockTabName) {
+  var current = values[rowIndex][1];
+  var currentNum = (current === '' || current === null || current === undefined) ? null : Number(current);
+  if (currentNum === null || isNaN(currentNum)) return false; // can't decrement unlimited
+  var next = Math.max(0, currentNum - qty);
+  sheet.getRange(rowIndex + 2, 2).setValue(next);
+  Logger.log('[Stock] DECREMENT VARIANT ' + stockTabName + ' -' + qty + ' = ' + next);
+  return true;
+}
+
 /** Find "ProductName - VariantName" in Stock tab and increment by qty (revert cancel).
- *  Returns true if found + incremented, false if not found. */
+ *  Returns true if found + incremented, false if not found.
+ *  Uses same SMART MATCH as decrementVariantStock_. */
 function incrementVariantStock_(productName, variantName, qty) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(STOCK_SHEET);
   if (!sheet) return false;
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return false;
+
   var stockTabName = productName + ' - ' + variantName;
+  var variantParts = variantName.split(' - ');
+
   var values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
   for (var i = 0; i < values.length; i++) {
     var rowName = String(values[i][0] || '').trim();
+
+    // Layer 1: EXACT match
     if (rowName === stockTabName) {
-      var current = values[i][1];
-      var currentNum = (current === '' || current === null || current === undefined)
-        ? 0
-        : Number(current);
-      if (isNaN(currentNum)) currentNum = 0;
-      var next = currentNum + qty;
-      sheet.getRange(i + 2, 2).setValue(next);
-      Logger.log('[Stock] INCREMENT VARIANT (revert) ' + stockTabName + ' +' + qty + ' = ' + next);
-      return true; // found + incremented
+      return doIncrement_(sheet, i, values, qty, stockTabName);
+    }
+
+    // Layer 2: Product name + ANY variant part
+    if (rowName.indexOf(productName) >= 0) {
+      for (var p = 0; p < variantParts.length; p++) {
+        var part = variantParts[p].trim();
+        if (part && rowName.indexOf(part) >= 0 && rowName.indexOf(productName + ' - ') >= 0) {
+          return doIncrement_(sheet, i, values, qty, rowName);
+        }
+      }
     }
   }
   return false; // not found
+}
+
+// Helper: actually increment the stock + log
+function doIncrement_(sheet, rowIndex, values, qty, stockTabName) {
+  var current = values[rowIndex][1];
+  var currentNum = (current === '' || current === null || current === undefined) ? 0 : Number(current);
+  if (isNaN(currentNum)) currentNum = 0;
+  var next = currentNum + qty;
+  sheet.getRange(rowIndex + 2, 2).setValue(next);
+  Logger.log('[Stock] INCREMENT VARIANT (revert) ' + stockTabName + ' +' + qty + ' = ' + next);
+  return true;
 }
 
 // ============================================================
