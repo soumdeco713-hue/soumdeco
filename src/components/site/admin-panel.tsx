@@ -227,9 +227,23 @@ function EditForm({
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Initialize draft from product.
+  // If the product has no stock in the Products tab BUT the Stock tab CSV
+  // has a value → pre-fill draft.stock with the CSV value.
+  // This is a ONE-TIME initialization — after this, the admin can freely
+  // edit the field (it's bound to draft.stock, not CSV).
   useEffect(() => {
-    setDraft(product);
-  }, [product]);
+    const csvStock = getStockCount?.(product.name ?? "");
+    const productHasStock = product.stock !== null && product.stock !== undefined;
+    const csvHasStock = csvStock !== null && csvStock !== undefined;
+
+    if (!productHasStock && csvHasStock) {
+      // Pre-fill from CSV (one-time — admin can then edit freely)
+      setDraft({ ...product, stock: csvStock });
+    } else {
+      setDraft(product);
+    }
+  }, [product]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const photos = getProductImages(draft);
   // Maximum 5 images per product (enforced — keeps Cloudflare Pages file
@@ -760,13 +774,9 @@ function EditForm({
             name="productStock"
             type="number"
             value={
-              // Show CSV stock value if it exists (what visitor currently sees)
-              // Otherwise show the admin panel stock (Products tab value)
-              (() => {
-                const csvStock = getStockCount?.(draft.name ?? "");
-                if (csvStock !== null && csvStock !== undefined) return csvStock;
-                return draft.stock === null || draft.stock === undefined ? "" : draft.stock;
-              })()
+              draft.stock === null || draft.stock === undefined
+                ? ""
+                : draft.stock
             }
             onChange={(e) =>
               setDraft({
