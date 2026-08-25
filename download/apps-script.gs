@@ -42,6 +42,7 @@ function doGet(e) {
     if (action === 'dedupe') return doDedupeProducts();
     if (action === 'cleanup') return doCleanupSheet();
     if (action === 'health') return jsonOut({ ok: true, time: new Date().toISOString(), sheet: SpreadsheetApp.getActiveSpreadsheet().getName() });
+    if (action === 'statistics') return setupStatistics();
     return jsonOut({ ok: false, error: 'unknown action: ' + action });
   } catch (err) { return jsonOut({ ok: false, error: String(err) }); }
 }
@@ -415,6 +416,73 @@ function findProductRow_(sheet, id) {
 
 function jsonOut(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+// ============================================================
+//  STATISTICS — auto-update Statistics tab with formulas
+// ============================================================
+//  Creates/updates a "Statistics" tab with:
+//    - Total orders
+//    - Total revenue
+//    - Top 10 products (by order count)
+//    - Top 10 wilayas (by order count)
+//
+//  Uses QUERY formulas on the Orders tab — auto-updates when
+//  new orders arrive. No Apps Script trigger needed.
+//
+//  Call via: ?action=statistics
+//  Or: run setupStatistics() manually in the Apps Script editor.
+// ============================================================
+
+function setupStatistics() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Statistics');
+  if (!sheet) {
+    sheet = ss.insertSheet('Statistics');
+  }
+  // Clear existing content
+  sheet.clear();
+  // Set headers + formulas
+  sheet.getRange(1, 1).setValue('📊 Statistics (auto-updated)');
+  sheet.getRange(1, 1).setFontWeight('bold').setFontSize(14);
+
+  // Total orders
+  sheet.getRange(3, 1).setValue('Total Orders:');
+  sheet.getRange(3, 1).setFontWeight('bold');
+  sheet.getRange(3, 2).setValue('=COUNTA(Orders!C2:C)');
+
+  // Total revenue
+  sheet.getRange(4, 1).setValue('Total Revenue (DZD):');
+  sheet.getRange(4, 1).setFontWeight('bold');
+  sheet.getRange(4, 2).setValue('=SUM(Orders!G2:G)');
+
+  // Top 10 Products
+  sheet.getRange(6, 1).setValue('Top 10 Products');
+  sheet.getRange(6, 1).setFontWeight('bold').setFontSize(12);
+  sheet.getRange(7, 1).setValue('Product');
+  sheet.getRange(7, 2).setValue('Order Count');
+  sheet.getRange(7, 1).setFontWeight('bold');
+  sheet.getRange(7, 2).setFontWeight('bold');
+  // QUERY: count orders per product, top 10
+  // Column C = Product (index 3 in 1-indexed)
+  sheet.getRange(8, 1).setValue('=QUERY(Orders!C2:C, "SELECT C, COUNT(C) WHERE C IS NOT NULL GROUP BY C ORDER BY COUNT(C) DESC LIMIT 10", 0)');
+  sheet.getRange(8, 1).setFontWeight('bold');
+
+  // Top 10 Wilayas
+  sheet.getRange(20, 1).setValue('Top 10 Wilayas');
+  sheet.getRange(20, 1).setFontWeight('bold').setFontSize(12);
+  sheet.getRange(21, 1).setValue('Wilaya');
+  sheet.getRange(21, 2).setValue('Order Count');
+  sheet.getRange(21, 1).setFontWeight('bold');
+  sheet.getRange(21, 2).setFontWeight('bold');
+  // Column J = Wilaya (index 10 in 1-indexed)
+  sheet.getRange(22, 1).setValue('=QUERY(Orders!J2:J, "SELECT J, COUNT(J) WHERE J IS NOT NULL GROUP BY J ORDER BY COUNT(J) DESC LIMIT 10", 0)');
+
+  // Column widths
+  sheet.setColumnWidth(1, 300);
+  sheet.setColumnWidth(2, 150);
+
+  return jsonOut({ ok: true, message: 'Statistics tab updated' });
 }
 
 function setupAllSheets() {

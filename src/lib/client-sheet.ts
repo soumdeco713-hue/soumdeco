@@ -488,20 +488,22 @@ export async function clientSubmitOrder(payload: {
     //  VARIANT EXTRACTION — extract variant from product name
     //  and send as separate URL param for the new Variant column.
     //
-    //  This MUST be here (in clientSubmitOrder) — not in cod-order-form.tsx —
-    //  because the cod-order-form is dynamically imported and the extraction
-    //  code might end up in a different chunk. Putting it HERE guarantees
-    //  it's in the SAME chunk as the URL params.
+    //  Product names look like:
+    //    "Cocotte (اللون: Red) ×1" → variant = "Red"
+    //    "Product (المقاس: 10L) ×2" → variant = "10L"
+    //    "Simple Product ×1" → variant = "" (no variant)
     //
-    //  Product names with variants look like:
-    //    "Cocotte (اللون: Red)" → variant = "Red"
-    //    "Product (المقاس: 10L)" → variant = "10L"
-    //    "Simple Product" → variant = "" (no variant)
+    //  NOTE: The product name includes " ×N" at the end (quantity).
+    //  We must strip that FIRST, then extract the variant from
+    //  the parentheses.
     // ============================================================
     let variantParam = payload.variant || "";
     // If variant wasn't passed from the form, extract it from the product name
     if (!variantParam && payload.product) {
-      const variantMatch = payload.product.match(/\(([^)]+)\)\s*$/);
+      // Strip " ×N" suffix first (e.g., "Product (variant) ×1" → "Product (variant)")
+      const stripped = payload.product.replace(/\s*[×x]\s*\d+\s*$/, "").trim();
+      // Now extract variant from parentheses
+      const variantMatch = stripped.match(/\(([^)]+)\)\s*$/);
       if (variantMatch) {
         const variantContent = variantMatch[1].trim();
         const variantParts = variantContent.split("·");
