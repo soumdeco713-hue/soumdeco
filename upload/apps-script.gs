@@ -78,11 +78,12 @@ function doPost(e) {
 // ============================================================
 function onOpen() {
   SpreadsheetApp.getActiveSpreadsheet().addMenu('📦 SOUM DECO', [
+    { name: '🔍 Diagnose Orders (dry-run — check what variant would be extracted)', functionName: 'diagnoseOrders' },
     { name: '🔧 Setup Auto-Stock (run once)', functionName: 'setupTriggers' },
     { name: '✅ Process Pending Confirmed Orders', functionName: 'processAllConfirmedOrders' },
     { name: '📊 Update Statistics Dashboard', functionName: 'setupStatistics' },
     { name: '🧹 Cleanup Products Sheet', functionName: 'doCleanupSheet' },
-    { name: '🔍 Health Check', functionName: 'healthCheck' }
+    { name: '🏥 Health Check', functionName: 'healthCheck' }
   ]);
 }
 
@@ -129,6 +130,204 @@ function healthCheck() {
 }
 
 /**
+ * diagnoseOrders — DRY-RUN diagnostic that shows what variant + stockKey
+ * would be extracted from each row WITHOUT writing anything.
+ * Run this if "Process Pending Confirmed Orders" errors out.
+ *
+ * Output goes to: View → Logs (in the Apps Script editor)
+ * Returns: JSON summary with row count + first 10 sample rows.
+ */
+function diagnoseOrders() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(ORDERS_SHEET);
+  if (!sheet) return jsonOut({ ok: false, error: 'No Orders sheet' });
+
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  Logger.log('=== DIAGNOSE ORDERS ===');
+  Logger.log('Sheet lastRow=' + lastRow + ' lastCol=' + lastCol);
+
+  if (lastRow < 2) {
+    Logger.log('No data rows');
+    return jsonOut({ ok: true, message: 'No data rows' });
+  }
+
+  // Read whatever columns actually exist (defensive — don't ask for col 17 if sheet has only 14)
+  var readCols = Math.max(lastCol, ORDERS_COL.STOCK_SYNCED + 1);
+  var data = sheet.getRange(2, 1, lastRow - 1, readCols).getValues();
+  Logger.log('Read ' + data.length + ' rows × ' + readCols + ' cols');
+
+  var samples = [];
+  var withVariant = 0;
+  var withoutVariant = 0;
+  var confirmed = 0;
+
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    var status = String(row[ORDERS_COL.STATUS] || '').trim();
+    var productName = String(row[ORDERS_COL.PRODUCT] || '').trim();
+    var notes = String(row[ORDERS_COL.NOTES] || '').trim();
+    var existingVariant = row.length > ORDERS_COL.VARIANT ? String(row[ORDERS_COL.VARIANT] || '').trim() : '';
+    var existingStockKey = row.length > ORDERS_COL.STOCK_KEY ? String(row[ORDERS_COL.STOCK_KEY] || '').trim() : '';
+
+    var extracted = extractVariantFromRow_(productName, notes, existingVariant, existingStockKey);
+
+    if (extracted.variant) withVariant++; else withoutVariant++;
+    if (STOCK_DECREMENTED.indexOf(status.toLowerCase()) >= 0) confirmed++;
+
+    if (i < 10) {
+      samples.push({
+        row: i + 2,
+        status: status,
+        product: productName.substring(0, 60),
+        notes: notes.substring(0, 80),
+        existingVariant: existingVariant,
+        extractedVariant: extracted.variant,
+        extractedStockKey: extracted.stockKey,
+      });
+    }
+  }
+
+  Logger.log('=== SUMMARY ===');
+  Logger.log('Total rows: ' + data.length);
+  Logger.log('Rows with extractable variant: ' + withVariant);
+  Logger.log('Rows without variant info: ' + withoutVariant);
+  Logger.log('Confirmed/Shipped/Delivered: ' + confirmed);
+  Logger.log('=== FIRST 10 ROWS ===');
+  for (var s = 0; s < samples.length; s++) {
+    Logger.log('Row ' + samples[s].row + ': status=' + samples[s].status);
+    Logger.log('  product: ' + samples[s].product);
+    Logger.log('  notes:   ' + samples[s].notes);
+    Logger.log('  existing variant: ' + samples[s].existingVariant);
+    Logger.log('  extracted variant: ' + samples[s].extractedVariant);
+    Logger.log('  extracted stockKey: ' + samples[s].extractedStockKey);
+  }
+
+  var msg = 'Total: ' + data.length + ' | With variant: ' + withVariant + ' | Without: ' + withoutVariant + ' | Confirmed: ' + confirmed + '. See View → Logs for details.';
+  ss.toast(msg, 'Diagnose Complete', 15);
+  return jsonOut({ ok: true, total: data.length, withVariant: withVariant, withoutVariant: withoutVariant, confirmed: confirmed, samples: samples });
+}
+
+/**
+ * extractVariantFromRow_ — extract variant + stockKey from a row.
+ * Tries FOUR sources in order:
+ *   1. Existing Variant column (already populated)
+ *   2. Product name parentheses  "(المقاس: 06L)"
+ *   3. Notes column patterns     "المقاس: 06L · ..." (where variant is currently being written)
+ *   4. Returns empty if none found
+ *
+ * Returns: { variant: string, stockKey: string }
+ */
+function extractVariantFromRow_(productName, notes, existingVariant, existingStockKey) {
+  var variantStr = String(existingVariant || '').trim();
+  var stockKeyStr = String(existingStockKey || '').trim();
+  if (stockKeyStr) return { variant: variantStr, stockKey: stockKeyStr }; // already have both
+
+  // Strip trailing ×N
+  var bareName = String(productName || '').replace(/\s*[×x]\s*\d+\s*$/, '').trim();
+
+  // ─── SOURCE 1: existing variant column ───────────────────────
+  if (variantStr) {
+    return buildStockKey_(bareName, variantStr);
+  }
+
+  // ─── SOURCE 2: product name parentheses ──────────────────────
+  var variantMatch = bareName.match(/\(([^)]+)\)\s*$/);
+  if (variantMatch) {
+    var extractedVariant = parseVariantContent_(variantMatch[1]);
+    if (extractedVariant) {
+      return buildStockKey_(bareName, extractedVariant);
+    }
+  }
+
+  // ─── SOURCE 3: notes column (current frontend writes variant here) ──
+  // Notes format: "اللون: Blue · المقاس: Large · [user notes] · [company]"
+  // Or just: "المقاس: 06L"
+  if (notes) {
+    var notesVariant = extractVariantFromNotes_(notes);
+    if (notesVariant) {
+      return buildStockKey_(bareName, notesVariant);
+    }
+  }
+
+  return { variant: '', stockKey: '' };
+}
+
+/** Parse the content inside parentheses: "اللون: Red · المقاس: Large" → "Red - Large" */
+function parseVariantContent_(content) {
+  var parts = String(content || '').split('·');
+  var values = [];
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i].trim();
+    if (!part) continue;
+    var colonIdx = part.lastIndexOf(':');
+    if (colonIdx >= 0) {
+      var value = part.substring(colonIdx + 1).trim();
+      if (value) values.push(value);
+    } else if (part) {
+      values.push(part);
+    }
+  }
+  return values.join(' - ');
+}
+
+/** Extract variant from notes — looks for "Label: value" patterns. */
+function extractVariantFromNotes_(notes) {
+  var notesStr = String(notes || '').trim();
+  if (!notesStr) return '';
+
+  // Common Arabic + French variant labels (lowercased comparison)
+  // الترتيب مهم — الأطول أولاً لتجنب المطابقة الجزئية
+  var labels = [
+    'المقاس', 'اللون', 'الحجم', 'الوزن', 'النوع', 'النموذج',
+    'Taille', 'Couleur', 'Taille', 'Modèle', 'Couleur', 'Size', 'Color'
+  ];
+
+  var parts = notesStr.split('·');
+  var values = [];
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i].trim();
+    if (!part) continue;
+    var colonIdx = part.lastIndexOf(':');
+    if (colonIdx < 0) continue;
+    var label = part.substring(0, colonIdx).trim().toLowerCase();
+    var value = part.substring(colonIdx + 1).trim();
+    if (!value) continue;
+
+    // Is this label a variant label (not "notes" or "company" etc.)?
+    var isVariant = false;
+    for (var l = 0; l < labels.length; l++) {
+      if (label === labels[l].toLowerCase()) { isVariant = true; break; }
+    }
+
+    // Special case: skip entries that look like company labels or notes
+    // ("Stopdesk", "Yalidine", "ZR Express" — common Algerian delivery companies)
+    if (isVariant) {
+      // Strip any trailing emoji or extra text after the value
+      // (e.g. "06L 🚚" → "06L")
+      value = value.replace(/\s+[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}]/u, '').trim();
+      if (value) values.push(value);
+    }
+  }
+  return values.join(' - ');
+}
+
+/** Build stockKey from cleanProductName + variantStr.
+ *  "Cocotte...Ref 01" + "06L" → "Cocotte...Ref 01 - 06L"
+ *  "Cocotte...Ref 01" + "Red - Large" → "Cocotte...Ref 01 - Red,Cocotte...Ref 01 - Large"
+ */
+function buildStockKey_(bareName, variantStr) {
+  var cleanProductName = String(bareName || '').replace(/\s*\([^)]+\)\s*$/, '').trim();
+  var variantValues = String(variantStr || '').split(' - ');
+  var keys = [];
+  for (var k = 0; k < variantValues.length; k++) {
+    var v = variantValues[k].trim();
+    if (v) keys.push(cleanProductName + ' - ' + v);
+  }
+  return { variant: variantStr, stockKey: keys.join(',') };
+}
+
+/**
  * ============================================================
  *  setupTriggers — installs the onEdit trigger AUTOMATICALLY.
  *  Run this ONCE from the Apps Script editor or the spreadsheet menu.
@@ -171,6 +370,9 @@ function setupTriggers() {
  *   - You imported orders from another source
  *
  * Uses the "Stock Synced" column for idempotency — safe to run multiple times.
+ *
+ * SAFETY: This function NEVER errors out on a single bad row — it logs the
+ * error and continues. Returns a detailed summary at the end.
  */
 function processAllConfirmedOrders() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -180,102 +382,79 @@ function processAllConfirmedOrders() {
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return jsonOut({ ok: true, processed: 0, message: 'No orders to process' });
 
-  // Ensure Stock Synced column exists
+  // Ensure headers exist (extends sheet if needed)
   ensureOrdersHeaders_(sheet);
 
-  var data = sheet.getRange(2, 1, lastRow - 1, ORDERS_COL.STOCK_SYNCED + 1).getValues();
+  // Defensive: read whatever columns actually exist, padded to at least 17
+  var readCols = Math.max(sheet.getLastColumn(), ORDERS_COL.STOCK_SYNCED + 1);
+  var data = sheet.getRange(2, 1, lastRow - 1, readCols).getValues();
+
   var processed = 0;
   var skipped = 0;
   var errors = 0;
+  var errorDetails = [];
+
+  // Collect writes to do in batches (much faster than 1-by-1 setValue)
+  var variantUpdates = []; // [{ rowIdx, value }]
+  var stockKeyUpdates = [];
+  var syncedUpdates = [];
 
   for (var i = 0; i < data.length; i++) {
-    var row = data[i];
-    var status = String(row[ORDERS_COL.STATUS] || '').trim().toLowerCase();
-    var synced = String(row[ORDERS_COL.STOCK_SYNCED] || '').trim().toLowerCase();
-
-    // Only process Confirmed/Shipped/Delivered orders that haven't been synced
-    if (STOCK_DECREMENTED.indexOf(status) < 0) {
-      skipped++;
-      continue;
-    }
-    if (synced === 'y') {
-      skipped++;
-      continue;
-    }
-
-    var productName = String(row[ORDERS_COL.PRODUCT] || '').trim();
-    var qtyRaw = row[ORDERS_COL.QTY];
-    var qty = (qtyRaw === '' || qtyRaw === null || qtyRaw === undefined) ? 1 : parseInt(String(qtyRaw), 10);
-    if (isNaN(qty) || qty < 1) qty = 1;
-
-    // Multi-item orders (contain "+") — skip (can't reliably split)
-    if (productName.indexOf('+') >= 0) {
-      skipped++;
-      continue;
-    }
-
-    // Strip trailing ×N
-    var bareName = productName.replace(/\s*[×x]\s*\d+\s*$/, '').trim();
-    if (!bareName) {
-      skipped++;
-      continue;
-    }
-
-    var stockKeyStr = String(row[ORDERS_COL.STOCK_KEY] || '').trim();
-    var variantStr = String(row[ORDERS_COL.VARIANT] || '').trim();
-
-    // ============================================================
-    //  BACKFILL — if Variant or Stock Key is empty but the product
-    //  name contains "(...)" at the end, extract variant server-side.
-    //  This catches OLD orders placed before the frontend fix was
-    //  deployed, so they too can be stock-decremented.
-    // ============================================================
-    if (!stockKeyStr || !variantStr) {
-      var extractedVariant = variantStr;
-      if (!extractedVariant) {
-        var variantMatch = bareName.match(/\(([^)]+)\)\s*$/);
-        if (variantMatch) {
-          var variantContent = variantMatch[1].trim();
-          var variantParts = variantContent.split('·');
-          var extractedValues = [];
-          for (var vp = 0; vp < variantParts.length; vp++) {
-            var part = variantParts[vp].trim();
-            if (!part) continue;
-            var colonIdx = part.lastIndexOf(':');
-            if (colonIdx >= 0) {
-              var value = part.substring(colonIdx + 1).trim();
-              if (value) extractedValues.push(value);
-            } else if (part) {
-              extractedValues.push(part);
-            }
-          }
-          extractedVariant = extractedValues.join(' - ');
-        }
-      }
-
-      if (extractedVariant && !variantStr) {
-        sheet.getRange(i + 2, ORDERS_COL.VARIANT + 1).setValue(extractedVariant);
-        variantStr = extractedVariant;
-      }
-
-      if (extractedVariant && !stockKeyStr) {
-        var cleanProductName = bareName.replace(/\s*\([^)]+\)\s*$/, '').trim();
-        var variantValues = extractedVariant.split(' - ');
-        var keys = [];
-        for (var kv = 0; kv < variantValues.length; kv++) {
-          var vv = variantValues[kv].trim();
-          if (vv) keys.push(cleanProductName + ' - ' + vv);
-        }
-        var newStockKey = keys.join(',');
-        if (newStockKey) {
-          sheet.getRange(i + 2, ORDERS_COL.STOCK_KEY + 1).setValue(newStockKey);
-          stockKeyStr = newStockKey;
-        }
-      }
-    }
-
     try {
+      var row = data[i];
+      // Pad row if shorter than expected
+      while (row.length < ORDERS_COL.STOCK_SYNCED + 1) row.push('');
+
+      var status = String(row[ORDERS_COL.STATUS] || '').trim().toLowerCase();
+      var synced = String(row[ORDERS_COL.STOCK_SYNCED] || '').trim().toLowerCase();
+
+      // Only process Confirmed/Shipped/Delivered orders that haven't been synced
+      if (STOCK_DECREMENTED.indexOf(status) < 0) {
+        skipped++;
+        continue;
+      }
+      if (synced === 'y') {
+        skipped++;
+        continue;
+      }
+
+      var productName = String(row[ORDERS_COL.PRODUCT] || '').trim();
+      var notes = String(row[ORDERS_COL.NOTES] || '').trim();
+      var existingVariant = String(row[ORDERS_COL.VARIANT] || '').trim();
+      var existingStockKey = String(row[ORDERS_COL.STOCK_KEY] || '').trim();
+      var qtyRaw = row[ORDERS_COL.QTY];
+      var qty = (qtyRaw === '' || qtyRaw === null || qtyRaw === undefined) ? 1 : parseInt(String(qtyRaw), 10);
+      if (isNaN(qty) || qty < 1) qty = 1;
+
+      // Multi-item orders (contain "+") — skip (can't reliably split)
+      if (productName.indexOf('+') >= 0) {
+        skipped++;
+        continue;
+      }
+
+      // Strip trailing ×N
+      var bareName = productName.replace(/\s*[×x]\s*\d+\s*$/, '').trim();
+      if (!bareName) {
+        skipped++;
+        continue;
+      }
+
+      // Use the unified extractor (tries Variant col, then product name, then notes)
+      var extracted = extractVariantFromRow_(productName, notes, existingVariant, existingStockKey);
+      var variantStr = extracted.variant;
+      var stockKeyStr = extracted.stockKey;
+
+      // Queue writes (will be applied in batch after the loop)
+      if (variantStr && variantStr !== existingVariant) {
+        variantUpdates.push({ rowIdx: i + 2, value: variantStr });
+      }
+      if (stockKeyStr && stockKeyStr !== existingStockKey) {
+        stockKeyUpdates.push({ rowIdx: i + 2, value: stockKeyStr });
+      }
+
+      // ─── DECREMENT STOCK ──────────────────────────────────────
       var decremented = false;
+
       // Try stockKey FIRST (variant match)
       if (stockKeyStr) {
         var keys = stockKeyStr.split(',');
@@ -287,26 +466,66 @@ function processAllConfirmedOrders() {
             break;
           }
         }
-      }
-      // Fallback to whole-product ONLY if no stockKey was set
-      // (variant orders without a matching Stock tab entry = infinite, skip)
-      if (!decremented && !stockKeyStr) {
+        // IMPORTANT: if stockKey was set but no match found in Stock tab,
+        // the variant is INFINITE — DO NOT fall back to whole-product decrement.
+      } else {
+        // No stockKey at all → no variant info extractable → try whole-product decrement
         decrementProductStock_(bareName, qty);
-        decremented = true;
+        decremented = true; // even if infinite, mark synced
       }
-      // Mark as synced regardless (so we don't re-process)
-      // — if it was infinite (no Stock tab entry), it's still "applied" semantically.
-      sheet.getRange(i + 2, ORDERS_COL.STOCK_SYNCED + 1).setValue('Y');
+
+      // Queue the synced flag update
+      syncedUpdates.push({ rowIdx: i + 2, value: 'Y' });
       if (decremented) processed++; else skipped++;
+
     } catch (err) {
       errors++;
+      errorDetails.push({ row: i + 2, error: String(err) });
       Logger.log('[processAllConfirmedOrders] row ' + (i + 2) + ' error: ' + err);
     }
   }
 
-  var msg = '✅ Processed: ' + processed + ' | Skipped: ' + skipped + (errors > 0 ? ' | Errors: ' + errors : '');
-  ss.toast(msg, 'Stock Sync Complete', 10);
-  return jsonOut({ ok: true, processed: processed, skipped: skipped, errors: errors });
+  // ─── APPLY BATCH WRITES ─────────────────────────────────────
+  try {
+    for (var v = 0; v < variantUpdates.length; v++) {
+      sheet.getRange(variantUpdates[v].rowIdx, ORDERS_COL.VARIANT + 1).setValue(variantUpdates[v].value);
+    }
+    for (var sk = 0; sk < stockKeyUpdates.length; sk++) {
+      sheet.getRange(stockKeyUpdates[sk].rowIdx, ORDERS_COL.STOCK_KEY + 1).setValue(stockKeyUpdates[sk].value);
+    }
+    for (var sy = 0; sy < syncedUpdates.length; sy++) {
+      sheet.getRange(syncedUpdates[sy].rowIdx, ORDERS_COL.STOCK_SYNCED + 1).setValue(syncedUpdates[sy].value);
+    }
+  } catch (writeErr) {
+    Logger.log('[processAllConfirmedOrders] batch write error: ' + writeErr);
+    errors++;
+    errorDetails.push({ row: 0, error: 'Batch write error: ' + writeErr });
+  }
+
+  var msg = '✅ Processed: ' + processed + ' | Skipped: ' + skipped + ' | Errors: ' + errors;
+  if (variantUpdates.length > 0) msg += ' | Variants backfilled: ' + variantUpdates.length;
+  if (stockKeyUpdates.length > 0) msg += ' | Stock Keys backfilled: ' + stockKeyUpdates.length;
+  ss.toast(msg, 'Stock Sync Complete', 15);
+
+  Logger.log('=== processAllConfirmedOrders DONE ===');
+  Logger.log('Processed: ' + processed + ' | Skipped: ' + skipped + ' | Errors: ' + errors);
+  Logger.log('Variant backfills: ' + variantUpdates.length + ' | StockKey backfills: ' + stockKeyUpdates.length);
+  if (errorDetails.length > 0) {
+    Logger.log('Errors:');
+    for (var e = 0; e < errorDetails.length; e++) {
+      Logger.log('  Row ' + errorDetails[e].row + ': ' + errorDetails[e].error);
+    }
+  }
+
+  return jsonOut({
+    ok: true,
+    processed: processed,
+    skipped: skipped,
+    errors: errors,
+    errorDetails: errorDetails,
+    variantsBackfilled: variantUpdates.length,
+    stockKeysBackfilled: stockKeyUpdates.length,
+  });
 }
 
 // Wrapper for URL invocation
@@ -329,57 +548,17 @@ function doCreateOrderFromParams(p) {
 
   // ============================================================
   //  SERVER-SIDE VARIANT EXTRACTION (safety net)
-  //  If frontend didn't send `variant` or `stockKey`, extract them
-  //  from the product name server-side. This is the "very first method"
-  //  — works even if the frontend layer fails to populate the columns.
-  //
-  //  Product name format from frontend:
-  //    "Cocotte minute 06, 08, 10, 12 litres Ref 01 (المقاس: 06L) ×1"
-  //    → variant = "06L"
-  //    → stockKey = "Cocotte minute 06, 08, 10, 12 litres Ref 01 - 06L"
+  //  Uses the same extractVariantFromRow_ helper as the trigger +
+  //  batch processor — tries in order:
+  //    1. Variant param sent by frontend
+  //    2. Parentheses in product name "(المقاس: 06L)"
+  //    3. Patterns in notes column "المقاس: 06L"
   // ============================================================
   var productStr = String(p.product || '');
-  var variantStr = String(p.variant || '');
-  var stockKeyStr = String(p.stockKey || '');
-
-  // Strip trailing " ×N" to get bare product name
-  var bareName = productStr.replace(/\s*[×x]\s*\d+\s*$/, '').trim();
-
-  // If variant wasn't sent, try to extract from product name (parenthesized suffix)
-  if (!variantStr) {
-    var variantMatch = bareName.match(/\(([^)]+)\)\s*$/);
-    if (variantMatch) {
-      var variantContent = variantMatch[1].trim();
-      var variantParts = variantContent.split('·');
-      var extractedValues = [];
-      for (var i = 0; i < variantParts.length; i++) {
-        var part = variantParts[i].trim();
-        if (!part) continue;
-        var colonIdx = part.lastIndexOf(':');
-        if (colonIdx >= 0) {
-          var value = part.substring(colonIdx + 1).trim();
-          if (value) extractedValues.push(value);
-        } else if (part) {
-          extractedValues.push(part);
-        }
-      }
-      variantStr = extractedValues.join(' - ');
-    }
-  }
-
-  // If stockKey wasn't sent, build it from bareName + extracted variant
-  if (!stockKeyStr && variantStr) {
-    // Strip the variant parentheses from bareName to get the clean product name
-    var cleanProductName = bareName.replace(/\s*\([^)]+\)\s*$/, '').trim();
-    // stockKey may have multiple variant values ("Red - Large")
-    var variantValues = variantStr.split(' - ');
-    var keys = [];
-    for (var k = 0; k < variantValues.length; k++) {
-      var v = variantValues[k].trim();
-      if (v) keys.push(cleanProductName + ' - ' + v);
-    }
-    stockKeyStr = keys.join(',');
-  }
+  var notesStr = String(p.notes || '');
+  var extracted = extractVariantFromRow_(productStr, notesStr, p.variant || '', p.stockKey || '');
+  var variantStr = extracted.variant;
+  var stockKeyStr = extracted.stockKey;
 
   sheet.appendRow([
     new Date(), 'New',
@@ -387,10 +566,10 @@ function doCreateOrderFromParams(p) {
     (p.price === null || p.price === undefined || p.price === '') ? '' : Number(p.price),
     Number(p.shippingPrice) || 0, Number(p.grandTotal) || 0,
     p.fullName || '', p.phone || '', p.wilaya || '', p.commune || '',
-    p.deliveryLabel || '', p.shippingCompanyLabel || '', p.notes || '',
+    p.deliveryLabel || '', p.shippingCompanyLabel || '', notesStr,
     variantStr, stockKeyStr, ''  // Stock Synced = empty (not yet processed)
   ]);
-  return jsonOut({ ok: true });
+  return jsonOut({ ok: true, variant: variantStr, stockKey: stockKeyStr });
 }
 
 /** Ensure Orders sheet has the Variant, Stock Key, and Stock Synced columns. */
@@ -800,9 +979,13 @@ function onStockEdit(e) {
     var oldStatus = String((e.oldValue || '')).trim().toLowerCase();
 
     var row = range.getRow();
-    // Read the entire row up to the Stock Synced column
-    var data = sheet.getRange(row, 1, 1, ORDERS_COL.STOCK_SYNCED + 1).getValues()[0];
+    // Defensive: read whatever columns exist, padded to at least 17
+    var readCols = Math.max(sheet.getLastColumn(), ORDERS_COL.STOCK_SYNCED + 1);
+    var data = sheet.getRange(row, 1, 1, readCols).getValues()[0];
+    while (data.length < ORDERS_COL.STOCK_SYNCED + 1) data.push('');
+
     var productName = String(data[ORDERS_COL.PRODUCT] || '').trim();
+    var notes = String(data[ORDERS_COL.NOTES] || '').trim();
     var qtyRaw = data[ORDERS_COL.QTY];
     var qty = (qtyRaw === '' || qtyRaw === null || qtyRaw === undefined) ? 1 : parseInt(String(qtyRaw), 10);
     if (isNaN(qty) || qty < 1) qty = 1;
@@ -819,51 +1002,23 @@ function onStockEdit(e) {
     var alreadySynced = String(data[ORDERS_COL.STOCK_SYNCED] || '').trim().toLowerCase();
 
     // ============================================================
-    //  BACKFILL — if Variant or Stock Key is empty, extract from
-    //  product name server-side. Catches orders where the frontend
-    //  failed to populate these columns.
+    //  BACKFILL — use the unified extractor (tries Variant col,
+    //  then product name parentheses, then notes column).
+    //  Writes back the extracted Variant + Stock Key columns.
     // ============================================================
     if (!stockKeyStr || !variantStr) {
-      var extractedVariant = variantStr;
-      if (!extractedVariant) {
-        var variantMatch = bareName.match(/\(([^)]+)\)\s*$/);
-        if (variantMatch) {
-          var variantContent = variantMatch[1].trim();
-          var variantParts = variantContent.split('·');
-          var extractedValues = [];
-          for (var vp = 0; vp < variantParts.length; vp++) {
-            var part = variantParts[vp].trim();
-            if (!part) continue;
-            var colonIdx = part.lastIndexOf(':');
-            if (colonIdx >= 0) {
-              var value = part.substring(colonIdx + 1).trim();
-              if (value) extractedValues.push(value);
-            } else if (part) {
-              extractedValues.push(part);
-            }
-          }
-          extractedVariant = extractedValues.join(' - ');
-        }
+      var extracted = extractVariantFromRow_(productName, notes, variantStr, stockKeyStr);
+      if (extracted.variant && !variantStr) {
+        try {
+          sheet.getRange(row, ORDERS_COL.VARIANT + 1).setValue(extracted.variant);
+        } catch (e) { Logger.log('[onStockEdit] backfill variant write error: ' + e); }
+        variantStr = extracted.variant;
       }
-
-      if (extractedVariant && !variantStr) {
-        sheet.getRange(row, ORDERS_COL.VARIANT + 1).setValue(extractedVariant);
-        variantStr = extractedVariant;
-      }
-
-      if (extractedVariant && !stockKeyStr) {
-        var cleanProductName = bareName.replace(/\s*\([^)]+\)\s*$/, '').trim();
-        var variantValues = extractedVariant.split(' - ');
-        var keys = [];
-        for (var kv = 0; kv < variantValues.length; kv++) {
-          var vv = variantValues[kv].trim();
-          if (vv) keys.push(cleanProductName + ' - ' + vv);
-        }
-        var newStockKey = keys.join(',');
-        if (newStockKey) {
-          sheet.getRange(row, ORDERS_COL.STOCK_KEY + 1).setValue(newStockKey);
-          stockKeyStr = newStockKey;
-        }
+      if (extracted.stockKey && !stockKeyStr) {
+        try {
+          sheet.getRange(row, ORDERS_COL.STOCK_KEY + 1).setValue(extracted.stockKey);
+        } catch (e) { Logger.log('[onStockEdit] backfill stockKey write error: ' + e); }
+        stockKeyStr = extracted.stockKey;
       }
     }
 
