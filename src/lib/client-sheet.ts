@@ -454,6 +454,10 @@ export async function clientSubmitOrder(payload: {
   commune: string;
   deliveryLabel: string;
   notes: string;
+  /** Optional variant name (e.g., "Red" or "Red - Large") — written to the
+   *  Variant column in the Orders sheet. Used by the onStockEdit trigger
+   *  for variant-specific stock decrement. Empty string = no variant. */
+  variant?: string;
 }): Promise<boolean> {
   const base = getClientSheetBaseUrl();
   try {
@@ -479,6 +483,7 @@ export async function clientSubmitOrder(payload: {
     params.set("commune", (payload.commune || "").substring(0, 50));
     params.set("deliveryLabel", (payload.deliveryLabel || "").substring(0, 50));
     params.set("notes", (payload.notes || "").substring(0, 200));
+    params.set("variant", (payload.variant || "").substring(0, 100));
 
     const url = `${base}?${params.toString()}`;
 

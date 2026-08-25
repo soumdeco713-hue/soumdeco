@@ -339,6 +339,49 @@ export function CodOrderForm({
         0,
       );
 
+      // ============================================================
+      //  VARIANT EXTRACTION — extract clean variant name for the
+      //  new "Variant" column in the Orders sheet.
+      //
+      //  Cart item names look like:
+      //    "Cocotte minute (اللون: Red)" → variant = "Red"
+      //    "Product (اللون: Red · المقاس: Large)" → variant = "Red - Large"
+      //    "Simple Product" → variant = "" (no variant)
+      //
+      //  This is sent as a separate URL param (&variant=Red) so the
+      //  Apps Script writes it to the Variant column — zero parsing
+      //  server-side. The trigger reads the column directly.
+      // ============================================================
+      const extractVariant = (itemName: string): string => {
+        const match = itemName.match(/\(([^)]+)\)\s*$/);
+        if (!match) return "";
+        const content = match[1].trim();
+        const parts = content.split("·");
+        const values: string[] = [];
+        for (const part of parts) {
+          const trimmed = part.trim();
+          const colonIdx = trimmed.lastIndexOf(":");
+          if (colonIdx >= 0) {
+            const value = trimmed.substring(colonIdx + 1).trim();
+            if (value) values.push(value);
+          } else if (trimmed) {
+            values.push(trimmed);
+          }
+        }
+        return values.join(" - ");
+      };
+      // For single-item orders: extract variant directly
+      // For multi-item orders: join all variants (rare but handles it)
+      const orderVariant = validItems.length === 1
+        ? extractVariant(validItems[0].name)
+        : validItems
+            .map((it) => {
+              const v = extractVariant(it.name);
+              return v ? `${it.name.split(" (")[0]}: ${v}` : "";
+            })
+            .filter(Boolean)
+            .join(" + ");
+
       // Combine user notes with variation summary (if any)
       const companyNote = SHIPPING_COMPANY_LABELS_AR[form.company];
 
@@ -378,6 +421,7 @@ export function CodOrderForm({
         commune: form.commune,
         deliveryLabel,
         notes: finalNotes,
+        variant: orderVariant,
       });
 
       if (!orderOk) {

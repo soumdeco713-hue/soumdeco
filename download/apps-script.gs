@@ -27,7 +27,7 @@ var IMG_SEP = '~~~';
 var ORDERS_COL = {
   DATE: 0, STATUS: 1, PRODUCT: 2, QTY: 3, UNIT_PRICE: 4,
   SHIPPING: 5, TOTAL: 6, CUSTOMER: 7, PHONE: 8, WILAYA: 9,
-  COMMUNE: 10, DELIVERY: 11, COMPANY: 12, NOTES: 13
+  COMMUNE: 10, DELIVERY: 11, COMPANY: 12, NOTES: 13, VARIANT: 14
 };
 
 function doGet(e) {
@@ -67,7 +67,12 @@ function doCreateOrderFromParams(p) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ORDERS_SHEET);
   if (!sheet) {
     sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet(ORDERS_SHEET);
-    sheet.appendRow(['Date','Status','Product','Qty','Unit Price','Shipping','Total','Customer','Phone','Wilaya','Commune','Delivery','Company','Notes']);
+    sheet.appendRow(['Date','Status','Product','Qty','Unit Price','Shipping','Total','Customer','Phone','Wilaya','Commune','Delivery','Company','Notes','Variant']);
+  }
+  // Auto-add 'Variant' column if it doesn't exist (backward compat with old sheets)
+  var headerRow = sheet.getRange(1, 1, 1, 15).getValues()[0];
+  if (!headerRow[14] || String(headerRow[14]).trim() !== 'Variant') {
+    sheet.getRange(1, 15).setValue('Variant');
   }
   sheet.appendRow([
     new Date(), 'New',
@@ -75,7 +80,8 @@ function doCreateOrderFromParams(p) {
     (p.price === null || p.price === undefined || p.price === '') ? '' : Number(p.price),
     Number(p.shippingPrice) || 0, Number(p.grandTotal) || 0,
     p.fullName || '', p.phone || '', p.wilaya || '', p.commune || '',
-    p.deliveryLabel || '', p.shippingCompanyLabel || '', p.notes || ''
+    p.deliveryLabel || '', p.shippingCompanyLabel || '', p.notes || '',
+    p.variant || ''
   ]);
   return jsonOut({ ok: true });
 }
@@ -454,9 +460,9 @@ function onStockEdit(e) {
     var newStatus = String(e.value || '').trim().toLowerCase();
     var oldStatus = String((e.oldValue || '')).trim().toLowerCase();
 
-    // Read the order row to find the product name + quantity.
+    // Read the order row to find the product name + quantity + variant.
     var row = range.getRow();
-    var data = sheet.getRange(row, 1, 1, ORDERS_COL.NOTES + 1).getValues()[0];
+    var data = sheet.getRange(row, 1, 1, ORDERS_COL.VARIANT + 1).getValues()[0];
     var productName = String(data[ORDERS_COL.PRODUCT] || '').trim();
     var qtyRaw = data[ORDERS_COL.QTY];
     var qty = (qtyRaw === '' || qtyRaw === null || qtyRaw === undefined)
@@ -474,40 +480,52 @@ function onStockEdit(e) {
     if (!bareName) return;
 
     // ============================================================
-    //  VARIANT EXTRACTION
+    //  VARIANT EXTRACTION — 3-layer fallback
     //  ============================================================
-    //  Order names with variants look like:
-    //    "Cocotte minute (color: Red)" → product="Cocotte minute", variant="Red"
-    //    "Cocotte minute (size: Large)" → product="Cocotte minute", variant="Large"
-    //    "Service a table" → product="Service a table", variant=null (no variant)
+    //  Layer 1 (BEST): Read from the new "Variant" column (column 15)
+    //    → Pre-extracted by the frontend, clean value like "Red"
+    //    → Zero parsing needed, most reliable
     //
-    //  The Stock tab has variant entries as: "ProductName - VariantName"
-    //  We extract the variant from the parentheses and look for that entry.
-    //  If found → decrement variant stock. If not found → product-level stock.
+    //  Layer 2 (FALLBACK): Parse from Product column (parentheses)
+    //    → For old orders that don't have the Variant column populated
+    //    → Extracts variant from "Product (اللون: Red)"
+    //
+    //  Layer 3 (FALLBACK): No variant found → product-level stock only
+    //    → Existing behavior (unchanged)
     // ============================================================
     var variantName = null;
-    var parenMatch = bareName.match(/\(([^)]+)\)\s*$/);
-    if (parenMatch) {
-      var variantContent = parenMatch[1].trim();
-      // Variant format: "color: Red" or "size: Large" or "color: Red · size: Large"
-      // Extract the VALUE (after the colon), handle multi-variant with " · " separator
-      var variantParts = variantContent.split('·');
-      var extractedNames = [];
-      for (var vp = 0; vp < variantParts.length; vp++) {
-        var vpTrimmed = variantParts[vp].trim();
-        var colonIdx = vpTrimmed.lastIndexOf(':');
-        if (colonIdx >= 0) {
-          var value = vpTrimmed.substring(colonIdx + 1).trim();
-          if (value) extractedNames.push(value);
-        } else {
-          // No colon — use the whole content as variant name
-          if (vpTrimmed) extractedNames.push(vpTrimmed);
+
+    // Layer 1: Read from Variant column directly (NEW — most reliable)
+    var variantColValue = String(data[ORDERS_COL.VARIANT] || '').trim();
+    if (variantColValue) {
+      variantName = variantColValue;
+    }
+
+    // Layer 2: If Variant column is empty, parse from Product column (FALLBACK)
+    if (!variantName) {
+      var parenMatch = bareName.match(/\(([^)]+)\)\s*$/);
+      if (parenMatch) {
+        var variantContent = parenMatch[1].trim();
+        var variantParts = variantContent.split('·');
+        var extractedNames = [];
+        for (var vp = 0; vp < variantParts.length; vp++) {
+          var vpTrimmed = variantParts[vp].trim();
+          var colonIdx = vpTrimmed.lastIndexOf(':');
+          if (colonIdx >= 0) {
+            var value = vpTrimmed.substring(colonIdx + 1).trim();
+            if (value) extractedNames.push(value);
+          } else {
+            if (vpTrimmed) extractedNames.push(vpTrimmed);
+          }
+        }
+        if (extractedNames.length > 0) {
+          variantName = extractedNames.join(' - ');
         }
       }
-      if (extractedNames.length > 0) {
-        variantName = extractedNames.join(' - ');
-      }
-      // Strip the parentheses from bareName for product-level lookup
+    }
+
+    // Strip the parentheses from bareName for product-level lookup
+    if (variantName) {
       bareName = bareName.replace(/\s*\([^)]+\)\s*$/, '').trim();
     }
 
