@@ -3408,3 +3408,46 @@ Stage Summary:
 - New 🔍 Diagnose Orders menu item lets user dry-run the extraction and see what would happen, before running the real batch processor.
 - File modified: download/apps-script.gs, upload/apps-script.gs
 - New test file: scripts/test-notes-extraction.js
+
+---
+Task ID: comma-in-product-name-bug
+Agent: main
+Task: "When I set it to Confirmed, the Variant column got updated, but no stock decrement happened. The item has a color variable (infinite stock) and the sizes."
+
+Work Log:
+- Diagnosed: ROOT CAUSE was a separator collision.
+  - Product name: "Cocotte minute 06, 08, 10, 12 litres Ref 01" (contains commas)
+  - Variant: "Red - 06L" (color + size combo)
+  - stockKey was built as: "Cocotte...Ref 01 - Red,Cocotte...Ref 01 - 06L" (comma-separated)
+  - When trigger called `stockKey.split(',')`, it got 8 fragments instead of 2:
+      "Cocotte minute 06" / " 08" / " 10" / " 12 litres Ref 01 - Red"
+      "Cocotte minute 06" / " 08" / " 10" / " 12 litres Ref 01 - 06L"
+  - NONE of these fragments matched the actual Stock tab rows
+  - → no decrement happened
+- Fix: changed the separator from "," to ";" (never appears in product names):
+  - buildStockKey_ now joins keys with ";"
+  - Added splitStockKey_() helper that smart-detects the separator:
+    - If ";" is present → split on ";" (new format)
+    - Else → split on "," (legacy format, only works for products without commas)
+  - Updated all 3 places that split stockKeyStr:
+    1. processAllConfirmedOrders (line ~476)
+    2. onStockEdit CASE 1: Confirmed → DECREMENT (line ~1050)
+    3. onStockEdit CASE 2: Cancelled → REVERT (line ~1083)
+- Also updated cod-order-form.tsx to join stockKey with ";" instead of ","
+- Tested with /home/z/my-project/scripts/test-comma-bug-fix.js — 2 scenarios, both pass:
+  1. ✅ NEW scenario: product name has commas, color (infinite) + size (with stock)
+     - Trigger tries "Cocotte...Red" first → no match in Stock tab (infinite color, skipped)
+     - Then tries "Cocotte...06L" → MATCH → decrements 5 → 4 ✓
+  2. ✅ LEGACY scenario: old comma format, product name has NO commas
+     - Smart split falls back to comma separator
+     - Trigger finds "Simple Product - Large" → MATCH → decrements 2 → 1 ✓
+- Verified syntax: verify-apps-script.js → both files OK (1334 lines)
+- Verified TypeScript: 0 errors
+
+Stage Summary:
+- This was the critical bug. The variant extraction was working correctly (Variant column got populated), but the stockKey parser was breaking the keys into pieces because of commas in the product name.
+- Now uses ";" separator → no collision with product name commas.
+- Smart split function preserves backward compatibility with any old comma-format stockKeys.
+- Adaptive to the user's exact scenario: color variant is infinite (no Stock tab row, trigger silently skips it), size variant has stock (trigger finds match and decrements).
+- Files modified: download/apps-script.gs, upload/apps-script.gs, src/components/site/cod-order-form.tsx
+- New test file: scripts/test-comma-bug-fix.js

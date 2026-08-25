@@ -446,12 +446,15 @@ export function CodOrderForm({
           // Build stockKey for each variant value
           // The Stock tab has entries like "Product - 10L" (one per variant)
           // We need to try each selected variant to find which one has stock
-          // Send ALL possible keys (comma-separated) — the SUMIFS will match
-          // the one that exists in the Stock tab
+          // Send ALL possible keys — the trigger will match the one that exists
+          //
+          // IMPORTANT: Uses ";" as separator (NOT ",") because product names
+          // can contain commas (e.g. "Cocotte minute 06, 08, 10, 12 litres Ref 01").
+          // Backend splitStockKey_() detects the separator smartly.
           if (selectedValues.length > 0) {
             stockKey = selectedValues
               .map((v) => `${prodName} - ${v}`)
-              .join(",");
+              .join(";");
           }
         }
       }

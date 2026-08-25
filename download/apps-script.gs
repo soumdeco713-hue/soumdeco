@@ -314,7 +314,11 @@ function extractVariantFromNotes_(notes) {
 
 /** Build stockKey from cleanProductName + variantStr.
  *  "Cocotte...Ref 01" + "06L" → "Cocotte...Ref 01 - 06L"
- *  "Cocotte...Ref 01" + "Red - Large" → "Cocotte...Ref 01 - Red,Cocotte...Ref 01 - Large"
+ *  "Cocotte...Ref 01" + "Red - Large" → "Cocotte...Ref 01 - Red;Cocotte...Ref 01 - Large"
+ *
+ *  IMPORTANT: Uses ";" as separator (NOT ",") because product names can contain
+ *  commas (e.g. "Cocotte minute 06, 08, 10, 12 litres Ref 01"). Using ";" ensures
+ *  we can reliably split the stockKey back into individual keys later.
  */
 function buildStockKey_(bareName, variantStr) {
   var cleanProductName = String(bareName || '').replace(/\s*\([^)]+\)\s*$/, '').trim();
@@ -324,7 +328,19 @@ function buildStockKey_(bareName, variantStr) {
     var v = variantValues[k].trim();
     if (v) keys.push(cleanProductName + ' - ' + v);
   }
-  return { variant: variantStr, stockKey: keys.join(',') };
+  return { variant: variantStr, stockKey: keys.join(';') };
+}
+
+/** Split stockKey into individual keys.
+ *  - NEW format: ";" separator (handles product names with commas)
+ *  - LEGACY format: "," separator (only works for product names without commas)
+ *  Smart detection: if ";" is present, use it; otherwise fall back to ",".
+ */
+function splitStockKey_(stockKeyStr) {
+  if (!stockKeyStr) return [];
+  var s = String(stockKeyStr).trim();
+  if (s.indexOf(';') >= 0) return s.split(';');
+  return s.split(',');
 }
 
 /**
@@ -457,7 +473,7 @@ function processAllConfirmedOrders() {
 
       // Try stockKey FIRST (variant match)
       if (stockKeyStr) {
-        var keys = stockKeyStr.split(',');
+        var keys = splitStockKey_(stockKeyStr);
         for (var k = 0; k < keys.length; k++) {
           var key = keys[k].trim();
           if (!key) continue;
@@ -1031,7 +1047,7 @@ function onStockEdit(e) {
 
       // Try stockKey FIRST (variant match — sent by frontend)
       if (stockKeyStr) {
-        var keys = stockKeyStr.split(',');
+        var keys = splitStockKey_(stockKeyStr);
         for (var k = 0; k < keys.length; k++) {
           var key = keys[k].trim();
           if (!key) continue;
@@ -1064,7 +1080,7 @@ function onStockEdit(e) {
       var reverted = false;
 
       if (stockKeyStr) {
-        var keys2 = stockKeyStr.split(',');
+        var keys2 = splitStockKey_(stockKeyStr);
         for (var k2 = 0; k2 < keys2.length; k2++) {
           var key2 = keys2[k2].trim();
           if (!key2) continue;
