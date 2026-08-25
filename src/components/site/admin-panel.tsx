@@ -38,6 +38,10 @@ type AdminPanelProps = {
   onReset: () => Promise<void>;
   onClose: () => void;
   syncing?: boolean;
+  /** Optional: Returns the stock count from the Stock tab CSV for a given product name.
+   *  Returns null if no CSV entry exists (product uses admin-panel stock instead).
+   *  Used to display the effective stock value in the edit form. */
+  getStockCount?: (productName: string) => number | null;
 };
 
 // Maximum file size for admin uploads (15MB — anything larger freezes the browser
@@ -209,11 +213,13 @@ function EditForm({
   categories,
   onSave,
   onCancel,
+  getStockCount,
 }: {
   product: Product;
   categories: string[];
   onSave: (p: Product) => Promise<void>;
   onCancel: () => void;
+  getStockCount?: (productName: string) => number | null;
 }) {
   const [draft, setDraft] = useState<Product>(product);
   const [uploading, setUploading] = useState(false);
@@ -736,7 +742,12 @@ function EditForm({
           />
         </div>
 
-        {/* 6c. Product Stock (NEW — per-product stock management) */}
+        {/* 6c. Product Stock (per-product stock management)
+         *    Displays the EFFECTIVE stock value:
+         *    - If Stock tab CSV has an entry → show that value (it takes priority)
+         *    - If no CSV entry → show the admin-panel stock (product.stock)
+         *    The admin can edit the field, but if CSV has a value, a warning
+         *    explains that the CSV overrides this field. */}
         <div>
           <label htmlFor={`fld-stock-${draft.id ?? "new"}`} className="mb-1 block text-sm font-medium text-charcoal">
             المخزون{" "}
@@ -767,6 +778,37 @@ function EditForm({
             min={0}
             autoComplete="off"
           />
+          {/* Show CSV stock value from the Stock tab (if it exists) */}
+          {(() => {
+            const csvStock = getStockCount?.(draft.name ?? "");
+            if (csvStock !== null && csvStock !== undefined) {
+              const adminStock = draft.stock;
+              const differs = adminStock !== null && adminStock !== undefined && adminStock !== csvStock;
+              return (
+                <div className="mt-1 rounded-lg bg-brass/5 px-3 py-2 text-xs">
+                  <span className="text-brass-deep font-medium">
+                    📋 المخزون في Google Sheet: {csvStock}
+                  </span>
+                  {csvStock === 0 && (
+                    <span className="mr-2 font-medium text-terracotta">
+                      {" "}· نفدت الكمية
+                    </span>
+                  )}
+                  {differs && (
+                    <span className="text-terracotta">
+                      {" "}· ⚠️ قيمة Google Sheet تتجاوز قيمة الأدمن
+                    </span>
+                  )}
+                  {!differs && csvStock !== 0 && (
+                    <span className="text-gray-light">
+                      {" "}· مطابق للقيمة أعلاه
+                    </span>
+                  )}
+                </div>
+              );
+            }
+            return null;
+          })()}
           <p className="mt-1 text-xs text-gray-light">
             💡 إذا كان للمنتج متغيرات (ألوان/أحجام)، حدد مخزون كل متغير بالأسفل.
           </p>
@@ -1292,6 +1334,7 @@ export function AdminPanel({
   onMove,
   onClose,
   syncing = false,
+  getStockCount,
 }: AdminPanelProps) {
   const [authed, setAuthed] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
@@ -1423,6 +1466,7 @@ export function AdminPanel({
             categories={categories}
             onSave={handleSave}
             onCancel={() => setEditing(null)}
+            getStockCount={getStockCount}
           />
         ) : (
           <>

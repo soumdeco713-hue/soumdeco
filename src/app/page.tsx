@@ -280,6 +280,7 @@ export default function Home() {
           onReset={catalog.resetCatalog}
           onClose={exitToHome}
           syncing={catalog.syncing}
+          getStockCount={stock.getStockCount}
         />
       </ErrorBoundary>
     );
