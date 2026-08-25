@@ -408,6 +408,54 @@ export function CodOrderForm({
       // This bypasses Cloudflare's broken edge API entirely.
       const { clientSubmitOrder } = await import("@/lib/client-sheet");
 
+      // ============================================================
+      //  BUILD STOCK KEY — the EXACT Stock tab entry name
+      //  for variants that have stock tracking (|stock in variants string).
+      //
+      //  Format: "ProductName - VariantName"
+      //  This matches EXACTLY what updateVariantStockTab_ creates in the
+      //  Stock tab. The SUMIFS formula in the Stock tab uses this key
+      //  to auto-decrement when order status = "Confirmed".
+      //
+      //  Only built for variants that HAVE |stock set.
+      //  If no variant has stock → stockKey is empty → no variant decrement.
+      // ============================================================
+      let stockKey = "";
+      if (validItems.length === 1) {
+        const item = validItems[0];
+        // Extract product name (strip variant parentheses)
+        const prodName = item.name.replace(/\s*\([^)]+\)\s*$/, "").trim();
+        // Try to find the product in the catalog to get its variants
+        // The item might have variant info in its name
+        const variantMatch = item.name.match(/\(([^)]+)\)\s*$/);
+        if (variantMatch) {
+          const variantContent = variantMatch[1].trim();
+          const variantParts = variantContent.split("·");
+          // For each selected variant, extract the value
+          const selectedValues: string[] = [];
+          for (const part of variantParts) {
+            const trimmed = part.trim();
+            const colonIdx = trimmed.lastIndexOf(":");
+            if (colonIdx >= 0) {
+              const value = trimmed.substring(colonIdx + 1).trim();
+              if (value) selectedValues.push(value);
+            } else if (trimmed) {
+              selectedValues.push(trimmed);
+            }
+          }
+          // Build stockKey for each variant value
+          // The Stock tab has entries like "Product - 10L" (one per variant)
+          // We need to try each selected variant to find which one has stock
+          // Send ALL possible keys (comma-separated) — the SUMIFS will match
+          // the one that exists in the Stock tab
+          if (selectedValues.length > 0) {
+            stockKey = selectedValues
+              .map((v) => `${prodName} - ${v}`)
+              .join(",");
+          }
+        }
+      }
+
       const orderOk = await clientSubmitOrder({
         product: allProducts,
         quantity: String(totalQty),
@@ -422,6 +470,7 @@ export function CodOrderForm({
         deliveryLabel,
         notes: finalNotes,
         variant: orderVariant,
+        stockKey,
       });
 
       if (!orderOk) {

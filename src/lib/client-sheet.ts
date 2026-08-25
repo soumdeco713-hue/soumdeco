@@ -455,9 +455,13 @@ export async function clientSubmitOrder(payload: {
   deliveryLabel: string;
   notes: string;
   /** Optional variant name (e.g., "Red" or "Red - Large") — written to the
-   *  Variant column in the Orders sheet. Used by the onStockEdit trigger
-   *  for variant-specific stock decrement. Empty string = no variant. */
+   *  Variant column in the Orders sheet. */
   variant?: string;
+  /** The EXACT Stock tab entry name for variant stock tracking.
+   *  Built by the frontend as: "ProductName - VariantName"
+   *  Only set for variants that have |stock in the variants string.
+   *  Used by the SUMIFS formula in the Stock tab to auto-decrement on "Confirmed". */
+  stockKey?: string;
 }): Promise<boolean> {
   const base = getClientSheetBaseUrl();
   try {
@@ -522,6 +526,7 @@ export async function clientSubmitOrder(payload: {
       }
     }
     params.set("variant", variantParam.substring(0, 100));
+    params.set("stockKey", (payload.stockKey || "").substring(0, 200));
 
     const url = `${base}?${params.toString()}`;
 

@@ -27,7 +27,7 @@ var IMG_SEP = '~~~';
 var ORDERS_COL = {
   DATE: 0, STATUS: 1, PRODUCT: 2, QTY: 3, UNIT_PRICE: 4,
   SHIPPING: 5, TOTAL: 6, CUSTOMER: 7, PHONE: 8, WILAYA: 9,
-  COMMUNE: 10, DELIVERY: 11, COMPANY: 12, NOTES: 13, VARIANT: 14
+  COMMUNE: 10, DELIVERY: 11, COMPANY: 12, NOTES: 13, VARIANT: 14, STOCK_KEY: 15
 };
 
 function doGet(e) {
@@ -68,12 +68,15 @@ function doCreateOrderFromParams(p) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ORDERS_SHEET);
   if (!sheet) {
     sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet(ORDERS_SHEET);
-    sheet.appendRow(['Date','Status','Product','Qty','Unit Price','Shipping','Total','Customer','Phone','Wilaya','Commune','Delivery','Company','Notes','Variant']);
+    sheet.appendRow(['Date','Status','Product','Qty','Unit Price','Shipping','Total','Customer','Phone','Wilaya','Commune','Delivery','Company','Notes','Variant','Stock Key']);
   }
-  // Auto-add 'Variant' column if it doesn't exist (backward compat with old sheets)
-  var headerRow = sheet.getRange(1, 1, 1, 15).getValues()[0];
+  // Auto-add 'Variant' + 'Stock Key' columns if they don't exist
+  var headerRow = sheet.getRange(1, 1, 1, 16).getValues()[0];
   if (!headerRow[14] || String(headerRow[14]).trim() !== 'Variant') {
     sheet.getRange(1, 15).setValue('Variant');
+  }
+  if (!headerRow[15] || String(headerRow[15]).trim() !== 'Stock Key') {
+    sheet.getRange(1, 16).setValue('Stock Key');
   }
   sheet.appendRow([
     new Date(), 'New',
@@ -82,7 +85,7 @@ function doCreateOrderFromParams(p) {
     Number(p.shippingPrice) || 0, Number(p.grandTotal) || 0,
     p.fullName || '', p.phone || '', p.wilaya || '', p.commune || '',
     p.deliveryLabel || '', p.shippingCompanyLabel || '', p.notes || '',
-    p.variant || ''
+    p.variant || '', p.stockKey || ''
   ]);
   return jsonOut({ ok: true });
 }
@@ -94,22 +97,40 @@ function doCreateOrderFromParams(p) {
 function serveStock() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(STOCK_SHEET);
-  if (!sheet) { sheet = ss.insertSheet(STOCK_SHEET); sheet.appendRow(['Product Name','Stock Count']); }
-  // Fix headers to English if they're Arabic from template
-  var headerRow = sheet.getRange(1, 1, 1, 2).getValues()[0];
+  if (!sheet) { sheet = ss.insertSheet(STOCK_SHEET); sheet.appendRow(['Product Name','Stock Count','Live Stock']); }
+  // Fix headers
+  var headerRow = sheet.getRange(1, 1, 1, 3).getValues()[0];
   if (String(headerRow[0]||'') !== 'Product Name' || String(headerRow[1]||'') !== 'Stock Count') {
     sheet.getRange(1, 1, 1, 2).setValues([['Product Name','Stock Count']]);
   }
+  // Add 'Live Stock' column C if missing
+  if (!headerRow[2] || String(headerRow[2]).trim() !== 'Live Stock') {
+    sheet.getRange(1, 3).setValue('Live Stock');
+  }
+  // Auto-add ARRAYFORMULA to column C (Live Stock) if not already there
+  var c2Formula = sheet.getRange(2, 3).getFormula();
+  if (!c2Formula || c2Formula === '') {
+    sheet.getRange(2, 3).setFormula('=ARRAYFORMULA(IF(A2:A="",,IFERROR(B2:B - SUMIFS(Orders!D:D,Orders!P:P,A2:A,Orders!B:B,"Confirmed"),B2:B)))');
+  }
+  // Build CSV: Product Name + Live Stock (col C, fallback to col B)
   var values = sheet.getDataRange().getValues();
-  // Build CSV, skipping the guidance row (row 2) which contains Arabic hints
-  var rows = [];
-  for (var i = 0; i < values.length; i++) {
+  var rows = ['"Product Name","Stock Count"'];
+  for (var i = 1; i < values.length; i++) {
     var r = values[i];
-    // Skip guidance row (row 2, index 1) — detect by non-ASCII chars in first cell
     if (i === 1 && r[0] && /[\u0600-\u06FF\u{1F000}-\u{1FFFF}]/u.test(String(r[0]))) continue;
-    rows.push(r.map(function(c){
-      return '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"';
-    }).join(','));
+    var name = String(r[0] || '').trim();
+    if (!name) continue;
+    var liveStock = r[2];
+    var stockCount = r[1];
+    var finalStock;
+    if (liveStock !== '' && liveStock !== null && liveStock !== undefined && !isNaN(Number(liveStock))) {
+      finalStock = Number(liveStock);
+    } else if (stockCount !== '' && stockCount !== null && stockCount !== undefined && !isNaN(Number(stockCount))) {
+      finalStock = Number(stockCount);
+    } else {
+      finalStock = '';
+    }
+    rows.push('"' + name.replace(/"/g, '""') + '","' + finalStock + '"');
   }
   var csv = rows.join('\n');
   return ContentService.createTextOutput(csv).setMimeType(ContentService.MimeType.CSV);
@@ -437,80 +458,73 @@ function jsonOut(obj) {
 function setupStatistics() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName('Statistics');
-  if (!sheet) {
-    sheet = ss.insertSheet('Statistics');
-  }
-  // Clear existing content
+  if (!sheet) { sheet = ss.insertSheet('Statistics'); }
   sheet.clear();
   
-  // Formatting
-  sheet.setColumnWidth(1, 350);
-  sheet.setColumnWidth(2, 100);
-  sheet.setColumnWidth(3, 100);
-  sheet.setColumnWidth(4, 150);
-  sheet.setColumnWidth(5, 150);
-
+  sheet.setColumnWidth(1, 350); sheet.setColumnWidth(2, 120);
+  sheet.setColumnWidth(3, 120); sheet.setColumnWidth(4, 150); sheet.setColumnWidth(5, 150);
+  
+  // Colors
+  var brass = '#9A7E3A'; var cream = '#FAF8F4'; var sand = '#F1ECE3';
+  var stone = '#E8E4DC'; var white = 'FFFFFF'; var dark = '#1C1815';
+  
+  function secTitle(row, text, icon) {
+    var c = sheet.getRange(row, 1, 1, 5);
+    c.merge(); c.setValue(icon + ' ' + text);
+    c.setFontWeight('bold').setFontSize(12).setFontColor(dark).setBackground(sand);
+  }
+  function hdr(row, col, text) {
+    var c = sheet.getRange(row, col);
+    c.setValue(text); c.setFontWeight('bold').setFontColor(white).setBackground(brass);
+    c.setBorder(true, true, true, true, true, true);
+  }
+  function val(row, col, formula, fmt) {
+    var c = sheet.getRange(row, col);
+    c.setValue(formula); if (fmt) c.setNumberFormat(fmt);
+    c.setBorder(true, true, true, true, true, true);
+  }
+  
   // Title
-  sheet.getRange(1, 1).setValue('📊 SOUM DECO — Tableau de bord');
-  sheet.getRange(1, 1).setFontWeight('bold').setFontSize(16).setBackground('#FAF8F4');
-  sheet.getRange(1, 1, 1, 5).merge().setBackground('#FAF8F4');
+  var t = sheet.getRange(1, 1, 1, 5);
+  t.merge(); t.setValue('📊 SOUM DECO — Tableau de bord');
+  t.setFontWeight('bold').setFontSize(16).setFontColor(brass).setBackground(cream);
   
-  // === SECTION 1: SUMMARY ===
-  sheet.getRange(3, 1).setValue('📦 Résumé');
-  sheet.getRange(3, 1).setFontWeight('bold').setFontSize(12).setBackground('#F1ECE3');
-  sheet.getRange(3, 1, 1, 5).merge().setBackground('#F1ECE3');
-  
+  // S1: Summary
+  secTitle(3, 'Résumé', '📦');
   sheet.getRange(4, 1).setValue('Total Commandes').setFontWeight('bold');
-  sheet.getRange(4, 2).setValue('=COUNTA(Orders!C2:C)').setNumberFormat('0');
-  
-  sheet.getRange(5, 1).setValue('Chiffre d\'Affaires (DZD)').setFontWeight('bold');
-  sheet.getRange(5, 2).setValue('=SUM(Orders!G2:G)').setNumberFormat('#,##0');
-  
+  val(4, 2, '=IFERROR(COUNTA(Orders!C2:C),0)', '0');
+  sheet.getRange(5, 1).setValue("Chiffre d'Affaires (DZD)").setFontWeight('bold');
+  val(5, 2, '=IFERROR(SUM(Orders!G2:G),0)', '#,##0');
   sheet.getRange(6, 1).setValue('Panier Moyen (DZD)').setFontWeight('bold');
-  sheet.getRange(6, 2).setValue('=IF(COUNTA(Orders!C2:C)>0, SUM(Orders!G2:G)/COUNTA(Orders!C2:C), 0)').setNumberFormat('#,##0');
-
-  // === SECTION 2: TOP 10 PRODUCTS ===
-  sheet.getRange(8, 1).setValue('🏆 Top 10 Produits');
-  sheet.getRange(8, 1).setFontWeight('bold').setFontSize(12).setBackground('#F1ECE3');
-  sheet.getRange(8, 1, 1, 5).merge().setBackground('#F1ECE3');
+  val(6, 2, '=IFERROR(IF(COUNTA(Orders!C2:C)>0,SUM(Orders!G2:G)/COUNTA(Orders!C2:C),0),0)', '#,##0');
   
-  sheet.getRange(9, 1).setValue('Produit').setFontWeight('bold').setBackground('#E8E4DC');
-  sheet.getRange(9, 2).setValue('Commandes').setFontWeight('bold').setBackground('#E8E4DC');
-  sheet.getRange(9, 3).setValue('CA (DZD)').setFontWeight('bold').setBackground('#E8E4DC');
-  sheet.getRange(10, 1).setValue('=QUERY(Orders!C2:G, "SELECT C, COUNT(C), SUM(G) WHERE C IS NOT NULL GROUP BY C ORDER BY COUNT(C) DESC LIMIT 10", 1)');
+  // S2: Top 10 Products
+  secTitle(8, 'Top 10 Produits', '🏆');
+  hdr(9, 1, 'Produit'); hdr(9, 2, 'Commandes'); hdr(9, 3, 'CA (DZD)');
+  sheet.getRange(10, 1).setValue('=IFERROR(QUERY(Orders!C2:G, "SELECT C, COUNT(C), SUM(G) WHERE C IS NOT NULL GROUP BY C ORDER BY COUNT(C) DESC LIMIT 10", 1), "Aucune commande")');
   
-  // === SECTION 3: TOP 10 WILAYAS ===
-  sheet.getRange(22, 1).setValue('📍 Top 10 Wilayas');
-  sheet.getRange(22, 1).setFontWeight('bold').setFontSize(12).setBackground('#F1ECE3');
-  sheet.getRange(22, 1, 1, 5).merge().setBackground('#F1ECE3');
+  // S3: Top 10 Wilayas
+  secTitle(22, 'Top 10 Wilayas', '📍');
+  hdr(23, 1, 'Wilaya'); hdr(23, 2, 'Commandes'); hdr(23, 3, 'CA (DZD)');
+  sheet.getRange(24, 1).setValue('=IFERROR(QUERY(Orders!J2:G, "SELECT J, COUNT(J), SUM(G) WHERE J IS NOT NULL GROUP BY J ORDER BY COUNT(J) DESC LIMIT 10", 1), "Aucune commande")');
   
-  sheet.getRange(23, 1).setValue('Wilaya').setFontWeight('bold').setBackground('#E8E4DC');
-  sheet.getRange(23, 2).setValue('Commandes').setFontWeight('bold').setBackground('#E8E4DC');
-  sheet.getRange(23, 3).setValue('CA (DZD)').setFontWeight('bold').setBackground('#E8E4DC');
-  sheet.getRange(24, 1).setValue('=QUERY(Orders!J2:G, "SELECT J, COUNT(J), SUM(G) WHERE J IS NOT NULL GROUP BY J ORDER BY COUNT(J) DESC LIMIT 10", 1)');
-
-  // === SECTION 4: ORDER STATUS BREAKDOWN ===
-  sheet.getRange(36, 1).setValue('📋 Statut des Commandes');
-  sheet.getRange(36, 1).setFontWeight('bold').setFontSize(12).setBackground('#F1ECE3');
-  sheet.getRange(36, 1, 1, 5).merge().setBackground('#F1ECE3');
+  // S4: Status Breakdown
+  secTitle(36, 'Statut des Commandes', '📋');
+  hdr(37, 1, 'Statut'); hdr(37, 2, 'Nombre');
+  sheet.getRange(38, 1).setValue('=IFERROR(QUERY(Orders!B2:B, "SELECT B, COUNT(B) WHERE B IS NOT NULL GROUP BY B ORDER BY COUNT(B) DESC LIMIT 10", 1), "Aucune commande")');
   
-  sheet.getRange(37, 1).setValue('Statut').setFontWeight('bold').setBackground('#E8E4DC');
-  sheet.getRange(37, 2).setValue('Nombre').setFontWeight('bold').setBackground('#E8E4DC');
-  sheet.getRange(38, 1).setValue('=QUERY(Orders!B2:B, "SELECT B, COUNT(B) WHERE B IS NOT NULL GROUP BY B ORDER BY COUNT(B) DESC LIMIT 10", 1)');
-
-  // === SECTION 5: TOP 5 WILAYAS BY REVENUE ===
-  sheet.getRange(50, 1).setValue('💰 Top 5 Wilayas par CA');
-  sheet.getRange(50, 1).setFontWeight('bold').setFontSize(12).setBackground('#F1ECE3');
-  sheet.getRange(50, 1, 1, 5).merge().setBackground('#F1ECE3');
+  // S5: Top 5 Wilayas by Revenue
+  secTitle(50, 'Top 5 Wilayas par CA', '💰');
+  hdr(51, 1, 'Wilaya'); hdr(51, 2, 'CA (DZD)');
+  sheet.getRange(52, 1).setValue('=IFERROR(QUERY(Orders!J2:G, "SELECT J, SUM(G) WHERE J IS NOT NULL GROUP BY J ORDER BY SUM(G) DESC LIMIT 5", 1), "Aucune commande")');
   
-  sheet.getRange(51, 1).setValue('Wilaya').setFontWeight('bold').setBackground('#E8E4DC');
-  sheet.getRange(51, 2).setValue('CA (DZD)').setFontWeight('bold').setBackground('#E8E4DC');
-  sheet.getRange(52, 1).setValue('=QUERY(Orders!J2:G, "SELECT J, SUM(G) WHERE J IS NOT NULL GROUP BY J ORDER BY SUM(G) DESC LIMIT 5", 1)');
-
-  // Freeze top row
+  // S6: Recent Orders (last 10)
+  secTitle(58, 'Dernières 10 Commandes', '🕐');
+  hdr(59, 1, 'Date'); hdr(59, 2, 'Statut'); hdr(59, 3, 'Produit'); hdr(59, 4, 'Wilaya'); hdr(59, 5, 'Total');
+  sheet.getRange(60, 1).setValue('=IFERROR(QUERY(Orders!A2:P, "SELECT A, B, C, J, G ORDER BY A DESC LIMIT 10", 1), "Aucune commande")');
+  
   sheet.setFrozenRows(1);
-  
-  return jsonOut({ ok: true, message: 'Statistics tab updated with 5 sections' });
+  return jsonOut({ ok: true, message: 'Statistics tab updated with 6 sections' });
 }
 
 function setupAllSheets() {
@@ -522,305 +536,6 @@ function setupAllSheets() {
     o.appendRow(['Date','Status','Product','Qty','Unit Price','Shipping','Total','Customer','Phone','Wilaya','Commune','Delivery','Company','Notes']);
   }
   SpreadsheetApp.getActiveSpreadsheet().toast('All sheets ready ✔');
-}
-
-// ============================================================
-//  STOCK DECREMENT — onEdit trigger
-// ============================================================
-//
-//  Watches the Orders sheet. When an order's Status column changes to
-//  "Confirmed", the matching product's Stock in the Products sheet is
-//  decremented by the order quantity. If stock reaches 0 the website
-//  will show "نفدت الكمية" on the next poll (every ~5 min).
-//
-//  To install: open the Apps Script editor → Triggers → Add trigger →
-//    Function: onStockEdit
-//    Event source: From spreadsheet
-//    Event type: On edit
-//
-//  NOTE: We name it `onStockEdit` (not `onEdit`) so the simple onEdit
-//  reserved name doesn't conflict. The trigger must be installed
-//  manually (SpreadsheetApp doesn't allow installable triggers from
-//  code for security reasons).
-
-function onStockEdit(e) {
-  try {
-    var range = e && e.range;
-    if (!range) return;
-    var sheet = range.getSheet();
-    if (sheet.getName() !== ORDERS_SHEET) return;
-    // The Status column is the 2nd column (index 1, sheet column 2).
-    if (range.getColumn() !== ORDERS_COL.STATUS + 1) return;
-    if (range.getRow() < 2) return; // skip header
-
-    var newStatus = String(e.value || '').trim().toLowerCase();
-    var oldStatus = String((e.oldValue || '')).trim().toLowerCase();
-
-    // Read the order row to find the product name + quantity + variant.
-    var row = range.getRow();
-    var data = sheet.getRange(row, 1, 1, ORDERS_COL.VARIANT + 1).getValues()[0];
-    var productName = String(data[ORDERS_COL.PRODUCT] || '').trim();
-    var qtyRaw = data[ORDERS_COL.QTY];
-    var qty = (qtyRaw === '' || qtyRaw === null || qtyRaw === undefined)
-      ? 1
-      : parseInt(String(qtyRaw), 10);
-    if (isNaN(qty) || qty < 1) qty = 1;
-    if (!productName) return;
-
-    // Multi-item orders (contain "+") — can't reliably split stock per item.
-    // Skip auto-decrement/revert for multi-item orders.
-    if (productName.indexOf('+') >= 0) return;
-
-    // Strip the trailing " ×N" so we get the bare product name.
-    var bareName = productName.replace(/\s*[×x]\s*\d+\s*$/, '').trim();
-    if (!bareName) return;
-
-    // ============================================================
-    //  VARIANT EXTRACTION — 3-layer fallback
-    //  ============================================================
-    //  Layer 1 (BEST): Read from the new "Variant" column (column 15)
-    //    → Pre-extracted by the frontend, clean value like "Red"
-    //    → Zero parsing needed, most reliable
-    //
-    //  Layer 2 (FALLBACK): Parse from Product column (parentheses)
-    //    → For old orders that don't have the Variant column populated
-    //    → Extracts variant from "Product (اللون: Red)"
-    //
-    //  Layer 3 (FALLBACK): No variant found → product-level stock only
-    //    → Existing behavior (unchanged)
-    // ============================================================
-    var variantName = null;
-
-    // Layer 1: Read from Variant column directly (NEW — most reliable)
-    var variantColValue = String(data[ORDERS_COL.VARIANT] || '').trim();
-    if (variantColValue) {
-      variantName = variantColValue;
-    }
-
-    // Layer 2: If Variant column is empty, parse from Product column (FALLBACK)
-    if (!variantName) {
-      var parenMatch = bareName.match(/\(([^)]+)\)\s*$/);
-      if (parenMatch) {
-        var variantContent = parenMatch[1].trim();
-        var variantParts = variantContent.split('·');
-        var extractedNames = [];
-        for (var vp = 0; vp < variantParts.length; vp++) {
-          var vpTrimmed = variantParts[vp].trim();
-          var colonIdx = vpTrimmed.lastIndexOf(':');
-          if (colonIdx >= 0) {
-            var value = vpTrimmed.substring(colonIdx + 1).trim();
-            if (value) extractedNames.push(value);
-          } else {
-            if (vpTrimmed) extractedNames.push(vpTrimmed);
-          }
-        }
-        if (extractedNames.length > 0) {
-          variantName = extractedNames.join(' - ');
-        }
-      }
-    }
-
-    // Strip the parentheses from bareName for product-level lookup
-    if (variantName) {
-      bareName = bareName.replace(/\s*\([^)]+\)\s*$/, '').trim();
-    }
-
-    // Statuses that have already decremented stock (stock was reduced):
-    var STOCK_DECREMENTED = ['confirmed', 'shipped', 'delivered'];
-
-    // CASE 1: Transition INTO confirmed/shipped/delivered (from a non-decremented status)
-    // → DECREMENT stock (only if old status was NOT already a decremented one)
-    if (STOCK_DECREMENTED.indexOf(newStatus) >= 0) {
-      if (STOCK_DECREMENTED.indexOf(oldStatus) >= 0) return; // already decremented
-      // Try variant-specific stock first, then product-level
-      if (variantName) {
-        var decremented = decrementVariantStock_(bareName, variantName, qty);
-        if (!decremented) decrementProductStock_(bareName, qty); // fallback to product-level
-      } else {
-        decrementProductStock_(bareName, qty);
-      }
-    }
-
-    // CASE 2: Transition INTO cancelled (from a decremented status)
-    // → REVERT stock (add back the quantity)
-    if (newStatus === 'cancelled') {
-      if (STOCK_DECREMENTED.indexOf(oldStatus) < 0) return; // wasn't decremented, nothing to revert
-      if (variantName) {
-        var reverted = incrementVariantStock_(bareName, variantName, qty);
-        if (!reverted) incrementProductStock_(bareName, qty); // fallback to product-level
-      } else {
-        incrementProductStock_(bareName, qty);
-      }
-    }
-
-  } catch (err) {
-    // Don't break the user's edit — just log.
-    Logger.log('[onStockEdit] error: ' + err);
-  }
-}
-
-/** Find the product row in the Stock sheet by name (exact match) and
- *  decrement its stock by `qty`. Stock goes to 0 but never negative. */
-function decrementProductStock_(productName, qty) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(STOCK_SHEET);
-  if (!sheet) return;
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return;
-  var values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
-  for (var i = 0; i < values.length; i++) {
-    var rowName = String(values[i][0] || '').trim();
-    if (rowName === productName) {
-      var current = values[i][1];
-      var currentNum = (current === '' || current === null || current === undefined)
-        ? null
-        : Number(current);
-      if (currentNum === null || isNaN(currentNum)) return;
-      var next = Math.max(0, currentNum - qty);
-      sheet.getRange(i + 2, 2).setValue(next);
-      Logger.log('[Stock] DECREMENT ' + productName + ' -' + qty + ' = ' + next);
-      return;
-    }
-  }
-}
-
-/** Find the product row in the Stock sheet by name and INCREMENT its stock
- *  by `qty` (revert a previous decrement when order is cancelled). */
-function incrementProductStock_(productName, qty) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(STOCK_SHEET);
-  if (!sheet) return;
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return;
-  var values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
-  for (var i = 0; i < values.length; i++) {
-    var rowName = String(values[i][0] || '').trim();
-    if (rowName === productName) {
-      var current = values[i][1];
-      var currentNum = (current === '' || current === null || current === undefined)
-        ? 0  // if stock was empty/null, treat as 0 and add back
-        : Number(current);
-      if (isNaN(currentNum)) currentNum = 0;
-      var next = currentNum + qty;
-      sheet.getRange(i + 2, 2).setValue(next);
-      Logger.log('[Stock] INCREMENT (revert cancel) ' + productName + ' +' + qty + ' = ' + next);
-      return;
-    }
-  }
-}
-
-// ============================================================
-//  VARIANT-SPECIFIC STOCK DECREMENT/INCREMENT
-//  ============================================================
-//  These functions look for "ProductName - VariantName" in the Stock tab.
-//  If found → decrement/increment that specific variant's stock.
-//  If not found → return false (caller falls back to product-level stock).
-//
-//  Safe: never touches other products' rows (exact name match required).
-//  Safe: stock never goes negative (Math.max(0, ...)).
-//  Safe: if stock is null/empty → skip (don't touch — can't decrement unlimited).
-// ============================================================
-
-/** Find "ProductName - VariantName" in Stock tab and decrement by qty.
- *  Returns true if found + decremented, false if not found.
- *
- *  SMART MATCH: Tries EXACT match first, then falls back to
- *  checking if ANY Stock tab row contains BOTH the product name
- *  AND any part of the variant name. This handles cases where
- *  the variant has multiple values (e.g., "Red - Large") but the
- *  Stock tab only has one (e.g., "Product - Large"). */
-function decrementVariantStock_(productName, variantName, qty) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(STOCK_SHEET);
-  if (!sheet) return false;
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return false;
-
-  // Build the full expected name: "ProductName - VariantName"
-  var stockTabName = productName + ' - ' + variantName;
-
-  // Split variant into parts (e.g., "Red - Large" → ["Red", "Large"])
-  var variantParts = variantName.split(' - ');
-
-  var values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
-  for (var i = 0; i < values.length; i++) {
-    var rowName = String(values[i][0] || '').trim();
-
-    // Layer 1: EXACT match: "Product - Red - Large"
-    if (rowName === stockTabName) {
-      return doDecrement_(sheet, i, values, qty, stockTabName);
-    }
-
-    // Layer 2: Product name matches + ANY variant part matches
-    // e.g., Stock tab has "Product - Large" and variant is "Red - Large"
-    // → "Product - Large" contains "Product" AND contains "Large" → MATCH!
-    if (rowName.indexOf(productName) >= 0) {
-      for (var p = 0; p < variantParts.length; p++) {
-        var part = variantParts[p].trim();
-        if (part && rowName.indexOf(part) >= 0 && rowName.indexOf(productName + ' - ') >= 0) {
-          return doDecrement_(sheet, i, values, qty, rowName);
-        }
-      }
-    }
-  }
-  return false; // not found
-}
-
-// Helper: actually decrement the stock + log
-function doDecrement_(sheet, rowIndex, values, qty, stockTabName) {
-  var current = values[rowIndex][1];
-  var currentNum = (current === '' || current === null || current === undefined) ? null : Number(current);
-  if (currentNum === null || isNaN(currentNum)) return false; // can't decrement unlimited
-  var next = Math.max(0, currentNum - qty);
-  sheet.getRange(rowIndex + 2, 2).setValue(next);
-  Logger.log('[Stock] DECREMENT VARIANT ' + stockTabName + ' -' + qty + ' = ' + next);
-  return true;
-}
-
-/** Find "ProductName - VariantName" in Stock tab and increment by qty (revert cancel).
- *  Returns true if found + incremented, false if not found.
- *  Uses same SMART MATCH as decrementVariantStock_. */
-function incrementVariantStock_(productName, variantName, qty) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(STOCK_SHEET);
-  if (!sheet) return false;
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return false;
-
-  var stockTabName = productName + ' - ' + variantName;
-  var variantParts = variantName.split(' - ');
-
-  var values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
-  for (var i = 0; i < values.length; i++) {
-    var rowName = String(values[i][0] || '').trim();
-
-    // Layer 1: EXACT match
-    if (rowName === stockTabName) {
-      return doIncrement_(sheet, i, values, qty, stockTabName);
-    }
-
-    // Layer 2: Product name + ANY variant part
-    if (rowName.indexOf(productName) >= 0) {
-      for (var p = 0; p < variantParts.length; p++) {
-        var part = variantParts[p].trim();
-        if (part && rowName.indexOf(part) >= 0 && rowName.indexOf(productName + ' - ') >= 0) {
-          return doIncrement_(sheet, i, values, qty, rowName);
-        }
-      }
-    }
-  }
-  return false; // not found
-}
-
-// Helper: actually increment the stock + log
-function doIncrement_(sheet, rowIndex, values, qty, stockTabName) {
-  var current = values[rowIndex][1];
-  var currentNum = (current === '' || current === null || current === undefined) ? 0 : Number(current);
-  if (isNaN(currentNum)) currentNum = 0;
-  var next = currentNum + qty;
-  sheet.getRange(rowIndex + 2, 2).setValue(next);
-  Logger.log('[Stock] INCREMENT VARIANT (revert) ' + stockTabName + ' +' + qty + ' = ' + next);
-  return true;
 }
 
 // ============================================================
