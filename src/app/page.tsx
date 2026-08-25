@@ -202,66 +202,68 @@ export default function Home() {
   const showSkeletons = catalog.loading && validProducts.length === 0 && !catalog.hydrated;
 
   // ============================================================
-  //  ENHANCED STOCK CHECKS
+  //  STOCK CHECKS — Admin panel stock takes priority
   //  ============================================================
-  //  Priority (CSV from Stock tab takes precedence — preserves existing stock):
-  //    1. Stock tab CSV (existing) → if entry exists, use it
-  //    2. Product.stock / Variant.stock from admin panel (new) → fallback
+  //  Priority (admin panel stock overwrites CSV):
+  //    1. Product.stock from admin panel (NEW — takes priority)
+  //       - If set (not null), this is the effective value
+  //       - Admin can overwrite CSV values without touching the sheet
+  //    2. Stock tab CSV (existing) → fallback if admin panel stock is empty
+  //       - Used only when admin hasn't set a value in the panel
   //
-  //  This guarantees:
-  //  - Products with existing stock in the sheet → SAME behavior as before
-  //  - Products without CSV entry → admin panel stock is used (NEW feature)
-  //  - Admin can always override by setting stock in the sheet CSV
+  //  This allows admin to manage ALL stock from the admin panel.
+  //  The CSV value is displayed in the admin panel for reference,
+  //  but the admin panel value is what visitors actually see.
   //  ============================================================
   const isRupture = useCallback(
     (product: Product) => {
-      // 1. Stock tab CSV first (existing behavior — preserved)
+      // 1. Admin panel stock takes priority (overwrites CSV)
+      if (product.stock !== null && product.stock !== undefined) {
+        return product.stock === 0;
+      }
+      // 2. No admin panel stock → fall back to CSV
       const csvCount = stock.getStockCount(product.name);
       if (csvCount !== null) return csvCount === 0;
-      // 2. No CSV entry → check product.stock from admin panel (new)
-      return product.stock === 0;
+      return false; // no stock info → not ruptured
     },
     [stock],
   );
 
   const isLowStock = useCallback(
     (product: Product) => {
-      // 1. Stock tab CSV first (existing behavior — preserved)
+      // 1. Admin panel stock takes priority
+      if (product.stock !== null && product.stock !== undefined) {
+        return product.stock > 0 && product.stock <= 3;
+      }
+      // 2. No admin panel stock → fall back to CSV
       const csvCount = stock.getStockCount(product.name);
       if (csvCount !== null) {
         return csvCount > 0 && csvCount <= 3;
-      }
-      // 2. No CSV entry → check product.stock from admin panel (new)
-      if (product.stock !== null && product.stock !== undefined) {
-        return product.stock > 0 && product.stock <= 3;
       }
       return false;
     },
     [stock],
   );
 
-  // Enhanced per-variant rupture check — checks variant.stock from variants string
+  // Per-variant rupture check — variant.stock from admin panel takes priority
   const isVariantRupture = useCallback(
     (productName: string, variantName: string): boolean => {
-      // 1. Stock tab CSV first (existing behavior — preserved)
-      // Format: "Product Name - Variant Name"
-      const csvCount = stock.getStockCount(`${productName} - ${variantName}`);
-      if (csvCount !== null) return csvCount === 0;
-
-      // 2. No CSV entry → check variant.stock from variants string (new)
-      // variantName could be "Red" or "Red - Large" (combined selections)
-      // Split by " - " and check if ANY selected variant has stock = 0
+      // 1. Check variant.stock from variants string (admin panel) — takes priority
       const product = catalog.products.find((p) => p.name === productName);
       if (product?.variants && product.variants.length > 0) {
         const selectedParts = variantName.split(" - ").map((s) => s.trim());
         for (const part of selectedParts) {
           if (!part) continue;
           const variant = product.variants.find((v) => v.name === part);
-          if (variant && typeof variant.stock === "number" && variant.stock === 0) {
-            return true;
+          if (variant && typeof variant.stock === "number") {
+            // Variant has explicit stock set → this is the effective value
+            return variant.stock === 0;
           }
         }
       }
+      // 2. No variant stock set → fall back to CSV
+      const csvCount = stock.getStockCount(`${productName} - ${variantName}`);
+      if (csvCount !== null) return csvCount === 0;
       return false;
     },
     [stock, catalog.products],

@@ -778,33 +778,15 @@ function EditForm({
             min={0}
             autoComplete="off"
           />
-          {/* Show CSV stock value from the Stock tab (if it exists) */}
+          {/* Show CSV stock value from the Stock tab (informational only) */}
           {(() => {
             const csvStock = getStockCount?.(draft.name ?? "");
             if (csvStock !== null && csvStock !== undefined) {
-              const adminStock = draft.stock;
-              const differs = adminStock !== null && adminStock !== undefined && adminStock !== csvStock;
               return (
-                <div className="mt-1 rounded-lg bg-brass/5 px-3 py-2 text-xs">
-                  <span className="text-brass-deep font-medium">
-                    📋 المخزون في Google Sheet: {csvStock}
-                  </span>
-                  {csvStock === 0 && (
-                    <span className="mr-2 font-medium text-terracotta">
-                      {" "}· نفدت الكمية
-                    </span>
-                  )}
-                  {differs && (
-                    <span className="text-terracotta">
-                      {" "}· ⚠️ قيمة Google Sheet تتجاوز قيمة الأدمن
-                    </span>
-                  )}
-                  {!differs && csvStock !== 0 && (
-                    <span className="text-gray-light">
-                      {" "}· مطابق للقيمة أعلاه
-                    </span>
-                  )}
-                </div>
+                <p className="mt-1 text-xs text-gray-light">
+                  📋 المخزون في Google Sheet: {csvStock}
+                  {csvStock === 0 && " · نفدت الكمية"}
+                </p>
               );
             }
             return null;
