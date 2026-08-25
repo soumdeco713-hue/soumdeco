@@ -97,40 +97,17 @@ function doCreateOrderFromParams(p) {
 function serveStock() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(STOCK_SHEET);
-  if (!sheet) { sheet = ss.insertSheet(STOCK_SHEET); sheet.appendRow(['Product Name','Stock Count','Live Stock']); }
-  // Fix headers
-  var headerRow = sheet.getRange(1, 1, 1, 3).getValues()[0];
+  if (!sheet) { sheet = ss.insertSheet(STOCK_SHEET); sheet.appendRow(['Product Name','Stock Count']); }
+  var headerRow = sheet.getRange(1, 1, 1, 2).getValues()[0];
   if (String(headerRow[0]||'') !== 'Product Name' || String(headerRow[1]||'') !== 'Stock Count') {
     sheet.getRange(1, 1, 1, 2).setValues([['Product Name','Stock Count']]);
   }
-  // Add 'Live Stock' column C if missing
-  if (!headerRow[2] || String(headerRow[2]).trim() !== 'Live Stock') {
-    sheet.getRange(1, 3).setValue('Live Stock');
-  }
-  // Auto-add ARRAYFORMULA to column C (Live Stock) if not already there
-  var c2Formula = sheet.getRange(2, 3).getFormula();
-  if (!c2Formula || c2Formula === '') {
-    sheet.getRange(2, 3).setFormula('=ARRAYFORMULA(IF(A2:A="",,IFERROR(B2:B - SUMIFS(Orders!D:D,Orders!P:P,A2:A,Orders!B:B,"Confirmed"),B2:B)))');
-  }
-  // Build CSV: Product Name + Live Stock (col C, fallback to col B)
   var values = sheet.getDataRange().getValues();
-  var rows = ['"Product Name","Stock Count"'];
-  for (var i = 1; i < values.length; i++) {
+  var rows = [];
+  for (var i = 0; i < values.length; i++) {
     var r = values[i];
     if (i === 1 && r[0] && /[\u0600-\u06FF\u{1F000}-\u{1FFFF}]/u.test(String(r[0]))) continue;
-    var name = String(r[0] || '').trim();
-    if (!name) continue;
-    var liveStock = r[2];
-    var stockCount = r[1];
-    var finalStock;
-    if (liveStock !== '' && liveStock !== null && liveStock !== undefined && !isNaN(Number(liveStock))) {
-      finalStock = Number(liveStock);
-    } else if (stockCount !== '' && stockCount !== null && stockCount !== undefined && !isNaN(Number(stockCount))) {
-      finalStock = Number(stockCount);
-    } else {
-      finalStock = '';
-    }
-    rows.push('"' + name.replace(/"/g, '""') + '","' + finalStock + '"');
+    rows.push(r.map(function(c){ return '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"'; }).join(','));
   }
   var csv = rows.join('\n');
   return ContentService.createTextOutput(csv).setMimeType(ContentService.MimeType.CSV);
@@ -537,6 +514,189 @@ function setupAllSheets() {
   }
   SpreadsheetApp.getActiveSpreadsheet().toast('All sheets ready ✔');
 }
+
+
+// ============================================================
+//  STOCK DECREMENT — onEdit trigger (RESTORED)
+// ============================================================
+//  Watches the Orders sheet. When an order's Status changes to
+//  "Confirmed", the matching product's Stock is decremented.
+//
+//  Uses Stock Key column (column P) for EXACT matching:
+//    - If stockKey has value → find exact match in Stock tab → decrement
+//    - If empty → try product name match → decrement
+//    - If no match → skip (can't decrement unlimited)
+//
+//  To install: Apps Script editor → Triggers → Add trigger →
+//    Function: onStockEdit
+//    Event source: From spreadsheet
+//    Event type: On edit
+// ============================================================
+
+function onStockEdit(e) {
+  try {
+    var range = e && e.range;
+    if (!range) return;
+    var sheet = range.getSheet();
+    if (sheet.getName() !== ORDERS_SHEET) return;
+    if (range.getColumn() !== ORDERS_COL.STATUS + 1) return;
+    if (range.getRow() < 2) return;
+
+    var newStatus = String(e.value || '').trim().toLowerCase();
+    var oldStatus = String((e.oldValue || '')).trim().toLowerCase();
+
+    var row = range.getRow();
+    var data = sheet.getRange(row, 1, 1, ORDERS_COL.STOCK_KEY + 1).getValues()[0];
+    var productName = String(data[ORDERS_COL.PRODUCT] || '').trim();
+    var qtyRaw = data[ORDERS_COL.QTY];
+    var qty = (qtyRaw === '' || qtyRaw === null || qtyRaw === undefined) ? 1 : parseInt(String(qtyRaw), 10);
+    if (isNaN(qty) || qty < 1) qty = 1;
+    if (!productName) return;
+
+    // Multi-item orders (contain "+") — skip
+    if (productName.indexOf('+') >= 0) return;
+
+    // Strip trailing ×N
+    var bareName = productName.replace(/\s*[×x]\s*\d+\s*$/, '').trim();
+    if (!bareName) return;
+
+    // Read Stock Key column (column P = index 15)
+    var stockKeyStr = String(data[ORDERS_COL.STOCK_KEY] || '').trim();
+
+    var STOCK_DECREMENTED = ['confirmed', 'shipped', 'delivered'];
+
+    // CASE 1: Confirmed → DECREMENT
+    if (STOCK_DECREMENTED.indexOf(newStatus) >= 0) {
+      if (STOCK_DECREMENTED.indexOf(oldStatus) >= 0) return;
+
+      // Try stockKey FIRST (EXACT match — sent by frontend)
+      if (stockKeyStr) {
+        // stockKey may be comma-separated (multiple variant keys)
+        var keys = stockKeyStr.split(',');
+        var decremented = false;
+        for (var k = 0; k < keys.length; k++) {
+          var key = keys[k].trim();
+          if (!key) continue;
+          decremented = decrementStockByKey_(key, qty);
+          if (decremented) break; // found and decremented
+        }
+        if (decremented) return; // done
+      }
+
+      // Fallback: try product name match
+      decrementProductStock_(bareName, qty);
+    }
+
+    // CASE 2: Cancelled → REVERT
+    if (newStatus === 'cancelled') {
+      if (STOCK_DECREMENTED.indexOf(oldStatus) < 0) return;
+
+      if (stockKeyStr) {
+        var keys2 = stockKeyStr.split(',');
+        var reverted = false;
+        for (var k2 = 0; k2 < keys2.length; k2++) {
+          var key2 = keys2[k2].trim();
+          if (!key2) continue;
+          reverted = incrementStockByKey_(key2, qty);
+          if (reverted) break;
+        }
+        if (reverted) return;
+      }
+
+      incrementProductStock_(bareName, qty);
+    }
+
+  } catch (err) {
+    Logger.log('[onStockEdit] error: ' + err);
+  }
+}
+
+// Decrement stock by EXACT Stock tab name (from stockKey)
+function decrementStockByKey_(stockTabName, qty) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(STOCK_SHEET);
+  if (!sheet) return false;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return false;
+  var values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0] || '').trim() === stockTabName.trim()) {
+      var current = values[i][1];
+      var currentNum = (current === '' || current === null || current === undefined) ? null : Number(current);
+      if (currentNum === null || isNaN(currentNum)) return false;
+      var next = Math.max(0, currentNum - qty);
+      sheet.getRange(i + 2, 2).setValue(next);
+      Logger.log('[Stock] DECREMENT ' + stockTabName + ' -' + qty + ' = ' + next);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Increment stock by EXACT Stock tab name (revert cancel)
+function incrementStockByKey_(stockTabName, qty) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(STOCK_SHEET);
+  if (!sheet) return false;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return false;
+  var values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0] || '').trim() === stockTabName.trim()) {
+      var current = values[i][1];
+      var currentNum = (current === '' || current === null || current === undefined) ? 0 : Number(current);
+      if (isNaN(currentNum)) currentNum = 0;
+      var next = currentNum + qty;
+      sheet.getRange(i + 2, 2).setValue(next);
+      Logger.log('[Stock] INCREMENT (revert) ' + stockTabName + ' +' + qty + ' = ' + next);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Decrement by product name (fallback when stockKey is empty)
+function decrementProductStock_(productName, qty) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(STOCK_SHEET);
+  if (!sheet) return;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  var values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0] || '').trim() === productName.trim()) {
+      var current = values[i][1];
+      var currentNum = (current === '' || current === null || current === undefined) ? null : Number(current);
+      if (currentNum === null || isNaN(currentNum)) return;
+      var next = Math.max(0, currentNum - qty);
+      sheet.getRange(i + 2, 2).setValue(next);
+      Logger.log('[Stock] DECREMENT ' + productName + ' -' + qty + ' = ' + next);
+      return;
+    }
+  }
+}
+
+// Increment by product name (fallback)
+function incrementProductStock_(productName, qty) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(STOCK_SHEET);
+  if (!sheet) return;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  var values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0] || '').trim() === productName.trim()) {
+      var current = values[i][1];
+      var currentNum = (current === '' || current === null || current === undefined) ? 0 : Number(current);
+      if (isNaN(currentNum)) currentNum = 0;
+      var next = currentNum + qty;
+      sheet.getRange(i + 2, 2).setValue(next);
+      Logger.log('[Stock] INCREMENT (revert) ' + productName + ' +' + qty + ' = ' + next);
+      return;
+    }
+  }
+}
+
 
 // ============================================================
 //  DEDUPE + CLEANUP — one-time maintenance actions
