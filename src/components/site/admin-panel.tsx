@@ -228,21 +228,44 @@ function EditForm({
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Initialize draft from product.
-  // If the product has no stock in the Products tab BUT the Stock tab CSV
-  // has a value → pre-fill draft.stock with the CSV value.
-  // This is a ONE-TIME initialization — after this, the admin can freely
-  // edit the field (it's bound to draft.stock, not CSV).
+  // For each variant, also sync stock from the Stock tab CSV (which is the
+  // source of truth — it gets auto-decremented by the trigger when orders
+  // are Confirmed). If the CSV has a value for "productName - variantName",
+  // use that instead of the (stale) Products tab value.
   useEffect(() => {
     const csvStock = getStockCount?.(product.name ?? "");
     const productHasStock = product.stock !== null && product.stock !== undefined;
     const csvHasStock = csvStock !== null && csvStock !== undefined;
 
+    let baseDraft: Product;
     if (!productHasStock && csvHasStock) {
-      // Pre-fill from CSV (one-time — admin can then edit freely)
-      setDraft({ ...product, stock: csvStock });
+      // Pre-fill product-level stock from CSV (one-time)
+      baseDraft = { ...product, stock: csvStock };
     } else {
-      setDraft(product);
+      baseDraft = { ...product };
     }
+
+    // Sync per-variant stock from CSV (sheet is source of truth)
+    // For each variant, look up "productName - variantName" in the CSV.
+    // If found, use that value (it reflects auto-decrements from Confirmed orders).
+    // If not found, keep the existing variant.stock (from Products tab).
+    if (baseDraft.variants && baseDraft.variants.length > 0) {
+      const syncedVariants = baseDraft.variants.map((v) => {
+        if (!v.name) return v;
+        const csvVariantStock = getStockCount?.(`${product.name} - ${v.name}`);
+        if (csvVariantStock !== null && csvVariantStock !== undefined) {
+          // CSV has a value — use it (sheet is source of truth)
+          return { ...v, stock: csvVariantStock };
+        }
+        // No CSV entry — variant is INFINITE (admin hasn't set per-variant stock)
+        // OR this variant was added in admin but not yet saved to sheet.
+        // Keep the existing Products tab value (could be null/undefined = infinite).
+        return v;
+      });
+      baseDraft = { ...baseDraft, variants: syncedVariants };
+    }
+
+    setDraft(baseDraft);
   }, [product]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const photos = getProductImages(draft);
@@ -375,6 +398,36 @@ function EditForm({
       variants: [...(d.variants ?? []), { type, name: "", priceAdjustment: 0 }],
     }));
   };
+
+  // Quick-add a variant with a pre-filled name (from the quick-chips below).
+  // Skips if a variant with the same type+name already exists (dedup).
+  const addVariantWithValue = (type: string, name: string) => {
+    setDraft((d) => {
+      const existing = d.variants ?? [];
+      // Dedup: don't add if (type, name) already exists
+      const alreadyExists = existing.some(
+        (v) => v.type === type && v.name.toLowerCase() === name.toLowerCase(),
+      );
+      if (alreadyExists) {
+        toast.info(`"${name}" موجود بالفعل`);
+        return d;
+      }
+      return {
+        ...d,
+        variants: [...existing, { type, name, priceAdjustment: 0 }],
+      };
+    });
+  };
+
+  // Common colors / sizes for the quick-add chips (Arabic + French)
+  const COMMON_COLORS = [
+    "أحمر", "أزرق", "أخضر", "أسود", "أبيض", "أصفر", "وردي", "بنفسجي", "برتقالي", "بني", "رمادي", "ذهبي", "فضي",
+  ];
+  const COMMON_SIZES = [
+    "S", "M", "L", "XL", "XXL",
+    "06L", "08L", "10L", "12L", "3L", "5L", "7L",
+    "صغير", "متوسط", "كبير", "ضخم",
+  ];
   const removeVariant = (idx: number) => {
     setDraft((d) => ({
       ...d,
@@ -812,8 +865,31 @@ function EditForm({
               className="flex items-center gap-1 rounded-full bg-brass/10 px-3 py-1 text-xs font-medium text-brass-deep hover:bg-brass/20"
             >
               <Plus className="h-3 w-3" />
-              إضافة لون
+              إضافة لون مخصص
             </button>
+          </div>
+          {/* Quick-add chips — common colors (one click = added) */}
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {COMMON_COLORS.map((color) => {
+              const exists = variants.some(
+                (v) => v.type === "color" && v.name.toLowerCase() === color.toLowerCase(),
+              );
+              return (
+                <button
+                  key={color}
+                  type="button"
+                  onClick={() => addVariantWithValue("color", color)}
+                  disabled={exists}
+                  className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                    exists
+                      ? "border-clay/20 bg-clay/5 text-gray-light cursor-not-allowed line-through"
+                      : "border-brass/30 bg-brass/5 text-brass-deep hover:bg-brass/15 hover:border-brass/50"
+                  }`}
+                >
+                  {color}
+                </button>
+              );
+            })}
           </div>
           {variants.some((v) => v.type === "color") ? (
             <div className="space-y-2">
@@ -826,6 +902,7 @@ function EditForm({
                     placeholder="مثال: أحمر"
                     className={`${inputClass} flex-1`}
                     style={{ minWidth: "120px" }}
+                    autoFocus={!v.name}
                   />
                   <input
                     type="number"
@@ -870,7 +947,7 @@ function EditForm({
             </div>
           ) : (
             <p className="text-xs text-gray-light">
-              لا توجد ألوان. أضف الألوان إذا كان المنتج متاحاً بأكثر من لون.
+              لا توجد ألوان. اختر من الألوان الشائعة بالأعلى أو أضف لوناً مخصصاً.
             </p>
           )}
         </div>
@@ -890,8 +967,31 @@ function EditForm({
               className="flex items-center gap-1 rounded-full bg-brass/10 px-3 py-1 text-xs font-medium text-brass-deep hover:bg-brass/20"
             >
               <Plus className="h-3 w-3" />
-              إضافة مقاس
+              إضافة مقاس مخصص
             </button>
+          </div>
+          {/* Quick-add chips — common sizes */}
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {COMMON_SIZES.map((size) => {
+              const exists = variants.some(
+                (v) => v.type === "size" && v.name.toLowerCase() === size.toLowerCase(),
+              );
+              return (
+                <button
+                  key={size}
+                  type="button"
+                  onClick={() => addVariantWithValue("size", size)}
+                  disabled={exists}
+                  className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                    exists
+                      ? "border-clay/20 bg-clay/5 text-gray-light cursor-not-allowed line-through"
+                      : "border-brass/30 bg-brass/5 text-brass-deep hover:bg-brass/15 hover:border-brass/50"
+                  }`}
+                >
+                  {size}
+                </button>
+              );
+            })}
           </div>
           {variants.some((v) => v.type === "size") ? (
             <div className="space-y-2">
@@ -904,6 +1004,7 @@ function EditForm({
                     placeholder="مثال: كبير"
                     className={`${inputClass} flex-1`}
                     style={{ minWidth: "120px" }}
+                    autoFocus={!v.name}
                   />
                   <input
                     type="number"

@@ -144,6 +144,28 @@ export function ProductPage({
     ? isVariantRupture(product.name, selectedVariantName)
     : false;
 
+  // AUTO-CLEAR: if the user has selected a color/size that is now out of stock
+  // (e.g. another variant's stock was decremented to 0 by a confirmed order),
+  // automatically clear the selection. This prevents the user from being stuck
+  // with an invalid selection + confused why add-to-cart is disabled.
+  useEffect(() => {
+    if (selectedColor && isVariantRupture(product.name, selectedColor)) {
+      setSelectedColor("");
+      toast.warning(`اللون "${selectedColor}" لم يعد متوفراً. اختر لوناً آخر.`);
+    }
+    if (selectedSize && isVariantRupture(product.name, selectedSize)) {
+      setSelectedSize("");
+      toast.warning(`المقاس "${selectedSize}" لم يعد متوفراً. اختر مقاساً آخر.`);
+    }
+    for (const ct of customTypes) {
+      const sel = selectedCustom[ct];
+      if (sel && isVariantRupture(product.name, sel)) {
+        setSelectedCustom((prev) => ({ ...prev, [ct]: "" }));
+        toast.warning(`"${sel}" لم يعد متوفراً. اختر خياراً آخر.`);
+      }
+    }
+  }, [product.name, selectedColor, selectedSize, selectedCustom, customTypes, isVariantRupture]);
+
   // Adjusted unit price — null stays null (price-on-request).
   const adjustedPrice =
     product.price === null ? null : product.price + variantAdjustment;
@@ -437,21 +459,29 @@ export function ProductPage({
                       {colorVariants.map((c) => {
                         const isSelected = selectedColor === c.name;
                         const adj = c.priceAdjustment ?? 0;
+                        // ELEGANT out-of-stock prevention: disable the button + visual indicator
+                        const colorRupture = isVariantRupture(product.name, c.name);
                         return (
                           <button
                             key={c.name}
                             type="button"
                             onClick={() => setSelectedColor(isSelected ? "" : c.name)}
+                            disabled={colorRupture}
                             className={`rounded-lg border-2 px-4 py-2 font-arabic text-sm font-medium transition-all active:scale-95 ${
                               isSelected
                                 ? "border-emerald bg-emerald/15 text-emerald"
                                 : "border-clay/40 bg-night-soft/60 text-charcoal hover:border-emerald/40"
-                            }`}
+                            } ${colorRupture ? "opacity-40 cursor-not-allowed line-through" : ""}`}
                           >
                             {c.name}
-                            {adj !== 0 && (
+                            {adj !== 0 && !colorRupture && (
                               <span className="ml-1 text-[10px] text-neon-magenta">
                                 ({adj > 0 ? "+" : ""}{adj} دج)
+                              </span>
+                            )}
+                            {colorRupture && (
+                              <span className="ml-1 text-[10px] text-terracotta">
+                                (نفدت)
                               </span>
                             )}
                           </button>
@@ -469,21 +499,29 @@ export function ProductPage({
                       {sizeVariants.map((s) => {
                         const isSelected = selectedSize === s.name;
                         const adj = s.priceAdjustment ?? 0;
+                        // ELEGANT out-of-stock prevention: disable the button + visual indicator
+                        const sizeRupture = isVariantRupture(product.name, s.name);
                         return (
                           <button
                             key={s.name}
                             type="button"
                             onClick={() => setSelectedSize(isSelected ? "" : s.name)}
+                            disabled={sizeRupture}
                             className={`rounded-lg border-2 px-4 py-2 font-arabic text-sm font-medium transition-all active:scale-95 ${
                               isSelected
                                 ? "border-emerald bg-emerald/15 text-emerald"
                                 : "border-clay/40 bg-night-soft/60 text-charcoal hover:border-emerald/40"
-                            }`}
+                            } ${sizeRupture ? "opacity-40 cursor-not-allowed line-through" : ""}`}
                           >
                             {s.name}
-                            {adj !== 0 && (
+                            {adj !== 0 && !sizeRupture && (
                               <span className="ml-1 text-[10px] text-neon-magenta">
                                 ({adj > 0 ? "+" : ""}{adj} دج)
+                              </span>
+                            )}
+                            {sizeRupture && (
+                              <span className="ml-1 text-[10px] text-terracotta">
+                                (نفدت)
                               </span>
                             )}
                           </button>
@@ -594,7 +632,7 @@ export function ProductPage({
 
             <CodOrderForm
               items={orderItems}
-              rupture={rupture}
+              rupture={rupture || isVariantOutOfStock}
               onContinueShopping={onBack}
               extraNotes={variantSummary}
               quantityTiers={tiers}

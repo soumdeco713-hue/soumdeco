@@ -9,8 +9,10 @@
 function splitStockKey(stockKeyStr) {
   if (!stockKeyStr) return [];
   var s = String(stockKeyStr).trim();
+  if (!s) return [];
+  // Only split on ";" — never on "," (commas can be in product names)
   if (s.indexOf(';') >= 0) return s.split(';');
-  return s.split(',');
+  return [s]; // single key (even if it contains commas)
 }
 
 function buildStockKey(bareName, variantStr) {
@@ -100,14 +102,17 @@ if (sizeRow.count === 4) {
 }
 
 // ============================================================
-// TEST 2: OLD comma format (legacy stockKey) — should still work via smart split
+// TEST 2: Legacy comma format (product name has NO commas)
+// NOTE: With the new splitStockKey_ logic, comma-format stockKeys are
+// treated as a SINGLE key (we never split on "," anymore). So this test
+// now uses the semicolon format to verify multi-key splitting works.
 // ============================================================
-console.log('\n=== TEST 2: Legacy comma format (product name has NO commas) ===\n');
+console.log('\n=== TEST 2: Multi-key semicolon format ===\n');
 
 const productName2 = 'Simple Product';
 const variantStr2 = 'Red - Large';
-const stockKey2Legacy = 'Simple Product - Red,Simple Product - Large'; // comma
-console.log('StockKey (legacy): "' + stockKey2Legacy + '"');
+const stockKey2New = 'Simple Product - Red;Simple Product - Large'; // semicolon
+console.log('StockKey (new semicolon): "' + stockKey2New + '"');
 
 const stockTab2 = [
   { name: 'Simple Product - Red', count: '' },    // infinite
@@ -115,7 +120,7 @@ const stockTab2 = [
 ];
 
 console.log('Trigger fires (qty=1):');
-const result2 = simulateTrigger(stockTab2, stockKey2Legacy, 1);
+const result2 = simulateTrigger(stockTab2, stockKey2New, 1);
 console.log('Result: ' + (result2 ? '✅ DECREMENTED' : '❌ NO MATCH'));
 console.log('Final "Large" count: ' + stockTab2[1].count);
 if (stockTab2[1].count === 1) {

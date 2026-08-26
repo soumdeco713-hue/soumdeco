@@ -263,6 +263,13 @@ function parseVariantContent_(content) {
     var colonIdx = part.lastIndexOf(':');
     if (colonIdx >= 0) {
       var value = part.substring(colonIdx + 1).trim();
+      // Strip emojis + variation selectors + normalize whitespace
+      value = value
+        .replace(/[\u{1F000}-\u{1FFFF}]/u, '')
+        .replace(/[\u{2600}-\u{27BF}]/u, '')
+        .replace(/[\uFE0F\u200D]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
       if (value) values.push(value);
     } else if (part) {
       values.push(part);
@@ -277,10 +284,9 @@ function extractVariantFromNotes_(notes) {
   if (!notesStr) return '';
 
   // Common Arabic + French variant labels (lowercased comparison)
-  // الترتيب مهم — الأطول أولاً لتجنب المطابقة الجزئية
   var labels = [
     'المقاس', 'اللون', 'الحجم', 'الوزن', 'النوع', 'النموذج',
-    'Taille', 'Couleur', 'Taille', 'Modèle', 'Couleur', 'Size', 'Color'
+    'Taille', 'Couleur', 'Modèle', 'Size', 'Color'
   ];
 
   var parts = notesStr.split('·');
@@ -294,18 +300,21 @@ function extractVariantFromNotes_(notes) {
     var value = part.substring(colonIdx + 1).trim();
     if (!value) continue;
 
-    // Is this label a variant label (not "notes" or "company" etc.)?
     var isVariant = false;
     for (var l = 0; l < labels.length; l++) {
       if (label === labels[l].toLowerCase()) { isVariant = true; break; }
     }
 
-    // Special case: skip entries that look like company labels or notes
-    // ("Stopdesk", "Yalidine", "ZR Express" — common Algerian delivery companies)
     if (isVariant) {
-      // Strip any trailing emoji or extra text after the value
-      // (e.g. "06L 🚚" → "06L")
-      value = value.replace(/\s+[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}]/u, '').trim();
+      // Strip emojis + variation selectors (U+FE0F) + zero-width joiners (U+200D)
+      // and normalize whitespace. This handles cases like "06L 🚚" → "06L"
+      // and "Red ❤️" → "Red" (the heart has a variation selector).
+      value = value
+        .replace(/[\u{1F000}-\u{1FFFF}]/u, '')
+        .replace(/[\u{2600}-\u{27BF}]/u, '')
+        .replace(/[\uFE0F\u200D]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
       if (value) values.push(value);
     }
   }
@@ -332,15 +341,25 @@ function buildStockKey_(bareName, variantStr) {
 }
 
 /** Split stockKey into individual keys.
- *  - NEW format: ";" separator (handles product names with commas)
- *  - LEGACY format: "," separator (only works for product names without commas)
- *  Smart detection: if ";" is present, use it; otherwise fall back to ",".
+ *  ONLY splits on ";" (the new separator that handles product names with commas).
+ *
+ *  NEVER splits on "," — because product names can contain commas
+ *  (e.g. "Cocotte minute 06, 08, 10, 12 litres Ref 01"). Splitting on ","
+ *  would break a single valid key into fragments.
+ *
+ *  Legacy comma-format stockKeys (from before the semicolon fix) are
+ *  treated as a SINGLE key here. If they were multi-key comma-format,
+ *  they were already broken (the comma-in-product-name bug) and won't
+ *  match — admin should run "Process Pending Confirmed Orders" to
+ *  re-extract variants with the new semicolon format.
  */
 function splitStockKey_(stockKeyStr) {
   if (!stockKeyStr) return [];
   var s = String(stockKeyStr).trim();
+  if (!s) return [];
+  // Only split on ";" — never on ","
   if (s.indexOf(';') >= 0) return s.split(';');
-  return s.split(',');
+  return [s]; // single key (even if it contains commas)
 }
 
 /**
