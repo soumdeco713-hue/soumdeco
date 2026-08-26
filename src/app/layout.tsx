@@ -43,7 +43,6 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://soumdeco.pages.dev"),
   title: `${BRAND.name} — ${BRAND.tagline}`,
   description: `${BRAND.name} · ${BRAND.tagline}. متجر ديكور المنزل وفنّ المائدة. توصيل لكل الولايات الجزائرية · الدفع عند الاستلام.`,
   keywords: [
@@ -89,8 +88,6 @@ export default function RootLayout({
   return (
     <html lang="ar" dir="ltr" suppressHydrationWarning>
       <head suppressHydrationWarning>
-        {/* Favicon */}
-        <link rel="icon" type="image/png" href="/favicon.png" />
         {/* DNS prefetch for Cloudinary + Apps Script — faster image + data loading */}
         <link rel="dns-prefetch" href="https://res.cloudinary.com" />
         <link rel="preconnect" href="https://res.cloudinary.com" />
