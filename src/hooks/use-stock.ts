@@ -265,19 +265,36 @@ export function useStock() {
   // hitting Apps Script's 20K/day limit. Stock updates appear within
   // 5 minutes (worker cron) or 24 hours (static rebuild).
 
-  const fetchStock = useCallback(async () => {
+  const fetchStock = useCallback(async (opts?: { bypassCache?: boolean }) => {
+    const bypassCache = opts?.bypassCache === true;
     try {
       let csvText = "";
 
-      // 1. Try Worker first (if configured) — returns combined catalog response
-      try {
-        const { fetchStockCsv } = await import("@/lib/worker-client");
-        const result = await fetchStockCsv();
-        if (result.csv && result.csv.trim().length > 0) {
-          csvText = result.csv;
+      // 0. BYPASS CACHE — fetch directly from Apps Script (used after admin save)
+      //    This skips all caches to get the LATEST stock values immediately.
+      if (bypassCache) {
+        try {
+          const { clientGetStockCsv } = await import("@/lib/client-sheet");
+          const directCsv = await clientGetStockCsv();
+          if (directCsv && directCsv.trim().length > 0) {
+            csvText = directCsv;
+          }
+        } catch {
+          // Direct fetch failed — fall through to normal fetch chain
         }
-      } catch {
-        // Worker fetch failed — fall through to static
+      }
+
+      // 1. Try Worker first (if configured) — returns combined catalog response
+      if (!csvText) {
+        try {
+          const { fetchStockCsv } = await import("@/lib/worker-client");
+          const result = await fetchStockCsv();
+          if (result.csv && result.csv.trim().length > 0) {
+            csvText = result.csv;
+          }
+        } catch {
+          // Worker fetch failed — fall through to static
+        }
       }
 
       // 2. If Worker didn't return stock, try static CSV from Cloudflare CDN
@@ -286,7 +303,7 @@ export function useStock() {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 5000);
           const res = await fetch("/data/stock.csv", {
-            cache: "no-cache",
+            cache: bypassCache ? "no-store" : "no-cache",
             signal: controller.signal,
           });
           clearTimeout(timeoutId);
@@ -430,5 +447,12 @@ export function useStock() {
     [normalizedMap],
   );
 
-  return { stockMap, loading, isRupture, isLowStock, getStockCount, isVariantRupture };
+  /** Force-refresh the stock map from Apps Script (bypasses all caches).
+   *  Called after admin saves a product so the panel reflects the LATEST
+   *  sheet values immediately (not 5 min later). */
+  const forceRefresh = useCallback(async () => {
+    await fetchStock({ bypassCache: true });
+  }, [fetchStock]);
+
+  return { stockMap, loading, isRupture, isLowStock, getStockCount, isVariantRupture, forceRefresh };
 }

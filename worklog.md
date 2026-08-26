@@ -3523,3 +3523,69 @@ Stage Summary:
 - All lessons learned respected: empty=infinite, semicolon separator, server-side extraction (Notes column), idempotency, no fallback from variant to whole-product
 - Files modified: src/components/site/product-page.tsx, src/components/site/admin-panel.tsx, download/apps-script.gs, upload/apps-script.gs
 - New test file: scripts/test-comprehensive.js (212 checks)
+
+---
+Task ID: stock-sync-and-worker-check
+Agent: main
+Task: User reports: "stock of one item is 5 in admin panel, but 8 in sheet. value should be the same. admin will change stock only in panel." + "worker is not deployed?"
+
+Work Log:
+- Checked Worker deployment: NEXT_PUBLIC_WORKER_URL is NOT set in .env. The site works without the worker (falls back to static JSON + Apps Script polling every 5 min). Worker is OPTIONAL — site is fully functional without it, just slower to reflect stock changes.
+- Diagnosed stock sync bug: in admin-panel.tsx EditForm useEffect, the condition was:
+    `if (!productHasStock && csvHasStock)` — only sync from CSV when Products tab is EMPTY
+  This meant: if Products tab had 5 (stale) and CSV had 8 (latest), panel showed 5 (stale).
+- ROOT CAUSE: when admin sets stock to 5 in panel:
+  - Saves → Products tab = 5, Stock tab = 5
+  - Later, an order is Confirmed → trigger decrements Stock tab → Stock tab = 4
+  - Or: order is Cancelled after being Confirmed → trigger reverts → Stock tab = 5 + qty
+  - But Products tab is NEVER updated by the trigger
+  - Result: Products tab stays at 5, Stock tab diverges to 8 (after reverts) or 2 (after decrements)
+  - Old useEffect: panel showed 5 (stale Products tab) — BAD
+  - New useEffect: panel shows 8 (latest CSV from Stock tab) — CORRECT
+
+FIX 1 — Always prefer CSV (sheet is source of truth):
+- Changed useEffect condition from `if (!productHasStock && csvHasStock)` to `if (csvHasStock)`
+- Now: if CSV has ANY value (including 0), use it; only use Products tab value if CSV has no entry
+- This means: admin opens panel → sees latest sheet value (reflects auto-decrements/reverts)
+- Tested with 11 scenarios in scripts/test-stock-sync.js — all pass
+
+FIX 2 — Force-refresh stock map after admin save:
+- Added `forceRefresh()` to useStock hook — bypasses all caches, fetches directly from Apps Script
+- Added `fetchStock({ bypassCache: true })` option that calls clientGetStockCsv() directly
+- Wired `onRefreshStock` prop from page.tsx → AdminPanel → EditForm
+- EditForm calls onRefreshStock() after successful save (fire-and-forget, non-blocking)
+- This means: after admin saves, the stock map is fresh within seconds (not 5 min)
+- When admin reopens the edit form, panel shows the just-saved value (not stale CSV)
+
+Architecture summary:
+- Admin opens edit form → useEffect syncs from CSV → panel shows latest sheet value ✓
+- Admin changes stock to 10 → saves → Apps Script updates both Products tab + Stock tab to 10
+- EditForm calls onRefreshStock() → fetches fresh CSV from Apps Script → stock map updates to 10
+- Admin reopens edit form → useEffect syncs from fresh CSV → panel shows 10 ✓
+- If 3 orders are Confirmed in the meantime → trigger decrements Stock tab to 7
+- Next time admin opens → panel shows 7 (latest sheet value) ✓
+
+About the Worker:
+- Worker is OPTIONAL — site works without it
+- Without Worker: stock updates every 5 min (direct Apps Script polling)
+- With Worker: stock updates every 3 min (KV cache + 5-min cron refresh)
+- For 800K visits/month, Worker is RECOMMENDED (reduces Apps Script quota usage)
+- For current scale (< 10K visits/day), site works fine without Worker
+
+Files modified:
+- src/hooks/use-stock.ts — added forceRefresh + bypassCache option
+- src/app/page.tsx — pass onRefreshStock to AdminPanel
+- src/components/site/admin-panel.tsx — always prefer CSV + call onRefreshStock after save
+
+Test results:
+- test-comprehensive.js: 212/212 ✓
+- test-stock-logic.js: 7/7 ✓
+- test-stock-sync.js (NEW): 11/11 ✓
+- TypeScript: 0 errors
+- Apps Script syntax: both files OK (1353 lines)
+
+Stage Summary:
+- Stock sync bug FIXED — admin panel now always shows the latest sheet value (CSV is source of truth)
+- After-save refresh ADDED — stock map updates immediately after admin saves (not 5 min)
+- Worker is OPTIONAL — site is fully functional without it, just slower to reflect changes
+- All 230 tests pass (212 + 7 + 11)

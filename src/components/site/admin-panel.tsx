@@ -42,6 +42,10 @@ type AdminPanelProps = {
    *  Used to pre-fill the stock field in the edit form with the current
    *  effective stock value (what the visitor sees). */
   getStockCount?: (productName: string) => number | null;
+  /** Force-refresh the stock map from Apps Script (bypasses all caches).
+   *  Called after admin saves a product so the panel reflects the LATEST
+   *  sheet values immediately. */
+  onRefreshStock?: () => Promise<void>;
 };
 
 // Maximum file size for admin uploads (15MB — anything larger freezes the browser
@@ -214,12 +218,16 @@ function EditForm({
   onSave,
   onCancel,
   getStockCount,
+  onRefreshStock,
 }: {
   product: Product;
   categories: string[];
   onSave: (p: Product) => Promise<void>;
   onCancel: () => void;
   getStockCount?: (productName: string) => number | null;
+  /** Called after admin saves a product — refreshes the stock map
+   *  so the panel reflects the LATEST sheet values on next open. */
+  onRefreshStock?: () => Promise<void>;
 }) {
   const [draft, setDraft] = useState<Product>(product);
   const [uploading, setUploading] = useState(false);
@@ -228,20 +236,31 @@ function EditForm({
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Initialize draft from product.
-  // For each variant, also sync stock from the Stock tab CSV (which is the
-  // source of truth — it gets auto-decremented by the trigger when orders
-  // are Confirmed). If the CSV has a value for "productName - variantName",
-  // use that instead of the (stale) Products tab value.
+  // SHEET IS SOURCE OF TRUTH: when CSV (Stock tab) has a stock value for
+  // this product OR any of its variants, use the CSV value instead of the
+  // (stale) Products tab value. The Stock tab gets auto-decremented by the
+  // trigger when orders are Confirmed; the Products tab does NOT.
+  //
+  // This means: if admin sets stock to 5 (saved to both Products + Stock tabs),
+  // then 3 orders are Confirmed (Stock tab → 2, Products tab still 5),
+  // the admin panel will show 2 (the LATEST sheet value) on next edit.
+  //
+  // After admin saves, the parent calls onRefreshStock() to force-refresh the
+  // CSV from Apps Script (bypassing the 5-min cache) — so the panel always
+  // shows fresh data immediately after a save.
   useEffect(() => {
     const csvStock = getStockCount?.(product.name ?? "");
-    const productHasStock = product.stock !== null && product.stock !== undefined;
     const csvHasStock = csvStock !== null && csvStock !== undefined;
 
     let baseDraft: Product;
-    if (!productHasStock && csvHasStock) {
-      // Pre-fill product-level stock from CSV (one-time)
+    if (csvHasStock) {
+      // CSV has a value — use it (sheet is source of truth)
+      // This reflects any auto-decrements from Confirmed orders
       baseDraft = { ...product, stock: csvStock };
     } else {
+      // No CSV entry — product is INFINITE (admin hasn't set stock)
+      // OR this product was just created in admin but not yet saved to sheet.
+      // Keep the existing Products tab value (could be null/undefined = infinite).
       baseDraft = { ...product };
     }
 
@@ -538,6 +557,14 @@ function EditForm({
     setSaving(true);
     try {
       await onSave(draft);
+      // After successful save, force-refresh the stock map from Apps Script
+      // so the panel reflects the LATEST sheet values immediately.
+      // The parent's handleSave closes the edit form (setEditing(null)),
+      // so this fires just before unmount — the refresh runs in the background.
+      if (onRefreshStock) {
+        // Fire-and-forget — don't block the save flow
+        onRefreshStock().catch(() => {});
+      }
     } catch {
       // error toast is shown by the parent handleSave
     } finally {
@@ -1419,6 +1446,7 @@ export function AdminPanel({
   onClose,
   syncing = false,
   getStockCount,
+  onRefreshStock,
 }: AdminPanelProps) {
   const [authed, setAuthed] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
@@ -1551,6 +1579,7 @@ export function AdminPanel({
             onSave={handleSave}
             onCancel={() => setEditing(null)}
             getStockCount={getStockCount}
+            onRefreshStock={onRefreshStock}
           />
         ) : (
           <>

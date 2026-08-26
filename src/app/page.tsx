@@ -284,6 +284,7 @@ export default function Home() {
           onClose={exitToHome}
           syncing={catalog.syncing}
           getStockCount={stock.getStockCount}
+          onRefreshStock={stock.forceRefresh}
         />
       </ErrorBoundary>
     );
