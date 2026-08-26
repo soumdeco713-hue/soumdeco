@@ -85,9 +85,10 @@ function getAdminToken_() {
 function isAuthorized_(e) {
   var token = getAdminToken_();
   if (!token) return true; // ⚠️ If no token set, allow all (backwards compat)
-  // Check X-Admin-Token header (set by /api/admin route)
+  // Read admin_token from BOTH URL parameter AND header (for max compat)
+  var p = (e && e.parameter) || {};
   var headers = (e && e.headers) || {};
-  var provided = headers['X-Admin-Token'] || headers['x-admin-token'] || '';
+  var provided = p.admin_token || headers['X-Admin-Token'] || headers['x-admin-token'] || '';
   return provided === token;
 }
 

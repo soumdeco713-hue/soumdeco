@@ -189,16 +189,19 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Build Apps Script URL
+      // Build Apps Script URL — include admin token as URL parameter
+      // (Apps Script doGet/doPost can't reliably read custom HTTP headers,
+      // but it CAN read URL parameters via e.parameter)
       const url = new URL(APPS_SCRIPT_URL);
       url.searchParams.set("action", operation);
+      url.searchParams.set("admin_token", APPS_SCRIPT_ADMIN_TOKEN);
       for (const [key, value] of Object.entries(params)) {
         if (typeof value === "string" || typeof value === "number") {
           url.searchParams.set(key, String(value));
         }
       }
 
-      // Forward to Apps Script with admin token header
+      // Forward to Apps Script
       const isPost =
         operation === "product_create" || operation === "product_update";
 
@@ -208,11 +211,11 @@ export async function POST(req: NextRequest) {
         const timeoutId = setTimeout(() => controller.abort(), 30000);
 
         if (isPost && body.product) {
-          appsScriptRes = await fetch(APPS_SCRIPT_URL, {
+          // For POST, include admin_token in the URL (Apps Script reads e.parameter)
+          appsScriptRes = await fetch(url.toString(), {
             method: "POST",
             headers: {
               "Content-Type": "text/plain;charset=utf-8",
-              "X-Admin-Token": APPS_SCRIPT_ADMIN_TOKEN,
             },
             body: JSON.stringify({ action: operation, ...body.product }),
             signal: controller.signal,
@@ -220,9 +223,6 @@ export async function POST(req: NextRequest) {
         } else {
           appsScriptRes = await fetch(url.toString(), {
             method: "GET",
-            headers: {
-              "X-Admin-Token": APPS_SCRIPT_ADMIN_TOKEN,
-            },
             signal: controller.signal,
           });
         }
