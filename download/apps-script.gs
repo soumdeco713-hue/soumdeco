@@ -40,20 +40,73 @@ var ORDERS_COL = {
 // Statuses that mean "stock has been consumed" — decrement on entry, revert on cancel.
 var STOCK_DECREMENTED = ['confirmed', 'shipped', 'delivered'];
 
+// ============================================================
+//  ADMIN TOKEN — protects WRITE operations only
+// ============================================================
+//  Reads (products, stock, order) stay PUBLIC (visitors need them).
+//  Writes (product_create, product_delete, etc.) require this token.
+//
+//  The token is checked via the X-Admin-Token header.
+//  Set this to the SAME value as the Cloudflare env var
+//  APPS_SCRIPT_ADMIN_TOKEN.
+//
+//  ⚠️  To set this token:
+//   1. Run the function 'setAdminToken_' once from the Apps Script editor
+//      (it will prompt you to enter the token value)
+//   2. The token is stored in the script's PropertiesService (encrypted at rest)
+//   3. To change it later, run 'setAdminToken_' again
+// ============================================================
+function setAdminToken_() {
+  var ui = SpreadsheetApp.getActiveSpreadsheet().getUi();
+  var response = ui.prompt('Set Admin Token', 'Enter the admin token (from Cloudflare env var APPS_SCRIPT_ADMIN_TOKEN):', ui.ButtonSet.OK_CANCEL);
+  if (response.getSelectedButton() === ui.Button.OK) {
+    var token = response.getResponseText().trim();
+    if (token) {
+      PropertiesService.getScriptProperties().setProperty('ADMIN_TOKEN', token);
+      ui.alert('✅ Admin token saved. Write operations now require this token.');
+    }
+  }
+}
+
+function getAdminToken_() {
+  return PropertiesService.getScriptProperties().getProperty('ADMIN_TOKEN') || '';
+}
+
+/** Check if the request has a valid admin token (for write operations). */
+function isAuthorized_(e) {
+  var token = getAdminToken_();
+  if (!token) return true; // ⚠️ If no token set, allow all (backwards compat)
+  // Check X-Admin-Token header (set by /api/admin route)
+  var headers = (e && e.headers) || {};
+  var provided = headers['X-Admin-Token'] || headers['x-admin-token'] || '';
+  return provided === token;
+}
+
 function doGet(e) {
   e = e || {}; var p = e.parameter || {};
   var action = String(p.action || '').toLowerCase();
   try {
+    // ─── PUBLIC OPERATIONS (no auth required) ──────────────
     if (action === 'stock') return serveStock();
     if (action === 'products') return serveProducts();
     if (action === 'order') return doCreateOrderFromParams(p);
+    if (action === 'health') return jsonOut({ ok: true, time: new Date().toISOString(), sheet: SpreadsheetApp.getActiveSpreadsheet().getName() });
+    if (action === 'statistics') return setupStatistics();
+    // process_confirmed is called from the sheet menu (no HTTP) — keep public
+    if (action === 'process_confirmed') return doProcessConfirmedFromUrl();
+
+    // ─── PROTECTED OPERATIONS (require admin token) ───────
+    if (action === 'product_delete' || action === 'product_reset' ||
+        action === 'dedupe' || action === 'cleanup') {
+      if (!isAuthorized_(e)) {
+        return jsonOut({ ok: false, error: 'unauthorized', message: 'Admin token required for write operations' });
+      }
+    }
     if (action === 'product_delete') return doDeleteProduct(p.id || '');
     if (action === 'product_reset') return doResetProducts();
     if (action === 'dedupe') return doDedupeProducts();
     if (action === 'cleanup') return doCleanupSheet();
-    if (action === 'health') return jsonOut({ ok: true, time: new Date().toISOString(), sheet: SpreadsheetApp.getActiveSpreadsheet().getName() });
-    if (action === 'statistics') return setupStatistics();
-    if (action === 'process_confirmed') return doProcessConfirmedFromUrl();
+
     return jsonOut({ ok: false, error: 'unknown action: ' + action });
   } catch (err) { return jsonOut({ ok: false, error: String(err) }); }
 }
@@ -63,6 +116,10 @@ function doPost(e) {
   var action = String(p.action || '').toLowerCase();
   try {
     if (action === 'product_create' || action === 'product_update') {
+      // PROTECTED — require admin token
+      if (!isAuthorized_(e)) {
+        return jsonOut({ ok: false, error: 'unauthorized', message: 'Admin token required for write operations' });
+      }
       var bodyStr = e.postData ? e.postData.contents : '';
       var prod = bodyStr ? JSON.parse(bodyStr) : p;
       return doCreateProduct(prod);

@@ -146,17 +146,42 @@ async function resizeImage(
 function PasswordGate({ onAuthed }: { onAuthed: () => void }) {
   const [value, setValue] = useState("");
   const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const submit = () => {
-    if (value === ADMIN_PASSWORD) {
-      try {
-        sessionStorage.setItem(SESSION_KEY, "1");
-      } catch {
-        // ignore
+  const submit = async () => {
+    if (!value.trim() || loading) return;
+    setLoading(true);
+    setError(false);
+    try {
+      // Login via /api/admin (server-side password validation)
+      const { clientAdminLogin } = await import("@/lib/client-sheet");
+      const ok = await clientAdminLogin(value);
+      if (ok) {
+        // Also set the legacy session key (backwards compat for the authed check)
+        try {
+          sessionStorage.setItem(SESSION_KEY, "1");
+        } catch {
+          // ignore
+        }
+        onAuthed();
+      } else {
+        setError(true);
       }
-      onAuthed();
-    } else {
-      setError(true);
+    } catch {
+      // FALLBACK: if /api/admin is unreachable, try the old client-side check
+      // (this ensures admin can ALWAYS log in, even if the new route has a bug)
+      if (value === ADMIN_PASSWORD) {
+        try {
+          sessionStorage.setItem(SESSION_KEY, "1");
+        } catch {
+          // ignore
+        }
+        onAuthed();
+      } else {
+        setError(true);
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -188,9 +213,10 @@ function PasswordGate({ onAuthed }: { onAuthed: () => void }) {
           onKeyDown={(e) => {
             if (e.key === "Enter") submit();
           }}
+          disabled={loading}
           className={`w-full rounded-lg border bg-night/60 px-3 py-2.5 text-left font-arabic text-sm text-charcoal outline-none focus:border-emerald ${
             error ? "border-terracotta" : "border-clay/40"
-          }`}
+          } ${loading ? "opacity-60" : ""}`}
           placeholder="كلمة المرور"
           autoFocus
         />
@@ -202,10 +228,11 @@ function PasswordGate({ onAuthed }: { onAuthed: () => void }) {
         <button
           type="button"
           onClick={submit}
-          className="mt-4 w-full rounded-full bg-emerald px-4 py-2.5 text-sm font-semibold text-night hover:bg-emerald-bright"
+          disabled={loading}
+          className="mt-4 w-full rounded-full bg-emerald px-4 py-2.5 text-sm font-semibold text-night hover:bg-emerald-bright disabled:opacity-60"
           style={{ boxShadow: "0 0 18px rgba(42, 125, 91, 0.45)" }}
         >
-          دخول
+          {loading ? "..." : "دخول"}
         </button>
       </div>
     </div>

@@ -101,6 +101,136 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// ============================================================
+//  ADMIN SESSION — stored in sessionStorage after login
+// ============================================================
+//  The session is a signed token (HMAC) issued by /api/admin.
+//  It's stored in sessionStorage (not localStorage) so it clears
+//  when the browser closes — better security.
+const ADMIN_SESSION_KEY = "soumdeco_admin_session";
+const ADMIN_SESSION_TIMESTAMP_KEY = "soumdeco_admin_session_ts";
+const ADMIN_SESSION_MAX_AGE_MS = 8 * 60 * 60 * 1000; // 8 hours (matches server)
+
+/** Get the admin session token (or null if not logged in / expired). */
+function getAdminSession(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const session = window.sessionStorage.getItem(ADMIN_SESSION_KEY);
+    const tsStr = window.sessionStorage.getItem(ADMIN_SESSION_TIMESTAMP_KEY);
+    if (!session || !tsStr) return null;
+    const ts = parseInt(tsStr, 10);
+    if (isNaN(ts) || Date.now() - ts > ADMIN_SESSION_MAX_AGE_MS) {
+      // Session expired — clean up
+      window.sessionStorage.removeItem(ADMIN_SESSION_KEY);
+      window.sessionStorage.removeItem(ADMIN_SESSION_TIMESTAMP_KEY);
+      return null;
+    }
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+/** Save the admin session token (called after successful login). */
+export function setAdminSession(session: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(ADMIN_SESSION_KEY, session);
+    window.sessionStorage.setItem(ADMIN_SESSION_TIMESTAMP_KEY, String(Date.now()));
+  } catch {
+    // sessionStorage might be full — ignore
+  }
+}
+
+/** Clear the admin session (called on logout). */
+export function clearAdminSession(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(ADMIN_SESSION_KEY);
+    window.sessionStorage.removeItem(ADMIN_SESSION_TIMESTAMP_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+/** Check if admin is currently logged in (has valid session). */
+export function isAdminLoggedIn(): boolean {
+  return getAdminSession() !== null;
+}
+
+/**
+ * Login to admin panel via /api/admin route.
+ * Returns true on success, false on failure.
+ *
+ * SECURITY: The password is sent to /api/admin (server-side) for validation.
+ * The server returns a signed session token. The password is NEVER stored.
+ */
+export async function clientAdminLogin(password: string): Promise<boolean> {
+  try {
+    const res = await fetchWithTimeoutAndRetry(
+      "/api/admin",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "login", password }),
+      },
+      DEFAULT_TIMEOUT_MS,
+      0, // no retry — login is sensitive
+      0,
+    );
+    if (!res.ok) return false;
+    const data = await res.json();
+    if (data.ok && data.session) {
+      setAdminSession(data.session);
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error("[clientAdminLogin] failed:", err);
+    return false;
+  }
+}
+
+/**
+ * Admin write operation — routes through /api/admin (server-side).
+ * Falls back to direct Apps Script call if /api/admin fails (backwards compat).
+ *
+ * SECURITY: The admin token is added by the server (NEVER in client bundle).
+ */
+async function adminWrite(
+  operation: string,
+  params: Record<string, string | number> = {},
+  product?: SheetProduct,
+): Promise<{ ok: boolean; data?: any }> {
+  const session = getAdminSession();
+  if (!session) {
+    return { ok: false };
+  }
+
+  try {
+    const body: any = { action: "write", session, operation, params };
+    if (product) body.product = product;
+
+    const res = await fetchWithTimeoutAndRetry(
+      "/api/admin",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+      DEFAULT_TIMEOUT_MS,
+      WRITE_RETRIES,
+      WRITE_RETRY_DELAY_MS,
+    );
+    if (!res.ok) return { ok: false };
+    const data = await res.json();
+    return { ok: data.ok === true, data: data.result };
+  } catch (err) {
+    console.error(`[adminWrite ${operation}] failed:`, err);
+    return { ok: false };
+  }
+}
+
 /**
  * Fetch all products directly from Google Apps Script.
  * Returns an array of SheetProduct (already normalized + deduplicated by ID).
@@ -169,9 +299,23 @@ export async function clientGetStockCsv(): Promise<string> {
  *
  * Returns true on success, false on failure (after retries).
  */
+/**
+ * Create or update a product.
+ * Routes through /api/admin (secure) with fallback to direct Apps Script.
+ *
+ * SECURITY: The admin token is added by the server when going through /api/admin.
+ * The fallback path (direct Apps Script) only works if the admin hasn't set
+ * a token yet (backwards compat).
+ */
 export async function clientUpsertProduct(
   product: SheetProduct,
 ): Promise<boolean> {
+  // Try secure path first (via /api/admin)
+  const result = await adminWrite("product_create", {}, product);
+  if (result.ok) return true;
+
+  // FALLBACK: direct to Apps Script (for backwards compat or if /api/admin fails)
+  // This path will FAIL if the admin has set the token (which is the desired behavior).
   const base = getClientSheetBaseUrl();
   try {
     const url = `${base}?action=product_create`;
@@ -197,9 +341,15 @@ export async function clientUpsertProduct(
 }
 
 /**
- * Delete a product directly via Apps Script GET.
+ * Delete a product.
+ * Routes through /api/admin (secure) with fallback to direct Apps Script.
  */
 export async function clientDeleteProduct(id: string): Promise<boolean> {
+  // Try secure path first
+  const result = await adminWrite("product_delete", { id });
+  if (result.ok) return true;
+
+  // FALLBACK: direct to Apps Script
   const base = getClientSheetBaseUrl();
   try {
     const url = `${base}?action=product_delete&id=${encodeURIComponent(id)}`;
@@ -218,9 +368,15 @@ export async function clientDeleteProduct(id: string): Promise<boolean> {
 }
 
 /**
- * Reset all products directly via Apps Script GET.
+ * Reset all products.
+ * Routes through /api/admin (secure) with fallback to direct Apps Script.
  */
 export async function clientResetProducts(): Promise<boolean> {
+  // Try secure path first
+  const result = await adminWrite("product_reset");
+  if (result.ok) return true;
+
+  // FALLBACK: direct to Apps Script
   const base = getClientSheetBaseUrl();
   try {
     const url = `${base}?action=product_reset`;
@@ -240,7 +396,7 @@ export async function clientResetProducts(): Promise<boolean> {
 
 /**
  * Run the dedupe + cleanup action on the sheet.
- * Removes duplicate IDs + fixes "Meubes" → "Meubles" typo.
+ * Routes through /api/admin (secure) with fallback to direct Apps Script.
  */
 export async function clientDedupeProducts(): Promise<{
   ok: boolean;
@@ -248,6 +404,13 @@ export async function clientDedupeProducts(): Promise<{
   fixed_categories?: number;
   remaining?: number;
 }> {
+  // Try secure path first
+  const result = await adminWrite("dedupe");
+  if (result.ok && result.data) {
+    return result.data;
+  }
+
+  // FALLBACK: direct to Apps Script
   const base = getClientSheetBaseUrl();
   try {
     const url = `${base}?action=dedupe`;
