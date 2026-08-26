@@ -16,13 +16,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 1
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -43,6 +43,6 @@ jobs:
         run: |
           git config user.name "Auto-Sync Bot"
           git config user.email "actions@github.com"
-          git add public/images/products/ public/image-manifest.json
-          git commit -m "auto-sync: update product images [skip ci]"
+          git add public/images/products/ public/image-manifest.json public/stock-seed.json public/data/products.json public/data/stock.csv
+          git commit -m "auto-sync: update images + stock seed + static data [skip ci]"
           git push
