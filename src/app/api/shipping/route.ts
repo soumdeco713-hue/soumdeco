@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
 import { getSheetBaseUrl } from "@/lib/sheet";
-import { FALLBACK_SHIPPING } from "@/lib/shipping";
+
+// Cloudflare edge runtime
+export const runtime = "edge";
 
 // GET /api/shipping → shipping company prices from Google Apps Script
-// Falls back to hardcoded FALLBACK_SHIPPING when no sheet is configured.
+// Falls back to empty array when no sheet is configured.
 export async function GET() {
   const base = getSheetBaseUrl();
   if (!base) {
-    // No sheet configured — return fallback shipping data
-    return NextResponse.json({ ok: true, shipping: FALLBACK_SHIPPING, source: "fallback" });
+    // No sheet configured — return empty shipping data
+    return NextResponse.json({ ok: true, shipping: [], source: "fallback" });
   }
   try {
     const url = `${base}?action=shipping`;
@@ -33,9 +35,9 @@ export async function GET() {
       },
     );
   } catch (e) {
-    // Network error — fall back to hardcoded prices
+    // Network error — fall back to empty array
     return NextResponse.json(
-      { ok: true, shipping: FALLBACK_SHIPPING, source: "fallback" },
+      { ok: true, shipping: [], source: "fallback" },
     );
   }
 }
