@@ -3672,3 +3672,60 @@ Stage Summary:
 - Worker cron still running every 5 minutes
 - Cloudflare Pages settings preserved (5 secrets, build config, destination dir)
 - Site is fully operational: products load, stock data available, API routes respond
+
+---
+Task ID: workflow-fix-2026-08-26
+Agent: main
+Task: Fix GitHub Actions workflow (actions upgrade + static fallback data commit) with extreme caution
+
+Work Log:
+- Verified token has `repo, workflow` scopes (can modify workflow files)
+- Created test branch `test/workflow-fix` to test before touching main
+- Applied 2 fixes to .github/workflows/auto-sync-images.yml:
+  1. actions/checkout@v4 → v5 (Node 24, removes deprecation warning)
+  2. actions/setup-python@v5 → v6 (Node 24, removes deprecation warning)
+  3. git add line now includes: public/stock-seed.json + public/data/products.json + public/data/stock.csv
+     (these were written by auto-sync.py but never committed, causing static fallback to be 7d old)
+  4. commit message updated to reflect what's actually committed
+- Validated YAML syntax (Python yaml.safe_load)
+- Pushed test branch to GitHub
+- Triggered workflow_dispatch on test branch — first run had transient Apps Script timeout
+- Retried — second run succeeded (all 6 steps passed, "Commit and push" skipped = no changes)
+- Merged test/workflow-fix to main (no-ff merge)
+- Pushed main to GitHub
+- Deleted test branch (local + remote)
+- Triggered workflow_dispatch on main — ALL 8 STEPS PASSED including "Commit and push":
+  ✅ Set up job
+  ✅ Checkout repository (actions/checkout@v5)
+  ✅ Set up Python (actions/setup-python@v6)
+  ✅ Run auto-sync (62 products, 94 images, 0 downloaded, 0 deleted, 0 failed)
+  ✅ Check for changes (changed=true)
+  ✅ Commit and push (4 files changed, 42 insertions, 32 deletions)
+  ✅ Post steps
+  ✅ Complete job
+- Static fallback data now fresh (built 2026-08-26T08:32:32):
+  - stock-seed.json: 63 entries (was 58, 7 days old)
+  - data/products.json: 62 products (was 7 days old)
+  - data/stock.csv: 63 entries (was 7 days old)
+- Pulled fresh static files locally + rebuilt + redeployed to Cloudflare Pages
+- Verified production static files are now fresh:
+  - stock-seed.json: Built 2026-08-26T08:32:32 ✅
+  - data/products.json: 62 products ✅
+  - data/stock.csv: 63 lines ✅
+- All 286 tests pass
+- TypeScript: 0 errors
+- Production health verified:
+  - Homepage: HTTP 200
+  - API catalog: 62 products
+  - API version: Worker alive
+  - Worker cron: */5 * * * * active
+  - Variant code in bundle: isVariantRupture + triggerWorkerRefresh + نفدت
+  - Workflow file on main: checkout@v5 ✅, setup-python@v6 ✅, git add includes static files ✅
+
+Stage Summary:
+- GitHub Actions workflow fixed (actions upgraded to v5+v6)
+- Static fallback data now committed by 24h auto-sync (was missing before)
+- Fallback chain is now truly 24h-fresh (was 7 days stale)
+- Tested on separate branch before merging to main (extreme caution)
+- All workflows verified working (workflow_dispatch on main succeeded)
+- Production fully operational
