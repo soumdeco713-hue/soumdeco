@@ -3643,3 +3643,32 @@ Stage Summary:
 - Magic zip rebuilt with all new files (30 files, 414KB)
 - Files modified: src/hooks/use-stock.ts, src/components/site/checkout-modal.tsx, src/app/page.tsx
 - New test file: scripts/test-cart-rapture.js (18 checks)
+
+---
+Task ID: production-deploy-2026-08-26
+Agent: main
+Task: Push to GitHub + Cloudflare, verify everything works, no workflows modified
+
+Work Log:
+- Verified GitHub token (user: soumdeco713-hue, scope: repo)
+- Verified Cloudflare token (account: Soumdeco713@gmail.com, ID: 42ddbc76e118f64b3adf7e5bcb790dd3)
+- Reviewed 10 commits — verified NO workflow files, NO wrangler.toml, NO worker/data-sync.js, NO package.json modified
+- Only changed files: src/components/site/*.tsx, src/hooks/use-stock.ts, src/lib/failed-orders.ts, download/apps-script.gs, scripts/test-*.js, worklog.md
+- Rebased 10 commits on top of remote's auto-sync commit (dab609d) — no conflicts
+- Pushed to GitHub: dab609d..d65bba9 main -> main ✅
+- Built for Cloudflare Pages: npm run build:cloudflare → 9 API routes + 166 static assets
+- Deployed to Cloudflare Pages: ✨ Deployment complete! https://eea5ff9a.soumdeco.pages.dev
+- Verified production site: https://soumdeco.pages.dev returns HTTP 200
+- Verified API routes: /api/catalog (62 products), /api/version (worker alive), /api/stock (stock CSV)
+- Verified Worker still deployed: soumdeco-data-sync (cron: */5 * * * *)
+- Verified Cloudflare Pages settings: 5 env vars preserved (all secrets), build config unchanged
+- Verified variant code in deployed bundle: isVariantRupture, triggerWorkerRefresh, نفدت, autoFocus, onRefreshStock all found
+- Verified all old problems fixed: nodejs_compat_v2, ORDER_RETRIES=0, CSV sync, no direct Apps Script from browser, magic zip exists
+- All 286 tests pass
+
+Stage Summary:
+- Production deployment COMPLETE — new variant stock code is live
+- No workflows, settings, or env vars modified — only code changes pushed
+- Worker cron still running every 5 minutes
+- Cloudflare Pages settings preserved (5 secrets, build config, destination dir)
+- Site is fully operational: products load, stock data available, API routes respond
