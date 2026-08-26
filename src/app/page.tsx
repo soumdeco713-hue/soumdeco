@@ -489,6 +489,7 @@ export default function Home() {
         items={cart.items}
         onClose={() => setCheckoutOpen(false)}
         onOrderSuccess={handleOrderSuccess}
+        isVariantRupture={isVariantRupture}
       />
     </div>
     </ErrorBoundary>

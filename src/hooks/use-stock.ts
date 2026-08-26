@@ -270,31 +270,38 @@ export function useStock() {
     try {
       let csvText = "";
 
-      // 0. BYPASS CACHE — fetch directly from Apps Script (used after admin save)
-      //    This skips all caches to get the LATEST stock values immediately.
+      // 0. BYPASS CACHE — when admin saves, we want fresh data immediately.
+      //    CRITICAL: We do NOT call Apps Script directly from the browser —
+      //    that would burn the 20K/day quota. Instead, we trigger the Worker's
+      //    /refresh endpoint (via /api/refresh same-domain proxy), which makes
+      //    the Worker fetch Apps Script SERVER-SIDE and update KV. Then we
+      //    re-fetch from KV (which is now fresh).
+      //
+      //    If the Worker is NOT configured, we skip this step entirely and
+      //    fall through to the normal fetch chain (Worker → static → seed → cache).
+      //    This preserves the 20K/day quota — no browser ever calls Apps Script directly.
       if (bypassCache) {
         try {
-          const { clientGetStockCsv } = await import("@/lib/client-sheet");
-          const directCsv = await clientGetStockCsv();
-          if (directCsv && directCsv.trim().length > 0) {
-            csvText = directCsv;
-          }
+          // Trigger Worker /refresh (server-side Apps Script fetch → KV update)
+          const { triggerWorkerRefresh } = await import("@/lib/worker-client");
+          await triggerWorkerRefresh();
+          // Brief pause to let KV propagate (KV is eventually-consistent, ~1-2s)
+          await new Promise((resolve) => setTimeout(resolve, 1500));
         } catch {
-          // Direct fetch failed — fall through to normal fetch chain
+          // Worker refresh failed — fall through to normal fetch chain
         }
       }
 
       // 1. Try Worker first (if configured) — returns combined catalog response
-      if (!csvText) {
-        try {
-          const { fetchStockCsv } = await import("@/lib/worker-client");
-          const result = await fetchStockCsv();
-          if (result.csv && result.csv.trim().length > 0) {
-            csvText = result.csv;
-          }
-        } catch {
-          // Worker fetch failed — fall through to static
+      //    After the /refresh trigger above, KV is now fresh (within 5 min).
+      try {
+        const { fetchStockCsv } = await import("@/lib/worker-client");
+        const result = await fetchStockCsv();
+        if (result.csv && result.csv.trim().length > 0) {
+          csvText = result.csv;
         }
+      } catch {
+        // Worker fetch failed — fall through to static
       }
 
       // 2. If Worker didn't return stock, try static CSV from Cloudflare CDN

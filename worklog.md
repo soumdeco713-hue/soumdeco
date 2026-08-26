@@ -3589,3 +3589,57 @@ Stage Summary:
 - After-save refresh ADDED — stock map updates immediately after admin saves (not 5 min)
 - Worker is OPTIONAL — site is fully functional without it, just slower to reflect changes
 - All 230 tests pass (212 + 7 + 11)
+
+---
+Task ID: quota-preservation-and-cart-rapture
+Agent: main
+Task: User demands: "worker is required for fresh 5min sync! do not use apps script! PREVIOUS MAXIMUM LIMITS SHOULD BE PRESERVED!" + "make sure if a variant is out of stock, it can not be selected to order, it will be shown unavailable elegantly and user must select another"
+
+Work Log:
+- CRITICAL VIOLATION FOUND: my previous fix added `clientGetStockCsv()` direct call in `forceRefresh()` — this bypassed the Worker and made a DIRECT Apps Script call from the browser, violating the 20K/day quota preservation rule.
+- FIX 1 — Removed direct Apps Script call from forceRefresh:
+  - Replaced `clientGetStockCsv()` with `triggerWorkerRefresh()` (from worker-client)
+  - Now: forceRefresh → /api/refresh (same-domain proxy) → Worker /refresh → Worker fetches Apps Script SERVER-SIDE → updates KV → client re-fetches from KV
+  - Added 1.5s pause for KV propagation (KV is eventually-consistent)
+  - NO browser ever calls Apps Script directly — quota preserved
+  - If Worker not configured: falls through to normal fetch chain (static JSON + cache)
+- HIDDEN ISSUE FOUND: cart checkout (CheckoutModal) did NOT check for out-of-stock variants.
+  - Scenario: customer adds "Cocotte (06L)" to cart → another customer confirms order → 06L auto-decrements to 0 → first customer opens checkout → OLD code let them place the order for an out-of-stock variant
+- FIX 2 — Cart checkout out-of-stock prevention:
+  - Updated `checkout-modal.tsx` to accept `isVariantRupture` prop
+  - For each cart item: extracts variant from name (parentheses pattern), checks if out of stock
+  - If ANY cart item's variant is out of stock: shows red warning box listing the unavailable items + blocks the order form (`rupture={hasRuptureItem}`)
+  - Customer must remove the out-of-stock items from cart to proceed
+  - Wired `isVariantRupture={isVariantRupture}` from page.tsx → CheckoutModal
+- VERIFIED all lessons learned respected:
+  - Empty = infinite (14 markers in apps-script)
+  - Semicolon separator (never comma) (explicit "NEVER splits on ','" comment)
+  - Server-side extraction (3 sources: Variant col → product name parens → Notes) (11 markers)
+  - No fallback from variant to whole-product (2 markers)
+  - Idempotency (Stock Synced) (12 markers)
+  - Multi-item orders skipped (2 markers)
+  - Emoji stripping with FE0F variation selector (2 markers)
+  - No direct Apps Script from browser (clientGetStockCsv NOT imported in use-stock.ts)
+- TESTS — 268 total checks, all pass:
+  - test-comprehensive.js: 212/212 ✓
+  - test-stock-logic.js: 7/7 ✓
+  - test-variant-flow.js: 4/4 ✓
+  - test-server-extraction.js: 6/6 ✓
+  - test-notes-extraction.js: 8/8 ✓
+  - test-comma-bug-fix.js: 2/2 ✓
+  - test-stock-sync.js: 11/11 ✓
+  - test-cart-rapture.js (NEW): 18/18 ✓
+- TypeScript: 0 errors
+- Apps Script syntax: both files OK (1353 lines)
+
+Stage Summary:
+- QUOTA PRESERVED: no browser ever calls Apps Script directly. Admin refresh goes through Worker → KV → browser.
+- OUT-OF-STOCK PREVENTION COMPLETE: 4 layers of defense
+  1. Product page buttons: disabled + line-through + "(نفدت)" for color/size/custom variants
+  2. Auto-clear: if selected variant becomes out-of-stock, selection clears + toast warning
+  3. Direct checkout form: blocks when selected variant is out of stock
+  4. Cart checkout: blocks when ANY cart item's variant is out of stock + shows which items
+- Customer CANNOT order an out-of-stock variant through ANY path (product page direct OR cart checkout)
+- Magic zip rebuilt with all new files (30 files, 414KB)
+- Files modified: src/hooks/use-stock.ts, src/components/site/checkout-modal.tsx, src/app/page.tsx
+- New test file: scripts/test-cart-rapture.js (18 checks)
