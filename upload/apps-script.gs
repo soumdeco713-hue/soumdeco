@@ -1,3 +1,12 @@
+// ============================================================
+//  setupToken — PUBLIC wrapper for setAdminToken_ (which is private)
+//  Run this ONCE from the Apps Script editor dropdown to set the admin token.
+//  When prompted, enter the token from Cloudflare env var APPS_SCRIPT_ADMIN_TOKEN.
+// ============================================================
+function setupToken() {
+  setAdminToken_();
+}
+
 /**
  * ============================================================
  *  SoumDecoDZ — Apps Script (ORDERS + STOCK + PRODUCTS)

@@ -1,0 +1,752 @@
+     1→// ============================================================
+     2→//  setupToken — PUBLIC wrapper for setAdminToken_ (which is private)
+     3→//  Run this ONCE from the Apps Script editor dropdown to set the admin token.
+     4→//  When prompted, enter the token from Cloudflare env var APPS_SCRIPT_ADMIN_TOKEN.
+     5→// ============================================================
+     6→function setupToken() {
+     7→  setAdminToken_();
+     8→}
+     9→
+    10→/**
+    11→ * ============================================================
+    12→ *  SoumDecoDZ — Apps Script (ORDERS + STOCK + PRODUCTS)
+    13→ * ============================================================
+    14→ *
+    15→ *  Products: stored in Google Sheet (product data) + Cloudinary (images)
+    16→ *  Orders:   stored in Google Sheet (Orders tab)
+    17→ *  Stock:    stored in Google Sheet (Stock tab)
+    18→ *
+    19→ *  GET  ?action=stock              → Stock tab as CSV (polled every 10 min)
+    20→ *  GET  ?action=products           → Products tab as JSON (polled every 10 min)
+    21→ *  GET  ?action=order&...          → append order row
+    22→ *  POST ?action=product_create     → upsert product (JSON body, no URL limit)
+    23→ *  GET  ?action=product_delete&id= → delete by id
+    24→ *  GET  ?action=product_reset      → wipe Products tab
+    25→ *  GET  ?action=process_confirmed  → manually process pending Confirmed orders
+    26→ *
+    27→ *  STOCK RULE (IMPORTANT):
+    28→ *  - Empty stock cell  = INFINITE (unlimited — never decrement, never revert)
+    29→ *  - Stock cell = 0     = OUT OF STOCK (visitors see "نفدت الكمية")
+    30→ *  - Stock cell = N     = N items left (low-stock badge at 1-3)
+    31→ * ============================================================
+    32→ */
+    33→
+    34→var ORDERS_SHEET = 'Orders';
+    35→var STOCK_SHEET = 'Stock';
+    36→var PRODUCTS_SHEET = 'Products';
+    37→var PRODUCTS_COLS = ['id', 'name', 'description', 'category', 'price', 'image', 'images', 'featured', 'isSpecialOffer', 'variations', 'variants', 'stock', 'highlights', 'sortOrder', 'badge', 'oldPrice', 'quantityTiers'];
+    38→var IMG_SEP = '~~~';
+    39→
+    40→// Orders sheet column positions (1-indexed in the sheet, 0-indexed here).
+    41→// These MUST match the order in the appendRow() call inside doCreateOrderFromParams.
+    42→var ORDERS_COL = {
+    43→  DATE: 0, STATUS: 1, PRODUCT: 2, QTY: 3, UNIT_PRICE: 4,
+    44→  SHIPPING: 5, TOTAL: 6, CUSTOMER: 7, PHONE: 8, WILAYA: 9,
+    45→  COMMUNE: 10, DELIVERY: 11, COMPANY: 12, NOTES: 13,
+    46→  VARIANT: 14, STOCK_KEY: 15, STOCK_SYNCED: 16
+    47→};
+    48→
+    49→// Statuses that mean "stock has been consumed" — decrement on entry, revert on cancel.
+    50→var STOCK_DECREMENTED = ['confirmed', 'shipped', 'delivered'];
+    51→
+    52→// ============================================================
+    53→//  ADMIN TOKEN — protects WRITE operations only
+    54→// ============================================================
+    55→//  Reads (products, stock, order) stay PUBLIC (visitors need them).
+    56→//  Writes (product_create, product_delete, etc.) require this token.
+    57→//
+    58→//  The token is checked via the X-Admin-Token header.
+    59→//  Set this to the SAME value as the Cloudflare env var
+    60→//  APPS_SCRIPT_ADMIN_TOKEN.
+    61→//
+    62→//  ⚠️  To set this token:
+    63→//   1. Run the function 'setAdminToken_' once from the Apps Script editor
+    64→//      (it will prompt you to enter the token value)
+    65→//   2. The token is stored in the script's PropertiesService (encrypted at rest)
+    66→//   3. To change it later, run 'setAdminToken_' again
+    67→// ============================================================
+    68→function setAdminToken_() {
+    69→  var ui = SpreadsheetApp.getActiveSpreadsheet().getUi();
+    70→  var response = ui.prompt('Set Admin Token', 'Enter the admin token (from Cloudflare env var APPS_SCRIPT_ADMIN_TOKEN):', ui.ButtonSet.OK_CANCEL);
+    71→  if (response.getSelectedButton() === ui.Button.OK) {
+    72→    var token = response.getResponseText().trim();
+    73→    if (token) {
+    74→      PropertiesService.getScriptProperties().setProperty('ADMIN_TOKEN', token);
+    75→      ui.alert('✅ Admin token saved. Write operations now require this token.');
+    76→    }
+    77→  }
+    78→}
+    79→
+    80→function getAdminToken_() {
+    81→  return PropertiesService.getScriptProperties().getProperty('ADMIN_TOKEN') || '';
+    82→}
+    83→
+    84→/** Check if the request has a valid admin token (for write operations). */
+    85→function isAuthorized_(e) {
+    86→  var token = getAdminToken_();
+    87→  if (!token) return true; // ⚠️ If no token set, allow all (backwards compat)
+    88→  // Check X-Admin-Token header (set by /api/admin route)
+    89→  var headers = (e && e.headers) || {};
+    90→  var provided = headers['X-Admin-Token'] || headers['x-admin-token'] || '';
+    91→  return provided === token;
+    92→}
+    93→
+    94→function doGet(e) {
+    95→  e = e || {}; var p = e.parameter || {};
+    96→  var action = String(p.action || '').toLowerCase();
+    97→  try {
+    98→    // ─── PUBLIC OPERATIONS (no auth required) ──────────────
+    99→    if (action === 'stock') return serveStock();
+   100→    if (action === 'products') return serveProducts();
+   101→    if (action === 'order') return doCreateOrderFromParams(p);
+   102→    if (action === 'health') return jsonOut({ ok: true, time: new Date().toISOString(), sheet: SpreadsheetApp.getActiveSpreadsheet().getName() });
+   103→    if (action === 'statistics') return setupStatistics();
+   104→    // process_confirmed is called from the sheet menu (no HTTP) — keep public
+   105→    if (action === 'process_confirmed') return doProcessConfirmedFromUrl();
+   106→
+   107→    // ─── PROTECTED OPERATIONS (require admin token) ───────
+   108→    if (action === 'product_delete' || action === 'product_reset' ||
+   109→        action === 'dedupe' || action === 'cleanup') {
+   110→      if (!isAuthorized_(e)) {
+   111→        return jsonOut({ ok: false, error: 'unauthorized', message: 'Admin token required for write operations' });
+   112→      }
+   113→    }
+   114→    if (action === 'product_delete') return doDeleteProduct(p.id || '');
+   115→    if (action === 'product_reset') return doResetProducts();
+   116→    if (action === 'dedupe') return doDedupeProducts();
+   117→    if (action === 'cleanup') return doCleanupSheet();
+   118→
+   119→    return jsonOut({ ok: false, error: 'unknown action: ' + action });
+   120→  } catch (err) { return jsonOut({ ok: false, error: String(err) }); }
+   121→}
+   122→
+   123→function doPost(e) {
+   124→  e = e || {}; var p = e.parameter || {};
+   125→  var action = String(p.action || '').toLowerCase();
+   126→  try {
+   127→    if (action === 'product_create' || action === 'product_update') {
+   128→      // PROTECTED — require admin token
+   129→      if (!isAuthorized_(e)) {
+   130→        return jsonOut({ ok: false, error: 'unauthorized', message: 'Admin token required for write operations' });
+   131→      }
+   132→      var bodyStr = e.postData ? e.postData.contents : '';
+   133→      var prod = bodyStr ? JSON.parse(bodyStr) : p;
+   134→      return doCreateProduct(prod);
+   135→    }
+   136→    return doGet(e);
+   137→  } catch (err) { return jsonOut({ ok: false, error: String(err) }); }
+   138→}
+   139→
+   140→// ============================================================
+   141→//  CUSTOM MENU — appears when the spreadsheet is opened.
+   142→//  Lets the admin install triggers + process pending orders
+   143→//  with ONE click — no need to dig into Apps Script settings.
+   144→// ============================================================
+   145→function onOpen() {
+   146→  SpreadsheetApp.getActiveSpreadsheet().addMenu('📦 SOUM DECO', [
+   147→    { name: '🔍 Diagnose Orders (dry-run — check what variant would be extracted)', functionName: 'diagnoseOrders' },
+   148→    { name: '🔧 Setup Auto-Stock (run once)', functionName: 'setupTriggers' },
+   149→    { name: '✅ Process Pending Confirmed Orders', functionName: 'processAllConfirmedOrders' },
+   150→    { name: '📊 Update Statistics Dashboard', functionName: 'setupStatistics' },
+   151→    { name: '🧹 Cleanup Products Sheet', functionName: 'doCleanupSheet' },
+   152→    { name: '🏥 Health Check', functionName: 'healthCheck' }
+   153→  ]);
+   154→}
+   155→
+   156→/**
+   157→ * healthCheck — quick diagnostic that logs the state of triggers + sheets.
+   158→ * Useful for debugging "why isn't stock decrementing" issues.
+   159→ */
+   160→function healthCheck() {
+   161→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+   162→  var triggers = ScriptApp.getProjectTriggers();
+   163→  var hasOnEdit = false;
+   164→  for (var i = 0; i < triggers.length; i++) {
+   165→    if (triggers[i].getHandlerFunction() === 'onStockEdit') hasOnEdit = true;
+   166→  }
+   167→  var ordersSheet = ss.getSheetByName(ORDERS_SHEET);
+   168→  var stockSheet = ss.getSheetByName(STOCK_SHEET);
+   169→  var ordersRows = ordersSheet ? ordersSheet.getLastRow() - 1 : 0;
+   170→  var stockRows = stockSheet ? stockSheet.getLastRow() - 1 : 0;
+   171→
+   172→  var msg = '===== SOUM DECO HEALTH CHECK =====\n';
+   173→  msg += 'onEdit trigger installed: ' + (hasOnEdit ? 'YES ✅' : 'NO ❌ (run "Setup Auto-Stock" once)') + '\n';
+   174→  msg += 'Total triggers: ' + triggers.length + '\n';
+   175→  msg += 'Orders sheet: ' + (ordersSheet ? 'YES (' + ordersRows + ' rows)' : 'MISSING ❌') + '\n';
+   176→  msg += 'Stock sheet: ' + (stockSheet ? 'YES (' + stockRows + ' rows)' : 'MISSING ❌') + '\n';
+   177→
+   178→  if (ordersSheet && ordersRows > 0) {
+   179→    var data = ordersSheet.getRange(2, 1, Math.min(ordersRows, 10), ORDERS_COL.STOCK_SYNCED + 1).getValues();
+   180→    var pending = 0;
+   181→    var unsynced = 0;
+   182→    for (var j = 0; j < data.length; j++) {
+   183→      var status = String(data[j][ORDERS_COL.STATUS] || '').trim().toLowerCase();
+   184→      var synced = String(data[j][ORDERS_COL.STOCK_SYNCED] || '').trim().toLowerCase();
+   185→      if (STOCK_DECREMENTED.indexOf(status) >= 0) {
+   186→        pending++;
+   187→        if (synced !== 'y') unsynced++;
+   188→      }
+   189→    }
+   190→    msg += 'Recent confirmed orders (last 10): ' + pending + '\n';
+   191→    msg += 'Of which NOT yet stock-synced: ' + unsynced + (unsynced > 0 ? ' ⚠️ run "Process Pending Confirmed Orders"' : ' ✅') + '\n';
+   192→  }
+   193→
+   194→  SpreadsheetApp.getActiveSpreadsheet().toast(msg, 'Health Check', 15);
+   195→  return jsonOut({ ok: true, message: msg });
+   196→}
+   197→
+   198→/**
+   199→ * diagnoseOrders — DRY-RUN diagnostic that shows what variant + stockKey
+   200→ * would be extracted from each row WITHOUT writing anything.
+   201→ * Run this if "Process Pending Confirmed Orders" errors out.
+   202→ *
+   203→ * Output goes to: View → Logs (in the Apps Script editor)
+   204→ * Returns: JSON summary with row count + first 10 sample rows.
+   205→ */
+   206→function diagnoseOrders() {
+   207→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+   208→  var sheet = ss.getSheetByName(ORDERS_SHEET);
+   209→  if (!sheet) return jsonOut({ ok: false, error: 'No Orders sheet' });
+   210→
+   211→  var lastRow = sheet.getLastRow();
+   212→  var lastCol = sheet.getLastColumn();
+   213→  Logger.log('=== DIAGNOSE ORDERS ===');
+   214→  Logger.log('Sheet lastRow=' + lastRow + ' lastCol=' + lastCol);
+   215→
+   216→  if (lastRow < 2) {
+   217→    Logger.log('No data rows');
+   218→    return jsonOut({ ok: true, message: 'No data rows' });
+   219→  }
+   220→
+   221→  // Read whatever columns actually exist (defensive — don't ask for col 17 if sheet has only 14)
+   222→  var readCols = Math.max(lastCol, ORDERS_COL.STOCK_SYNCED + 1);
+   223→  var data = sheet.getRange(2, 1, lastRow - 1, readCols).getValues();
+   224→  Logger.log('Read ' + data.length + ' rows × ' + readCols + ' cols');
+   225→
+   226→  var samples = [];
+   227→  var withVariant = 0;
+   228→  var withoutVariant = 0;
+   229→  var confirmed = 0;
+   230→
+   231→  for (var i = 0; i < data.length; i++) {
+   232→    var row = data[i];
+   233→    var status = String(row[ORDERS_COL.STATUS] || '').trim();
+   234→    var productName = String(row[ORDERS_COL.PRODUCT] || '').trim();
+   235→    var notes = String(row[ORDERS_COL.NOTES] || '').trim();
+   236→    var existingVariant = row.length > ORDERS_COL.VARIANT ? String(row[ORDERS_COL.VARIANT] || '').trim() : '';
+   237→    var existingStockKey = row.length > ORDERS_COL.STOCK_KEY ? String(row[ORDERS_COL.STOCK_KEY] || '').trim() : '';
+   238→
+   239→    var extracted = extractVariantFromRow_(productName, notes, existingVariant, existingStockKey);
+   240→
+   241→    if (extracted.variant) withVariant++; else withoutVariant++;
+   242→    if (STOCK_DECREMENTED.indexOf(status.toLowerCase()) >= 0) confirmed++;
+   243→
+   244→    if (i < 10) {
+   245→      samples.push({
+   246→        row: i + 2,
+   247→        status: status,
+   248→        product: productName.substring(0, 60),
+   249→        notes: notes.substring(0, 80),
+   250→        existingVariant: existingVariant,
+   251→        extractedVariant: extracted.variant,
+   252→        extractedStockKey: extracted.stockKey,
+   253→      });
+   254→    }
+   255→  }
+   256→
+   257→  Logger.log('=== SUMMARY ===');
+   258→  Logger.log('Total rows: ' + data.length);
+   259→  Logger.log('Rows with extractable variant: ' + withVariant);
+   260→  Logger.log('Rows without variant info: ' + withoutVariant);
+   261→  Logger.log('Confirmed/Shipped/Delivered: ' + confirmed);
+   262→  Logger.log('=== FIRST 10 ROWS ===');
+   263→  for (var s = 0; s < samples.length; s++) {
+   264→    Logger.log('Row ' + samples[s].row + ': status=' + samples[s].status);
+   265→    Logger.log('  product: ' + samples[s].product);
+   266→    Logger.log('  notes:   ' + samples[s].notes);
+   267→    Logger.log('  existing variant: ' + samples[s].existingVariant);
+   268→    Logger.log('  extracted variant: ' + samples[s].extractedVariant);
+   269→    Logger.log('  extracted stockKey: ' + samples[s].extractedStockKey);
+   270→  }
+   271→
+   272→  var msg = 'Total: ' + data.length + ' | With variant: ' + withVariant + ' | Without: ' + withoutVariant + ' | Confirmed: ' + confirmed + '. See View → Logs for details.';
+   273→  ss.toast(msg, 'Diagnose Complete', 15);
+   274→  return jsonOut({ ok: true, total: data.length, withVariant: withVariant, withoutVariant: withoutVariant, confirmed: confirmed, samples: samples });
+   275→}
+   276→
+   277→/**
+   278→ * extractVariantFromRow_ — extract variant + stockKey from a row.
+   279→ * Tries FOUR sources in order:
+   280→ *   1. Existing Variant column (already populated)
+   281→ *   2. Product name parentheses  "(المقاس: 06L)"
+   282→ *   3. Notes column patterns     "المقاس: 06L · ..." (where variant is currently being written)
+   283→ *   4. Returns empty if none found
+   284→ *
+   285→ * Returns: { variant: string, stockKey: string }
+   286→ */
+   287→function extractVariantFromRow_(productName, notes, existingVariant, existingStockKey) {
+   288→  var variantStr = String(existingVariant || '').trim();
+   289→  var stockKeyStr = String(existingStockKey || '').trim();
+   290→  if (stockKeyStr) return { variant: variantStr, stockKey: stockKeyStr }; // already have both
+   291→
+   292→  // Strip trailing ×N
+   293→  var bareName = String(productName || '').replace(/\s*[×x]\s*\d+\s*$/, '').trim();
+   294→
+   295→  // ─── SOURCE 1: existing variant column ───────────────────────
+   296→  if (variantStr) {
+   297→    return buildStockKey_(bareName, variantStr);
+   298→  }
+   299→
+   300→  // ─── SOURCE 2: product name parentheses ──────────────────────
+   301→  var variantMatch = bareName.match(/\(([^)]+)\)\s*$/);
+   302→  if (variantMatch) {
+   303→    var extractedVariant = parseVariantContent_(variantMatch[1]);
+   304→    if (extractedVariant) {
+   305→      return buildStockKey_(bareName, extractedVariant);
+   306→    }
+   307→  }
+   308→
+   309→  // ─── SOURCE 3: notes column (current frontend writes variant here) ──
+   310→  // Notes format: "اللون: Blue · المقاس: Large · [user notes] · [company]"
+   311→  // Or just: "المقاس: 06L"
+   312→  if (notes) {
+   313→    var notesVariant = extractVariantFromNotes_(notes);
+   314→    if (notesVariant) {
+   315→      return buildStockKey_(bareName, notesVariant);
+   316→    }
+   317→  }
+   318→
+   319→  return { variant: '', stockKey: '' };
+   320→}
+   321→
+   322→/** Parse the content inside parentheses: "اللون: Red · المقاس: Large" → "Red - Large" */
+   323→function parseVariantContent_(content) {
+   324→  var parts = String(content || '').split('·');
+   325→  var values = [];
+   326→  for (var i = 0; i < parts.length; i++) {
+   327→    var part = parts[i].trim();
+   328→    if (!part) continue;
+   329→    var colonIdx = part.lastIndexOf(':');
+   330→    if (colonIdx >= 0) {
+   331→      var value = part.substring(colonIdx + 1).trim();
+   332→      // Strip emojis + variation selectors + normalize whitespace
+   333→      value = value
+   334→        .replace(/[\u{1F000}-\u{1FFFF}]/u, '')
+   335→        .replace(/[\u{2600}-\u{27BF}]/u, '')
+   336→        .replace(/[\uFE0F\u200D]/g, '')
+   337→        .replace(/\s+/g, ' ')
+   338→        .trim();
+   339→      if (value) values.push(value);
+   340→    } else if (part) {
+   341→      values.push(part);
+   342→    }
+   343→  }
+   344→  return values.join(' - ');
+   345→}
+   346→
+   347→/** Extract variant from notes — looks for "Label: value" patterns. */
+   348→function extractVariantFromNotes_(notes) {
+   349→  var notesStr = String(notes || '').trim();
+   350→  if (!notesStr) return '';
+   351→
+   352→  // Common Arabic + French variant labels (lowercased comparison)
+   353→  var labels = [
+   354→    'المقاس', 'اللون', 'الحجم', 'الوزن', 'النوع', 'النموذج',
+   355→    'Taille', 'Couleur', 'Modèle', 'Size', 'Color'
+   356→  ];
+   357→
+   358→  var parts = notesStr.split('·');
+   359→  var values = [];
+   360→  for (var i = 0; i < parts.length; i++) {
+   361→    var part = parts[i].trim();
+   362→    if (!part) continue;
+   363→    var colonIdx = part.lastIndexOf(':');
+   364→    if (colonIdx < 0) continue;
+   365→    var label = part.substring(0, colonIdx).trim().toLowerCase();
+   366→    var value = part.substring(colonIdx + 1).trim();
+   367→    if (!value) continue;
+   368→
+   369→    var isVariant = false;
+   370→    for (var l = 0; l < labels.length; l++) {
+   371→      if (label === labels[l].toLowerCase()) { isVariant = true; break; }
+   372→    }
+   373→
+   374→    if (isVariant) {
+   375→      // Strip emojis + variation selectors (U+FE0F) + zero-width joiners (U+200D)
+   376→      // and normalize whitespace. This handles cases like "06L 🚚" → "06L"
+   377→      // and "Red ❤️" → "Red" (the heart has a variation selector).
+   378→      value = value
+   379→        .replace(/[\u{1F000}-\u{1FFFF}]/u, '')
+   380→        .replace(/[\u{2600}-\u{27BF}]/u, '')
+   381→        .replace(/[\uFE0F\u200D]/g, '')
+   382→        .replace(/\s+/g, ' ')
+   383→        .trim();
+   384→      if (value) values.push(value);
+   385→    }
+   386→  }
+   387→  return values.join(' - ');
+   388→}
+   389→
+   390→/** Build stockKey from cleanProductName + variantStr.
+   391→ *  "Cocotte...Ref 01" + "06L" → "Cocotte...Ref 01 - 06L"
+   392→ *  "Cocotte...Ref 01" + "Red - Large" → "Cocotte...Ref 01 - Red;Cocotte...Ref 01 - Large"
+   393→ *
+   394→ *  IMPORTANT: Uses ";" as separator (NOT ",") because product names can contain
+   395→ *  commas (e.g. "Cocotte minute 06, 08, 10, 12 litres Ref 01"). Using ";" ensures
+   396→ *  we can reliably split the stockKey back into individual keys later.
+   397→ */
+   398→function buildStockKey_(bareName, variantStr) {
+   399→  var cleanProductName = String(bareName || '').replace(/\s*\([^)]+\)\s*$/, '').trim();
+   400→  var variantValues = String(variantStr || '').split(' - ');
+   401→  var keys = [];
+   402→  for (var k = 0; k < variantValues.length; k++) {
+   403→    var v = variantValues[k].trim();
+   404→    if (v) keys.push(cleanProductName + ' - ' + v);
+   405→  }
+   406→  return { variant: variantStr, stockKey: keys.join(';') };
+   407→}
+   408→
+   409→/** Split stockKey into individual keys.
+   410→ *  ONLY splits on ";" (the new separator that handles product names with commas).
+   411→ *
+   412→ *  NEVER splits on "," — because product names can contain commas
+   413→ *  (e.g. "Cocotte minute 06, 08, 10, 12 litres Ref 01"). Splitting on ","
+   414→ *  would break a single valid key into fragments.
+   415→ *
+   416→ *  Legacy comma-format stockKeys (from before the semicolon fix) are
+   417→ *  treated as a SINGLE key here. If they were multi-key comma-format,
+   418→ *  they were already broken (the comma-in-product-name bug) and won't
+   419→ *  match — admin should run "Process Pending Confirmed Orders" to
+   420→ *  re-extract variants with the new semicolon format.
+   421→ */
+   422→function splitStockKey_(stockKeyStr) {
+   423→  if (!stockKeyStr) return [];
+   424→  var s = String(stockKeyStr).trim();
+   425→  if (!s) return [];
+   426→  // Only split on ";" — never on ","
+   427→  if (s.indexOf(';') >= 0) return s.split(';');
+   428→  return [s]; // single key (even if it contains commas)
+   429→}
+   430→
+   431→/**
+   432→ * ============================================================
+   433→ *  setupTriggers — installs the onEdit trigger AUTOMATICALLY.
+   434→ *  Run this ONCE from the Apps Script editor or the spreadsheet menu.
+   435→ *  After running, all status changes to "Confirmed" / "Cancelled"
+   436→ *  will auto-decrement / revert stock with no further setup.
+   437→ *
+   438→ *  Re-running is safe — duplicates are detected + removed.
+   439→ * ============================================================
+   440→ */
+   441→function setupTriggers() {
+   442→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+   443→  var triggers = ScriptApp.getProjectTriggers();
+   444→  var existing = 0;
+   445→  for (var i = 0; i < triggers.length; i++) {
+   446→    var t = triggers[i];
+   447→    if (t.getHandlerFunction() === 'onStockEdit') {
+   448→      existing++;
+   449→      // Remove duplicates (keep only the first one)
+   450→      if (existing > 1) {
+   451→        ScriptApp.deleteTrigger(t);
+   452→      }
+   453→    }
+   454→  }
+   455→  if (existing === 0) {
+   456→    ScriptApp.newTrigger('onStockEdit')
+   457→      .forSpreadsheet(ss)
+   458→      .onEdit()
+   459→      .create();
+   460→  }
+   461→  // Also ensure sheets exist with the right headers
+   462→  setupAllSheets();
+   463→  ss.toast('✅ Auto-stock trigger installed. Confirmed orders will now decrement variant stock automatically.', 'Setup Complete', 10);
+   464→}
+   465→
+   466→/**
+   467→ * processAllConfirmedOrders — manually scans ALL Confirmed orders that
+   468→ * haven't been stock-synced yet and processes them. Useful when:
+   469→ *   - The trigger was just installed (catch up on past orders)
+   470→ *   - The trigger failed for some reason
+   471→ *   - You imported orders from another source
+   472→ *
+   473→ * Uses the "Stock Synced" column for idempotency — safe to run multiple times.
+   474→ *
+   475→ * SAFETY: This function NEVER errors out on a single bad row — it logs the
+   476→ * error and continues. Returns a detailed summary at the end.
+   477→ */
+   478→function processAllConfirmedOrders() {
+   479→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+   480→  var sheet = ss.getSheetByName(ORDERS_SHEET);
+   481→  if (!sheet) return jsonOut({ ok: false, error: 'No Orders sheet' });
+   482→
+   483→  var lastRow = sheet.getLastRow();
+   484→  if (lastRow < 2) return jsonOut({ ok: true, processed: 0, message: 'No orders to process' });
+   485→
+   486→  // Ensure headers exist (extends sheet if needed)
+   487→  ensureOrdersHeaders_(sheet);
+   488→
+   489→  // Defensive: read whatever columns actually exist, padded to at least 17
+   490→  var readCols = Math.max(sheet.getLastColumn(), ORDERS_COL.STOCK_SYNCED + 1);
+   491→  var data = sheet.getRange(2, 1, lastRow - 1, readCols).getValues();
+   492→
+   493→  var processed = 0;
+   494→  var skipped = 0;
+   495→  var errors = 0;
+   496→  var errorDetails = [];
+   497→
+   498→  // Collect writes to do in batches (much faster than 1-by-1 setValue)
+   499→  var variantUpdates = []; // [{ rowIdx, value }]
+   500→  var stockKeyUpdates = [];
+   501→  var syncedUpdates = [];
+   502→
+   503→  for (var i = 0; i < data.length; i++) {
+   504→    try {
+   505→      var row = data[i];
+   506→      // Pad row if shorter than expected
+   507→      while (row.length < ORDERS_COL.STOCK_SYNCED + 1) row.push('');
+   508→
+   509→      var status = String(row[ORDERS_COL.STATUS] || '').trim().toLowerCase();
+   510→      var synced = String(row[ORDERS_COL.STOCK_SYNCED] || '').trim().toLowerCase();
+   511→
+   512→      // Only process Confirmed/Shipped/Delivered orders that haven't been synced
+   513→      if (STOCK_DECREMENTED.indexOf(status) < 0) {
+   514→        skipped++;
+   515→        continue;
+   516→      }
+   517→      if (synced === 'y') {
+   518→        skipped++;
+   519→        continue;
+   520→      }
+   521→
+   522→      var productName = String(row[ORDERS_COL.PRODUCT] || '').trim();
+   523→      var notes = String(row[ORDERS_COL.NOTES] || '').trim();
+   524→      var existingVariant = String(row[ORDERS_COL.VARIANT] || '').trim();
+   525→      var existingStockKey = String(row[ORDERS_COL.STOCK_KEY] || '').trim();
+   526→      var qtyRaw = row[ORDERS_COL.QTY];
+   527→      var qty = (qtyRaw === '' || qtyRaw === null || qtyRaw === undefined) ? 1 : parseInt(String(qtyRaw), 10);
+   528→      if (isNaN(qty) || qty < 1) qty = 1;
+   529→
+   530→      // Multi-item orders (contain "+") — skip (can't reliably split)
+   531→      if (productName.indexOf('+') >= 0) {
+   532→        skipped++;
+   533→        continue;
+   534→      }
+   535→
+   536→      // Strip trailing ×N
+   537→      var bareName = productName.replace(/\s*[×x]\s*\d+\s*$/, '').trim();
+   538→      if (!bareName) {
+   539→        skipped++;
+   540→        continue;
+   541→      }
+   542→
+   543→      // Use the unified extractor (tries Variant col, then product name, then notes)
+   544→      var extracted = extractVariantFromRow_(productName, notes, existingVariant, existingStockKey);
+   545→      var variantStr = extracted.variant;
+   546→      var stockKeyStr = extracted.stockKey;
+   547→
+   548→      // Queue writes (will be applied in batch after the loop)
+   549→      if (variantStr && variantStr !== existingVariant) {
+   550→        variantUpdates.push({ rowIdx: i + 2, value: variantStr });
+   551→      }
+   552→      if (stockKeyStr && stockKeyStr !== existingStockKey) {
+   553→        stockKeyUpdates.push({ rowIdx: i + 2, value: stockKeyStr });
+   554→      }
+   555→
+   556→      // ─── DECREMENT STOCK ──────────────────────────────────────
+   557→      var decremented = false;
+   558→
+   559→      // Try stockKey FIRST (variant match)
+   560→      if (stockKeyStr) {
+   561→        var keys = splitStockKey_(stockKeyStr);
+   562→        for (var k = 0; k < keys.length; k++) {
+   563→          var key = keys[k].trim();
+   564→          if (!key) continue;
+   565→          if (decrementStockByKey_(key, qty)) {
+   566→            decremented = true;
+   567→            break;
+   568→          }
+   569→        }
+   570→        // IMPORTANT: if stockKey was set but no match found in Stock tab,
+   571→        // the variant is INFINITE — DO NOT fall back to whole-product decrement.
+   572→      } else {
+   573→        // No stockKey at all → no variant info extractable → try whole-product decrement
+   574→        decrementProductStock_(bareName, qty);
+   575→        decremented = true; // even if infinite, mark synced
+   576→      }
+   577→
+   578→      // Queue the synced flag update
+   579→      syncedUpdates.push({ rowIdx: i + 2, value: 'Y' });
+   580→      if (decremented) processed++; else skipped++;
+   581→
+   582→    } catch (err) {
+   583→      errors++;
+   584→      errorDetails.push({ row: i + 2, error: String(err) });
+   585→      Logger.log('[processAllConfirmedOrders] row ' + (i + 2) + ' error: ' + err);
+   586→    }
+   587→  }
+   588→
+   589→  // ─── APPLY BATCH WRITES ─────────────────────────────────────
+   590→  try {
+   591→    for (var v = 0; v < variantUpdates.length; v++) {
+   592→      sheet.getRange(variantUpdates[v].rowIdx, ORDERS_COL.VARIANT + 1).setValue(variantUpdates[v].value);
+   593→    }
+   594→    for (var sk = 0; sk < stockKeyUpdates.length; sk++) {
+   595→      sheet.getRange(stockKeyUpdates[sk].rowIdx, ORDERS_COL.STOCK_KEY + 1).setValue(stockKeyUpdates[sk].value);
+   596→    }
+   597→    for (var sy = 0; sy < syncedUpdates.length; sy++) {
+   598→      sheet.getRange(syncedUpdates[sy].rowIdx, ORDERS_COL.STOCK_SYNCED + 1).setValue(syncedUpdates[sy].value);
+   599→    }
+   600→  } catch (writeErr) {
+   601→    Logger.log('[processAllConfirmedOrders] batch write error: ' + writeErr);
+   602→    errors++;
+   603→    errorDetails.push({ row: 0, error: 'Batch write error: ' + writeErr });
+   604→  }
+   605→
+   606→  var msg = '✅ Processed: ' + processed + ' | Skipped: ' + skipped + ' | Errors: ' + errors;
+   607→  if (variantUpdates.length > 0) msg += ' | Variants backfilled: ' + variantUpdates.length;
+   608→  if (stockKeyUpdates.length > 0) msg += ' | Stock Keys backfilled: ' + stockKeyUpdates.length;
+   609→  ss.toast(msg, 'Stock Sync Complete', 15);
+   610→
+   611→  Logger.log('=== processAllConfirmedOrders DONE ===');
+   612→  Logger.log('Processed: ' + processed + ' | Skipped: ' + skipped + ' | Errors: ' + errors);
+   613→  Logger.log('Variant backfills: ' + variantUpdates.length + ' | StockKey backfills: ' + stockKeyUpdates.length);
+   614→  if (errorDetails.length > 0) {
+   615→    Logger.log('Errors:');
+   616→    for (var e = 0; e < errorDetails.length; e++) {
+   617→      Logger.log('  Row ' + errorDetails[e].row + ': ' + errorDetails[e].error);
+   618→    }
+   619→  }
+   620→
+   621→  return jsonOut({
+   622→    ok: true,
+   623→    processed: processed,
+   624→    skipped: skipped,
+   625→    errors: errors,
+   626→    errorDetails: errorDetails,
+   627→    variantsBackfilled: variantUpdates.length,
+   628→    stockKeysBackfilled: stockKeyUpdates.length,
+   629→  });
+   630→}
+   631→
+   632→// Wrapper for URL invocation
+   633→function doProcessConfirmedFromUrl() {
+   634→  return processAllConfirmedOrders();
+   635→}
+   636→
+   637→// ============================================================
+   638→//  ORDERS
+   639→// ============================================================
+   640→
+   641→function doCreateOrderFromParams(p) {
+   642→  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ORDERS_SHEET);
+   643→  if (!sheet) {
+   644→    sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet(ORDERS_SHEET);
+   645→    sheet.appendRow(['Date','Status','Product','Qty','Unit Price','Shipping','Total','Customer','Phone','Wilaya','Commune','Delivery','Company','Notes','Variant','Stock Key','Stock Synced']);
+   646→  }
+   647→  // Auto-add 'Variant' + 'Stock Key' + 'Stock Synced' columns if they don't exist
+   648→  ensureOrdersHeaders_(sheet);
+   649→
+   650→  // ============================================================
+   651→  //  SERVER-SIDE VARIANT EXTRACTION (safety net)
+   652→  //  Uses the same extractVariantFromRow_ helper as the trigger +
+   653→  //  batch processor — tries in order:
+   654→  //    1. Variant param sent by frontend
+   655→  //    2. Parentheses in product name "(المقاس: 06L)"
+   656→  //    3. Patterns in notes column "المقاس: 06L"
+   657→  // ============================================================
+   658→  var productStr = String(p.product || '');
+   659→  var notesStr = String(p.notes || '');
+   660→  var extracted = extractVariantFromRow_(productStr, notesStr, p.variant || '', p.stockKey || '');
+   661→  var variantStr = extracted.variant;
+   662→  var stockKeyStr = extracted.stockKey;
+   663→
+   664→  sheet.appendRow([
+   665→    new Date(), 'New',
+   666→    productStr, Number(p.quantity) || 1,
+   667→    (p.price === null || p.price === undefined || p.price === '') ? '' : Number(p.price),
+   668→    Number(p.shippingPrice) || 0, Number(p.grandTotal) || 0,
+   669→    p.fullName || '', p.phone || '', p.wilaya || '', p.commune || '',
+   670→    p.deliveryLabel || '', p.shippingCompanyLabel || '', notesStr,
+   671→    variantStr, stockKeyStr, ''  // Stock Synced = empty (not yet processed)
+   672→  ]);
+   673→  return jsonOut({ ok: true, variant: variantStr, stockKey: stockKeyStr });
+   674→}
+   675→
+   676→/** Ensure Orders sheet has the Variant, Stock Key, and Stock Synced columns. */
+   677→function ensureOrdersHeaders_(sheet) {
+   678→  var headerRow = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), ORDERS_COL.STOCK_SYNCED + 1)).getValues()[0];
+   679→  if (!headerRow[ORDERS_COL.VARIANT] || String(headerRow[ORDERS_COL.VARIANT]).trim() !== 'Variant') {
+   680→    sheet.getRange(1, ORDERS_COL.VARIANT + 1).setValue('Variant');
+   681→  }
+   682→  if (!headerRow[ORDERS_COL.STOCK_KEY] || String(headerRow[ORDERS_COL.STOCK_KEY]).trim() !== 'Stock Key') {
+   683→    sheet.getRange(1, ORDERS_COL.STOCK_KEY + 1).setValue('Stock Key');
+   684→  }
+   685→  if (!headerRow[ORDERS_COL.STOCK_SYNCED] || String(headerRow[ORDERS_COL.STOCK_SYNCED]).trim() !== 'Stock Synced') {
+   686→    sheet.getRange(1, ORDERS_COL.STOCK_SYNCED + 1).setValue('Stock Synced');
+   687→  }
+   688→}
+   689→
+   690→// ============================================================
+   691→//  STOCK
+   692→// ============================================================
+   693→
+   694→function serveStock() {
+   695→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+   696→  var sheet = ss.getSheetByName(STOCK_SHEET);
+   697→  if (!sheet) { sheet = ss.insertSheet(STOCK_SHEET); sheet.appendRow(['Product Name','Stock Count']); }
+   698→  var headerRow = sheet.getRange(1, 1, 1, 2).getValues()[0];
+   699→  if (String(headerRow[0]||'') !== 'Product Name' || String(headerRow[1]||'') !== 'Stock Count') {
+   700→    sheet.getRange(1, 1, 1, 2).setValues([['Product Name','Stock Count']]);
+   701→  }
+   702→  var values = sheet.getDataRange().getValues();
+   703→  var rows = [];
+   704→  for (var i = 0; i < values.length; i++) {
+   705→    var r = values[i];
+   706→    if (i === 1 && r[0] && /[\u0600-\u06FF\u{1F000}-\u{1FFFF}]/u.test(String(r[0]))) continue;
+   707→    rows.push(r.map(function(c){ return '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"'; }).join(','));
+   708→  }
+   709→  var csv = rows.join('\n');
+   710→  return ContentService.createTextOutput(csv).setMimeType(ContentService.MimeType.CSV);
+   711→}
+   712→
+   713→// ============================================================
+   714→//  PRODUCTS
+   715→// ============================================================
+   716→
+   717→function ensureProductsSheet() {
+   718→  var ss = SpreadsheetApp.getActiveSpreadsheet();
+   719→  var sheet = ss.getSheetByName(PRODUCTS_SHEET);
+   720→  if (!sheet) {
+   721→    sheet = ss.insertSheet(PRODUCTS_SHEET);
+   722→    sheet.appendRow(PRODUCTS_COLS);
+   723→    return sheet;
+   724→  }
+   725→  var headerRow = sheet.getRange(1, 1, 1, PRODUCTS_COLS.length).getValues()[0];
+   726→  var needsFix = false;
+   727→  for (var i = 0; i < PRODUCTS_COLS.length; i++) {
+   728→    if (String(headerRow[i] || '') !== PRODUCTS_COLS[i]) { needsFix = true; break; }
+   729→  }
+   730→  if (needsFix) {
+   731→    sheet.getRange(1, 1, 1, PRODUCTS_COLS.length).setValues([PRODUCTS_COLS]);
+   732→  }
+   733→  return sheet;
+   734→}
+   735→
+   736→function serveProducts() {
+   737→  var sheet = ensureProductsSheet();
+   738→  var values = sheet.getDataRange().getValues();
+   739→  if (values.length < 2) return jsonOut([]);
+   740→  var header = values[0];
+   741→  var out = [];
+   742→  var seenIds = {};
+   743→  for (var i = 1; i < values.length; i++) {
+   744→    var r = values[i];
+   745→    if (!r[0]) continue;
+   746→    var idStr = String(r[0]);
+   747→    if (/[\u0600-\u06FF\u{1F000}-\u{1FFFF}]/u.test(idStr)) continue;
+   748→    if (seenIds[idStr]) continue;
+   749→    seenIds[idStr] = true;
+   750→    var obj = {};
+
+[showing lines 1-750 of 1419; use offset=751 with limit to continue reading]
