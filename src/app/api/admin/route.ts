@@ -26,15 +26,17 @@ export const runtime = "edge";
  */
 
 // ============================================================
-//  Secrets (read from Cloudflare env vars at runtime)
+//  Secrets — HARDCODED (same pattern as /api/refresh + /api/catalog)
 // ============================================================
-// These are set in the Cloudflare Pages dashboard as encrypted env vars.
-// They NEVER appear in the client bundle (this route is server-side only).
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "dimou2411@dz";
-const APPS_SCRIPT_ADMIN_TOKEN = process.env.APPS_SCRIPT_ADMIN_TOKEN || "";
-const SESSION_SIGNING_KEY = process.env.SESSION_SIGNING_KEY || "";
+//  WHY HARDCODED: Cloudflare Pages edge runtime does NOT support
+//  process.env for non-NEXT_PUBLIC_ vars. All working routes on
+//  this site hardcode their values (see /api/refresh, /api/catalog).
+//  This route is SERVER-SIDE ONLY (edge runtime) — these values
+//  NEVER appear in the client bundle.
+const ADMIN_PASSWORD = "dimou2411@dz";
+const APPS_SCRIPT_ADMIN_TOKEN = "sd_atk_6oyCjTznJlm56y6eYvwL7Xyf";
+const SESSION_SIGNING_KEY = "sd_ssk_3HjZnIVHNkew1okrFdc3EQ9Fny5CdmnU";
 const APPS_SCRIPT_URL =
-  process.env.NEXT_PUBLIC_SHEET_URL ||
   "https://script.google.com/macros/s/AKfycbxWVBZDsyfrqSBsRC_RPSwTyaXXkSaL4amjwRvcFIk3o_CASzw0TG5s_EF3B_BS44rV/exec";
 
 // Session TTL: 8 hours (in milliseconds)
@@ -146,7 +148,16 @@ export async function POST(req: NextRequest) {
       // Create signed session
       const session = await createSession();
       return NextResponse.json(
-        { ok: true, session, expiresIn: SESSION_TTL_MS },
+        {
+          ok: true,
+          session,
+          expiresIn: SESSION_TTL_MS,
+          // Return the admin token so the client can make direct Apps Script
+          // writes (Cloudflare edge fetch loses URL params on 302 redirect,
+          // so we can't proxy POST through this route reliably).
+          // The token is only revealed after successful password validation.
+          adminToken: APPS_SCRIPT_ADMIN_TOKEN,
+        },
         { status: 200, headers: noStore },
       );
     }

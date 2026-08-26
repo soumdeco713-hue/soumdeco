@@ -109,6 +109,7 @@ function sleep(ms: number): Promise<void> {
 //  when the browser closes — better security.
 const ADMIN_SESSION_KEY = "soumdeco_admin_session";
 const ADMIN_SESSION_TIMESTAMP_KEY = "soumdeco_admin_session_ts";
+const ADMIN_TOKEN_KEY = "soumdeco_admin_token";
 const ADMIN_SESSION_MAX_AGE_MS = 8 * 60 * 60 * 1000; // 8 hours (matches server)
 
 /** Get the admin session token (or null if not logged in / expired). */
@@ -123,6 +124,7 @@ function getAdminSession(): string | null {
       // Session expired — clean up
       window.sessionStorage.removeItem(ADMIN_SESSION_KEY);
       window.sessionStorage.removeItem(ADMIN_SESSION_TIMESTAMP_KEY);
+      window.sessionStorage.removeItem(ADMIN_TOKEN_KEY);
       return null;
     }
     return session;
@@ -131,12 +133,27 @@ function getAdminSession(): string | null {
   }
 }
 
-/** Save the admin session token (called after successful login). */
-export function setAdminSession(session: string): void {
+/** Get the admin token (returned by /api/admin after successful login).
+ *  Used for direct Apps Script writes (browser fetch handles 302 redirect
+ *  correctly, unlike Cloudflare edge runtime fetch). */
+function getAdminToken(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.sessionStorage.getItem(ADMIN_TOKEN_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+/** Save the admin session token + admin token (called after successful login). */
+export function setAdminSession(session: string, adminToken?: string): void {
   if (typeof window === "undefined") return;
   try {
     window.sessionStorage.setItem(ADMIN_SESSION_KEY, session);
     window.sessionStorage.setItem(ADMIN_SESSION_TIMESTAMP_KEY, String(Date.now()));
+    if (adminToken) {
+      window.sessionStorage.setItem(ADMIN_TOKEN_KEY, adminToken);
+    }
   } catch {
     // sessionStorage might be full — ignore
   }
@@ -181,7 +198,7 @@ export async function clientAdminLogin(password: string): Promise<boolean> {
     if (!res.ok) return false;
     const data = await res.json();
     if (data.ok && data.session) {
-      setAdminSession(data.session);
+      setAdminSession(data.session, data.adminToken);
       return true;
     }
     return false;
@@ -301,24 +318,25 @@ export async function clientGetStockCsv(): Promise<string> {
  */
 /**
  * Create or update a product.
- * Routes through /api/admin (secure) with fallback to direct Apps Script.
+ * Uses the admin token (received during login) for direct Apps Script writes.
+ * Browser fetch handles 302 redirect correctly (unlike Cloudflare edge runtime).
  *
- * SECURITY: The admin token is added by the server when going through /api/admin.
- * The fallback path (direct Apps Script) only works if the admin hasn't set
- * a token yet (backwards compat).
+ * SECURITY: The admin token is only revealed after successful password
+ * validation via /api/admin. It's stored in sessionStorage (not localStorage).
  */
 export async function clientUpsertProduct(
   product: SheetProduct,
 ): Promise<boolean> {
-  // Try secure path first (via /api/admin)
-  const result = await adminWrite("product_create", {}, product);
-  if (result.ok) return true;
-
-  // FALLBACK: direct to Apps Script (for backwards compat or if /api/admin fails)
-  // This path will FAIL if the admin has set the token (which is the desired behavior).
   const base = getClientSheetBaseUrl();
+  const adminToken = getAdminToken();
+
+  // Build URL with admin_token (browser fetch preserves URL params on redirect)
+  let url = `${base}?action=product_create`;
+  if (adminToken) {
+    url += `&admin_token=${encodeURIComponent(adminToken)}`;
+  }
+
   try {
-    const url = `${base}?action=product_create`;
     const res = await fetchWithTimeoutAndRetry(
       url,
       {
@@ -342,17 +360,18 @@ export async function clientUpsertProduct(
 
 /**
  * Delete a product.
- * Routes through /api/admin (secure) with fallback to direct Apps Script.
+ * Uses admin token for direct Apps Script write.
  */
 export async function clientDeleteProduct(id: string): Promise<boolean> {
-  // Try secure path first
-  const result = await adminWrite("product_delete", { id });
-  if (result.ok) return true;
-
-  // FALLBACK: direct to Apps Script
   const base = getClientSheetBaseUrl();
+  const adminToken = getAdminToken();
+
+  let url = `${base}?action=product_delete&id=${encodeURIComponent(id)}`;
+  if (adminToken) {
+    url += `&admin_token=${encodeURIComponent(adminToken)}`;
+  }
+
   try {
-    const url = `${base}?action=product_delete&id=${encodeURIComponent(id)}`;
     const res = await fetchWithTimeoutAndRetry(
       url,
       { method: "GET", redirect: "follow" },
@@ -369,17 +388,18 @@ export async function clientDeleteProduct(id: string): Promise<boolean> {
 
 /**
  * Reset all products.
- * Routes through /api/admin (secure) with fallback to direct Apps Script.
+ * Uses admin token for direct Apps Script write.
  */
 export async function clientResetProducts(): Promise<boolean> {
-  // Try secure path first
-  const result = await adminWrite("product_reset");
-  if (result.ok) return true;
-
-  // FALLBACK: direct to Apps Script
   const base = getClientSheetBaseUrl();
+  const adminToken = getAdminToken();
+
+  let url = `${base}?action=product_reset`;
+  if (adminToken) {
+    url += `&admin_token=${encodeURIComponent(adminToken)}`;
+  }
+
   try {
-    const url = `${base}?action=product_reset`;
     const res = await fetchWithTimeoutAndRetry(
       url,
       { method: "GET", redirect: "follow" },
@@ -396,7 +416,7 @@ export async function clientResetProducts(): Promise<boolean> {
 
 /**
  * Run the dedupe + cleanup action on the sheet.
- * Routes through /api/admin (secure) with fallback to direct Apps Script.
+ * Uses admin token for direct Apps Script write.
  */
 export async function clientDedupeProducts(): Promise<{
   ok: boolean;
@@ -404,16 +424,15 @@ export async function clientDedupeProducts(): Promise<{
   fixed_categories?: number;
   remaining?: number;
 }> {
-  // Try secure path first
-  const result = await adminWrite("dedupe");
-  if (result.ok && result.data) {
-    return result.data;
+  const base = getClientSheetBaseUrl();
+  const adminToken = getAdminToken();
+
+  let url = `${base}?action=dedupe`;
+  if (adminToken) {
+    url += `&admin_token=${encodeURIComponent(adminToken)}`;
   }
 
-  // FALLBACK: direct to Apps Script
-  const base = getClientSheetBaseUrl();
   try {
-    const url = `${base}?action=dedupe`;
     const res = await fetchWithTimeoutAndRetry(
       url,
       { method: "GET", redirect: "follow" },
