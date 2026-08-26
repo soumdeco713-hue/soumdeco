@@ -14,17 +14,20 @@ export const runtime = "edge";
  *   Reading process.env at runtime on Cloudflare Pages edge can be flaky.
  *   The Worker URL is public knowledge (it only reads from KV, no secrets).
  *   Hardcoding it ensures this route NEVER 500s due to env var issues.
+ *
+ * CACHING:
+ *   Version is a timestamp — caching for 60 seconds is safe. The frontend
+ *   polls every 5 minutes anyway, so a 60-second edge cache just prevents
+ *   duplicate Workers requests during burst traffic.
  */
 export async function GET() {
   const WORKER_URL = "https://soumdeco-data-sync.soumdeco713.workers.dev";
 
-  const noStore = {
+  const cacheHeaders = {
     "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-    "CDN-Cache-Control": "no-store",
-    "Cloudflare-CDN-Cache-Control": "no-store",
-    Pragma: "no-cache",
-    Expires: "0",
+    "Cache-Control": "no-cache, must-revalidate",
+    "CDN-Cache-Control": "s-maxage=60, stale-while-revalidate=300",
+    "Cloudflare-CDN-Cache-Control": "s-maxage=60, stale-while-revalidate=300",
   };
 
   try {
@@ -38,12 +41,12 @@ export async function GET() {
 
     if (res.ok) {
       const text = await res.text();
-      return new NextResponse(text, { status: 200, headers: noStore });
+      return new NextResponse(text, { status: 200, headers: cacheHeaders });
     }
   } catch {
     // Fall through to error response
   }
 
   // Worker failed — return v:0 (signals frontend to fetch full catalog)
-  return NextResponse.json({ v: 0 }, { status: 200, headers: noStore });
+  return NextResponse.json({ v: 0 }, { status: 200, headers: cacheHeaders });
 }

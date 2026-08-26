@@ -16,20 +16,23 @@ export const runtime = "edge";
  *   The Worker URL is public knowledge (it only reads from KV, no secrets).
  *   Hardcoding it ensures this route NEVER 500s due to env var issues.
  *
- * CACHE BUSTING:
- *   We set Cache-Control: no-store AND Cloudflare-CDN-Cache-Control: no-store
- *   to ensure Cloudflare's edge cache NEVER serves stale responses.
+ * CACHING:
+ *   The catalog data is already up to 5 minutes stale (Worker KV TTL).
+ *   Edge-caching this response for 60 seconds (with 5-minute stale-while-revalidate)
+ *   is perfectly safe — it means most visitors get served from Cloudflare's edge
+ *   cache without hitting the Worker at all, saving Workers quota.
+ *   The browser still gets fresh data on reload (max-age=0 forces revalidation).
  */
 export async function GET() {
   const WORKER_URL = "https://soumdeco-data-sync.soumdeco713.workers.dev";
 
-  const noStore = {
+  const cacheHeaders = {
     "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-    "CDN-Cache-Control": "no-store",
-    "Cloudflare-CDN-Cache-Control": "no-store",
-    Pragma: "no-cache",
-    Expires: "0",
+    // Browser: always revalidate (don't use stale from browser cache)
+    "Cache-Control": "no-cache, must-revalidate",
+    // Cloudflare edge: cache for 60 seconds, serve stale for up to 5 minutes
+    "CDN-Cache-Control": "s-maxage=60, stale-while-revalidate=300",
+    "Cloudflare-CDN-Cache-Control": "s-maxage=60, stale-while-revalidate=300",
   };
 
   try {
@@ -43,7 +46,7 @@ export async function GET() {
 
     if (res.ok) {
       const text = await res.text();
-      return new NextResponse(text, { status: 200, headers: noStore });
+      return new NextResponse(text, { status: 200, headers: cacheHeaders });
     }
   } catch {
     // Fall through to error response
@@ -53,6 +56,6 @@ export async function GET() {
   // static JSON / localStorage / seed (NEVER throws).
   return NextResponse.json(
     { products: "[]", stock: "", ts: Date.now(), error: "worker_unreachable" },
-    { status: 200, headers: noStore },
+    { status: 200, headers: cacheHeaders },
   );
 }
