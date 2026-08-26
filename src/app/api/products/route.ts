@@ -128,110 +128,21 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST /api/products → create or update product (uploads images to Cloudinary/R2 first)
-export async function POST(req: NextRequest) {
-  try {
-    const env = (req as any).env || (globalThis as any).env;
-    const url = new URL(req.url);
-    const action = url.searchParams.get("action");
-
-    if (action === "reset") {
-      const sheetUrl = getSheetBaseUrl();
-      let ok = true;
-      if (sheetUrl) ok = await sheetResetProducts();
-      await invalidateCache(env);
-      return NextResponse.json({ ok });
-    }
-
-    let body: any;
-    try {
-      body = await req.json();
-    } catch {
-      return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
-    }
-
-    const id = String(body?.id ?? "").trim();
-    const name = String(body?.name ?? "").trim();
-    if (!id || !name) {
-      return NextResponse.json({ ok: false, error: "Missing id or name" }, { status: 400 });
-    }
-
-    let imagesArray: string[] = [];
-    if (Array.isArray(body.images)) {
-      imagesArray = body.images.filter((s: any) => String(s).trim() !== "");
-    } else if (typeof body.images === "string" && body.images.trim()) {
-      imagesArray = body.images.split("~~~").filter((s) => s.trim() !== "");
-    }
-
-    try {
-      imagesArray = await uploadImagesToDrive(imagesArray, id);
-    } catch {}
-
-    const imagesStr = joinImageStrings(imagesArray);
-    const coverImage = imagesArray[0] || String(body.image ?? "");
-
-    let variationsStr = "";
-    if (Array.isArray(body.variations)) variationsStr = joinVariations(body.variations);
-    else if (typeof body.variations === "string") variationsStr = body.variations;
-
-    let variantsStr = "";
-    if (Array.isArray(body.variants)) variantsStr = joinVariants(body.variants);
-    else if (typeof body.variants === "string") variantsStr = body.variants;
-
-    let highlightsStr = "";
-    if (Array.isArray(body.highlights)) highlightsStr = joinHighlights(body.highlights);
-    else if (typeof body.highlights === "string") highlightsStr = body.highlights;
-
-    const product: SheetProduct = {
-      id, name,
-      description: String(body.description ?? ""),
-      category: String(body.category ?? ""),
-      price: body.price === null || body.price === undefined || body.price === "" ? null : Number(body.price),
-      image: coverImage,
-      images: imagesStr,
-      featured: Boolean(body.featured),
-      isSpecialOffer: Boolean(body.isSpecialOffer),
-      variations: variationsStr,
-      variants: variantsStr,
-      stock: body.stock === null || body.stock === undefined || body.stock === "" ? null : Number(body.stock),
-      highlights: highlightsStr,
-      sortOrder: body.sortOrder === null || body.sortOrder === undefined ? 999 : Number(body.sortOrder),
-      badge: String(body.badge ?? ""),
-      oldPrice: body.oldPrice === null || body.oldPrice === undefined || body.oldPrice === "" ? null : Number(body.oldPrice),
-      quantityTiers: Array.isArray(body.quantityTiers)
-        ? body.quantityTiers.filter((t: any) => t && typeof t.qty === "number").map((t: any) => `${t.qty}:${t.freeShipping || "none"}:${t.discountAmount || 0}`).join(",")
-        : String(body.quantityTiers ?? ""),
-    };
-
-    const sheetUrl = getSheetBaseUrl();
-    let ok = true;
-    if (sheetUrl) ok = await sheetUpsertProduct(product);
-
-    // Invalidate KV cache so admin sees the change
-    await invalidateCache(env);
-
-    return NextResponse.json({ ok, product });
-  } catch (err) {
-    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
-  }
+// POST /api/products → DISABLED (security: use /api/admin for writes)
+// This route previously allowed unauthenticated product writes. It is now
+// locked down. All admin writes go through /api/admin (which validates
+// session + admin token). Returns 403 to alert any caller of the change.
+export async function POST() {
+  return NextResponse.json(
+    { ok: false, error: "forbidden", message: "Use /api/admin for product writes" },
+    { status: 403 },
+  );
 }
 
-// DELETE /api/products?id=... → delete by id
-export async function DELETE(req: NextRequest) {
-  try {
-    const env = (req as any).env || (globalThis as any).env;
-    const url = new URL(req.url);
-    const id = url.searchParams.get("id");
-    if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
-
-    const sheetUrl = getSheetBaseUrl();
-    let ok = true;
-    if (sheetUrl) ok = await sheetDeleteProduct(id);
-
-    await invalidateCache(env);
-
-    return NextResponse.json({ ok });
-  } catch (err) {
-    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
-  }
+// DELETE /api/products → DISABLED (security: use /api/admin for writes)
+export async function DELETE() {
+  return NextResponse.json(
+    { ok: false, error: "forbidden", message: "Use /api/admin for product deletes" },
+    { status: 403 },
+  );
 }

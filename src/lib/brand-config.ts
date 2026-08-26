@@ -13,8 +13,11 @@ export const BRAND = {
   nameLatin: "SoumDecoDZ",
   /** Brand tagline — shown under the logo in the hero. */
   tagline: "L'élégance au cœur de votre maison",
-  /** Admin password — change before going live. */
-  adminPassword: "dimou2411@dz",
+  /** Admin password — kept EMPTY in client bundle for security.
+   *  Real password validation happens ONLY server-side via /api/admin.
+   *  The client-side fallback in PasswordGate will compare against ""
+   *  and always fail, forcing all logins through the secure API route. */
+  adminPassword: "",
   /** Logo file path (relative to /public). */
   logoPath: "/logo.jpg",
 
