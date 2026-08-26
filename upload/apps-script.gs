@@ -108,13 +108,6 @@ function doGet(e) {
     if (action === 'products') return serveProducts();
     if (action === 'order') return doCreateOrderFromParams(p);
     if (action === 'health') return jsonOut({ ok: true, time: new Date().toISOString(), sheet: SpreadsheetApp.getActiveSpreadsheet().getName() });
-    // ─── PROTECTED OPERATIONS (require admin token) ───────
-    // statistics + process_confirmed mutate the sheet — protect them too
-    if (action === 'statistics' || action === 'process_confirmed') {
-      if (!isAuthorized_(e)) {
-        return jsonOut({ ok: false, error: 'unauthorized', message: 'Admin token required for write operations' });
-      }
-    }
     if (action === 'statistics') return setupStatistics();
     if (action === 'process_confirmed') return doProcessConfirmedFromUrl();
 
@@ -683,29 +676,14 @@ function doCreateOrderFromParams(p) {
   var variantStr = extracted.variant;
   var stockKeyStr = extracted.stockKey;
 
-  // ============================================================
-  //  FORMULA INJECTION SANITIZATION (M-01 fix)
-  //  Google Sheets interprets cells starting with = + - @ as formulas.
-  //  Prefix dangerous values with apostrophe so they're treated as text.
-  // ============================================================
-  function sanitizeCell_(val) {
-    if (!val) return '';
-    var s = String(val);
-    // Only sanitize if the FIRST character is a formula trigger
-    if (s.charAt(0) === '=' || s.charAt(0) === '+' || s.charAt(0) === '-' || s.charAt(0) === '@') {
-      return "'" + s; // apostrophe prefix = treat as text (invisible in Sheets)
-    }
-    return s;
-  }
-
   sheet.appendRow([
     new Date(), 'New',
-    sanitizeCell_(productStr), Number(p.quantity) || 1,
+    productStr, Number(p.quantity) || 1,
     (p.price === null || p.price === undefined || p.price === '') ? '' : Number(p.price),
     Number(p.shippingPrice) || 0, Number(p.grandTotal) || 0,
-    sanitizeCell_(p.fullName), sanitizeCell_(p.phone), sanitizeCell_(p.wilaya), sanitizeCell_(p.commune),
-    sanitizeCell_(p.deliveryLabel), sanitizeCell_(p.shippingCompanyLabel), sanitizeCell_(notesStr),
-    sanitizeCell_(variantStr), sanitizeCell_(stockKeyStr), ''
+    p.fullName || '', p.phone || '', p.wilaya || '', p.commune || '',
+    p.deliveryLabel || '', p.shippingCompanyLabel || '', notesStr,
+    variantStr, stockKeyStr, ''  // Stock Synced = empty (not yet processed)
   ]);
   return jsonOut({ ok: true, variant: variantStr, stockKey: stockKeyStr });
 }
