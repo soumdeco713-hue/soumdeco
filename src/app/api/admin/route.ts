@@ -189,15 +189,16 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Build Apps Script URL — include admin token as URL parameter
-      // (Apps Script doGet/doPost can't reliably read custom HTTP headers,
-      // but it CAN read URL parameters via e.parameter)
-      const url = new URL(APPS_SCRIPT_URL);
-      url.searchParams.set("action", operation);
-      url.searchParams.set("admin_token", APPS_SCRIPT_ADMIN_TOKEN);
+      // Build Apps Script URL — use string concatenation (proven to work
+      // with Google Apps Script web apps, which have quirky URL param handling)
+      // Include admin_token as URL parameter (Apps Script reads via e.parameter)
+      let targetUrl = `${APPS_SCRIPT_URL}?action=${encodeURIComponent(operation)}`;
+      if (APPS_SCRIPT_ADMIN_TOKEN) {
+        targetUrl += `&admin_token=${encodeURIComponent(APPS_SCRIPT_ADMIN_TOKEN)}`;
+      }
       for (const [key, value] of Object.entries(params)) {
         if (typeof value === "string" || typeof value === "number") {
-          url.searchParams.set(key, String(value));
+          targetUrl += `&${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`;
         }
       }
 
@@ -211,19 +212,28 @@ export async function POST(req: NextRequest) {
         const timeoutId = setTimeout(() => controller.abort(), 30000);
 
         if (isPost && body.product) {
-          // For POST, include admin_token in the URL (Apps Script reads e.parameter)
-          appsScriptRes = await fetch(url.toString(), {
+          // POST: include action + admin_token in BOTH URL and body
+          // (Cloudflare edge fetch may lose URL params on 302 redirect,
+          //  so we put them in the body as a fallback)
+          const postBody = {
+            ...body.product,
+            _action: operation,
+            _admin_token: APPS_SCRIPT_ADMIN_TOKEN,
+          };
+          appsScriptRes = await fetch(targetUrl, {
             method: "POST",
             headers: {
               "Content-Type": "text/plain;charset=utf-8",
             },
-            body: JSON.stringify({ action: operation, ...body.product }),
+            body: JSON.stringify(postBody),
             signal: controller.signal,
+            redirect: "follow",
           });
         } else {
-          appsScriptRes = await fetch(url.toString(), {
+          appsScriptRes = await fetch(targetUrl, {
             method: "GET",
             signal: controller.signal,
+            redirect: "follow",
           });
         }
         clearTimeout(timeoutId);

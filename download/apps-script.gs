@@ -85,10 +85,17 @@ function getAdminToken_() {
 function isAuthorized_(e) {
   var token = getAdminToken_();
   if (!token) return true; // ⚠️ If no token set, allow all (backwards compat)
-  // Read admin_token from BOTH URL parameter AND header (for max compat)
+  // Read admin_token from URL params, POST body, AND header (max compat)
   var p = (e && e.parameter) || {};
   var headers = (e && e.headers) || {};
   var provided = p.admin_token || headers['X-Admin-Token'] || headers['x-admin-token'] || '';
+  // Fallback: check POST body for _admin_token (Cloudflare edge may lose URL params)
+  if (!provided && e && e.postData && e.postData.contents) {
+    try {
+      var body = JSON.parse(e.postData.contents);
+      if (body._admin_token) provided = body._admin_token;
+    } catch (err) {}
+  }
   return provided === token;
 }
 
@@ -102,7 +109,6 @@ function doGet(e) {
     if (action === 'order') return doCreateOrderFromParams(p);
     if (action === 'health') return jsonOut({ ok: true, time: new Date().toISOString(), sheet: SpreadsheetApp.getActiveSpreadsheet().getName() });
     if (action === 'statistics') return setupStatistics();
-    // process_confirmed is called from the sheet menu (no HTTP) — keep public
     if (action === 'process_confirmed') return doProcessConfirmedFromUrl();
 
     // ─── PROTECTED OPERATIONS (require admin token) ───────
@@ -125,6 +131,15 @@ function doPost(e) {
   e = e || {}; var p = e.parameter || {};
   var action = String(p.action || '').toLowerCase();
   try {
+    // Fallback: if action not in URL params, read from POST body
+    // (Cloudflare edge fetch may lose URL params on 302 redirect)
+    if (!action && e && e.postData && e.postData.contents) {
+      try {
+        var bodyObj = JSON.parse(e.postData.contents);
+        if (bodyObj._action) action = String(bodyObj._action).toLowerCase();
+      } catch (err) {}
+    }
+
     if (action === 'product_create' || action === 'product_update') {
       // PROTECTED — require admin token
       if (!isAuthorized_(e)) {
@@ -132,6 +147,10 @@ function doPost(e) {
       }
       var bodyStr = e.postData ? e.postData.contents : '';
       var prod = bodyStr ? JSON.parse(bodyStr) : p;
+      // Remove internal fields (not product data)
+      if (prod._action) delete prod._action;
+      if (prod._admin_token) delete prod._admin_token;
+      if (prod.action) delete prod.action;
       return doCreateProduct(prod);
     }
     return doGet(e);
