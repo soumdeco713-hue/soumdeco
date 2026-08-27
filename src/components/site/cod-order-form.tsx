@@ -79,6 +79,7 @@ export function CodOrderForm({
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [orderRef, setOrderRef] = useState("");
+  const [orderFailed, setOrderFailed] = useState(false);
   const [customQty, setCustomQty] = useState(""); // local input text — independent from buttons
   const [orderSummary, setOrderSummary] = useState<null | {
     items: OrderItem[];
@@ -508,24 +509,29 @@ export function CodOrderForm({
         }
       }
 
-      // ALWAYS show the thank-you screen — the customer has done their part.
-      // The order is either in the sheet OR in localStorage for retry.
-      setOrderRef(generateOrderRef());
-      setOrderSummary({
-        items,
-        productTotal,
-        discountAmount,
-        shippingPrice: ship,
-        grandTotal: finalGrandTotal,
-        freeShippingApplied,
-        fullName: form.fullName,
-        phone: form.phone,
-        wilayaLabel,
-        deliveryLabel,
-        date: new Date().toLocaleString("fr-FR"),
-      });
-      setDone(true);
-      onSuccess?.();
+      // SUCCESS — show thank-you screen
+      // FAILURE — show honest error screen (order saved to localStorage for retry)
+      if (orderOk) {
+        setOrderRef(generateOrderRef());
+        setOrderSummary({
+          items,
+          productTotal,
+          discountAmount,
+          shippingPrice: ship,
+          grandTotal: finalGrandTotal,
+          freeShippingApplied,
+          fullName: form.fullName,
+          phone: form.phone,
+          wilayaLabel,
+          deliveryLabel,
+          date: new Date().toLocaleString("fr-FR"),
+        });
+        setDone(true);
+        onSuccess?.();
+      } else {
+        // Honest error — order failed but was saved to localStorage retry queue
+        setOrderFailed(true);
+      }
 
       // Send Telegram notification (NON-BLOCKING but awaited for reliability)
       // Fires AFTER the order is confirmed — never blocks the thank-you screen
@@ -583,6 +589,122 @@ export function CodOrderForm({
             متابعة التسوق
           </button>
         </div>
+      </div>
+    );
+  }
+
+  // === ORDER FAILED STATE — honest, elegant, comforting ===
+  if (orderFailed) {
+    return (
+      <div className="px-1 py-2 text-center font-arabic">
+        {/* Soft warning icon */}
+        <div className="mb-4 flex justify-center">
+          <div
+            className="flex h-16 w-16 items-center justify-center rounded-full bg-amber/10"
+            style={{ boxShadow: "0 0 30px rgba(245, 158, 11, 0.15)" }}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="text-amber"
+            >
+              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+          </div>
+        </div>
+
+        {/* Honest message */}
+        <h3 className="mb-2 text-lg font-bold text-charcoal">
+          حدث خطأ في إرسال طلبك
+        </h3>
+        <p className="mb-1 text-sm text-gray">
+          لم يتم استلام طلبك في نظامنا.
+        </p>
+        <p className="mb-5 text-sm text-gray">
+          لا تقلق، تواصل معنا وسنقوم بتسجيل طلبك يدوياً.
+        </p>
+
+        {/* Contact options */}
+        <div className="mb-5 space-y-2">
+          <a
+            href="tel:0541645727"
+            className="flex items-center justify-center gap-2 rounded-full border border-emerald/30 bg-night-soft/60 px-4 py-2.5 text-sm font-medium text-charcoal transition-colors hover:bg-emerald/10"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald">
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+            </svg>
+            <span dir="ltr">0541 645 727</span>
+          </a>
+          <a
+            href="https://www.instagram.com/soumdecodz/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 rounded-full border border-clay/40 bg-night-soft/60 px-4 py-2.5 text-sm font-medium text-charcoal transition-colors hover:bg-brass/10"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brass">
+              <rect width="20" height="20" x="2" y="2" rx="5" ry="5" />
+              <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+              <line x1="17.5" x2="17.51" y1="6.5" y2="6.5" />
+            </svg>
+            <span>@soumdecodz</span>
+          </a>
+        </div>
+
+        <p className="mb-4 text-xs text-gray-light">
+          أو أرسل لنا صورة المنتج الذي تريد طلبه عبر إنستغرام
+        </p>
+
+        {/* Retry button */}
+        <button
+          type="button"
+          onClick={() => {
+            setOrderFailed(false);
+            handleSubmit();
+          }}
+          disabled={submitting}
+          className="flex w-full items-center justify-center gap-2 rounded-full bg-emerald px-4 py-3 text-sm font-semibold text-night transition-colors hover:bg-emerald-bright disabled:opacity-60"
+          style={{ boxShadow: "0 0 18px rgba(42, 125, 91, 0.35)" }}
+        >
+          {submitting ? (
+            <>
+              <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              جاري إعادة المحاولة...
+            </>
+          ) : (
+            <>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                <path d="M21 3v5h-5" />
+                <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                <path d="M8 16H3v5" />
+              </svg>
+              إعادة المحاولة
+            </>
+          )}
+        </button>
+
+        {/* Continue shopping */}
+        {onContinueShopping && (
+          <button
+            type="button"
+            onClick={onContinueShopping}
+            className="mt-3 w-full text-center text-xs text-gray-light hover:text-gray"
+          >
+            متابعة التسوق
+          </button>
+        )}
       </div>
     );
   }
