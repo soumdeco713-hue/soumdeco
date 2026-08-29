@@ -29,7 +29,6 @@
     "Veilleuse cylindrique BCB": 10,
     "Mixeur plongeant Cristor HB- K55GN": 1,
     "🍹 CRISTOR BLEND-IT : Noir": 2,
-    "🍹 CRISTOR BLEND-IT : Blanc": 2,
     "Jarr Terracotta": 2,
     "Jarr Blanche beige": 2,
     "Jarr Blanche": 2,
@@ -62,8 +61,9 @@
     "Cocotte minute 06, 08, 10, 12 litres Ref 01 - 8L": 2,
     "Cocotte minute 06, 08, 10, 12 litres Ref 01 - 10L": 5,
     "Cocotte minute 06, 08, 10, 12 litres Ref 01 - 12L": 4,
-    "Cocotte minute 06, 08, 10, 12 litres Ref 01": 8
+    "Cocotte minute 06, 08, 10, 12 litres Ref 01": 8,
+    "🍹 CRISTOR BLEND-IT : Noir et Blanc": 10
   },
-  "builtAt": "2026-08-28T07:04:23.804909+00:00",
+  "builtAt": "2026-08-29T02:01:15.420853+00:00",
   "count": 63
 }
