@@ -52,7 +52,7 @@
     "Service a table 24p Vert": 10,
     "Service a table 24p bleu": 10,
     "Service a table 24p Vert fleurie": 0,
-    "Service a table 24p beige a fleurie": 7,
+    "Service a table 24p beige a fleurie": 8,
     "Tasses et souss tasse (thé)": 0,
     "Service a table Olea Vert": 10,
     "Service a table 24p Blue": 10,
@@ -64,6 +64,6 @@
     "Cocotte minute 06, 08, 10, 12 litres Ref 01": 8,
     "🍹 CRISTOR BLEND-IT : Noir et Blanc": 10
   },
-  "builtAt": "2026-08-30T02:01:39.087756+00:00",
+  "builtAt": "2026-08-31T02:01:27.295393+00:00",
   "count": 63
 }
