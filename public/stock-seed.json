@@ -26,7 +26,7 @@
     "Veilleuse cylindrique BB": 10,
     "Veilleuse cylindrique BNC": 10,
     "Veilleuse cylindrique BN": 10,
-    "Veilleuse cylindrique BCB": 10,
+    "Veilleuse cylindrique BCB": 8,
     "Mixeur plongeant Cristor HB- K55GN": 1,
     "🍹 CRISTOR BLEND-IT : Noir": 2,
     "Jarr Terracotta": 2,
@@ -51,7 +51,7 @@
     "Cafetière 02T BECS Ref N9001-2": 2,
     "Service a table 24p Vert": 10,
     "Service a table 24p bleu": 10,
-    "Service a table 24p Vert fleurie": 0,
+    "Service a table 24p Vert fleurie": 2,
     "Service a table 24p beige a fleurie": 8,
     "Tasses et souss tasse (thé)": 0,
     "Service a table Olea Vert": 10,
@@ -64,6 +64,6 @@
     "Cocotte minute 06, 08, 10, 12 litres Ref 01": 8,
     "🍹 CRISTOR BLEND-IT : Noir et Blanc": 10
   },
-  "builtAt": "2026-08-31T02:01:27.295393+00:00",
+  "builtAt": "2026-09-01T02:01:44.103202+00:00",
   "count": 63
 }
