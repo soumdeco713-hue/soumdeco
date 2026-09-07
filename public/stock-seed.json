@@ -26,7 +26,7 @@
     "Veilleuse cylindrique BB": 10,
     "Veilleuse cylindrique BNC": 10,
     "Veilleuse cylindrique BN": 10,
-    "Veilleuse cylindrique BCB": 8,
+    "Veilleuse cylindrique BCB": 6,
     "Mixeur plongeant Cristor HB- K55GN": 1,
     "🍹 CRISTOR BLEND-IT : Noir": 2,
     "Jarr Terracotta": 2,
@@ -65,6 +65,6 @@
     "🍹 CRISTOR BLEND-IT : Noir et Blanc": 10,
     "Service a table vintage": 10
   },
-  "builtAt": "2026-09-06T02:02:09.416205+00:00",
+  "builtAt": "2026-09-07T02:01:55.008893+00:00",
   "count": 64
 }
